@@ -1,0 +1,2 @@
+* Use lists in struct super_blocks to track open files.
+* Remove the global open files lock and add a per-list lock.
