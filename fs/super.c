@@ -55,6 +55,7 @@ static struct super_block *alloc_super(struct file_system_type *type)
 {
 	struct super_block *s = kzalloc(sizeof(struct super_block),  GFP_USER);
 	static const struct super_operations default_op;
+	unsigned int c;
 
 	if (s) {
 		if (security_sb_alloc(s)) {
@@ -62,7 +63,9 @@ static struct super_block *alloc_super(struct file_system_type *type)
 			s = NULL;
 			goto out;
 		}
-		INIT_LIST_HEAD(&s->s_files);
+		for_each_possible_cpu(c)
+			smp_list_init(&s->s_files[c]);
+		spin_lock_init(&s->s_files_lock);
 		INIT_LIST_HEAD(&s->s_instances);
 		INIT_HLIST_HEAD(&s->s_anon);
 		INIT_LIST_HEAD(&s->s_inodes);

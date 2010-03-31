@@ -9,6 +9,8 @@
 #include <linux/limits.h>
 #include <linux/ioctl.h>
 
+#include <linux/smp_list.h>
+
 /*
  * It's silly to have NR_OPEN bigger than NR_FILE, but you can change
  * the file limit at runtime and only root can increase the per-process
@@ -919,6 +921,7 @@ struct file {
 		struct list_head	fu_list;
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
+	struct smp_list		*f_sb_list;
 	struct path		f_path;
 #define f_dentry	f_path.dentry
 #define f_vfsmnt	f_path.mnt
@@ -948,9 +951,18 @@ struct file {
 	unsigned long f_mnt_write_state;
 #endif
 };
-extern spinlock_t files_lock;
-#define file_list_lock() spin_lock(&files_lock);
-#define file_list_unlock() spin_unlock(&files_lock);
+
+static inline void file_list_lock(struct smp_list *l)
+{
+	if (l)
+		spin_lock(&l->lock);
+}
+
+static inline void file_list_unlock(struct smp_list *l)
+{
+	if (l)
+		spin_unlock(&l->lock);
+}
 
 #define get_file(x)	atomic_long_inc(&(x)->f_count)
 #define file_count(x)	atomic_long_read(&(x)->f_count)
@@ -1343,7 +1355,9 @@ struct super_block {
 
 	struct list_head	s_inodes;	/* all inodes */
 	struct hlist_head	s_anon;		/* anonymous dentries for (nfs) exporting */
-	struct list_head	s_files;
+	struct smp_list		s_files[NR_CPUS];
+	spinlock_t		s_files_lock;
+
 	/* s_dentry_lru and s_nr_dentry_unused are protected by dcache_lock */
 	struct list_head	s_dentry_lru;	/* unused dentry lru */
 	int			s_nr_dentry_unused;	/* # of dentry on lru */
@@ -2181,7 +2195,7 @@ static inline void insert_inode_hash(struct inode *inode) {
 	__insert_inode_hash(inode, inode->i_ino);
 }
 
-extern void file_move(struct file *f, struct list_head *list);
+extern void file_move(struct file *f, struct smp_list *slist);
 extern void file_kill(struct file *f);
 #ifdef CONFIG_BLOCK
 struct bio;

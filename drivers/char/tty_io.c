@@ -234,11 +234,11 @@ static int check_tty_count(struct tty_struct *tty, const char *routine)
 	struct list_head *p;
 	int count = 0;
 
-	file_list_lock();
-	list_for_each(p, &tty->tty_files) {
+	file_list_lock(&tty->tty_files);
+	list_for_each(p, &tty->tty_files.list) {
 		count++;
 	}
-	file_list_unlock();
+	file_list_unlock(&tty->tty_files);
 	if (tty->driver->type == TTY_DRIVER_TYPE_PTY &&
 	    tty->driver->subtype == PTY_TYPE_SLAVE &&
 	    tty->link && tty->link->count)
@@ -517,9 +517,9 @@ static void do_tty_hangup(struct work_struct *work)
 	lock_kernel();
 	check_tty_count(tty, "do_tty_hangup");
 
-	file_list_lock();
+	file_list_lock(&tty->tty_files);
 	/* This breaks for file handles being sent over AF_UNIX sockets ? */
-	list_for_each_entry(filp, &tty->tty_files, f_u.fu_list) {
+	list_for_each_entry(filp, &tty->tty_files.list, f_u.fu_list) {
 		if (filp->f_op->write == redirected_tty_write)
 			cons_filp = filp;
 		if (filp->f_op->write != tty_write)
@@ -528,7 +528,7 @@ static void do_tty_hangup(struct work_struct *work)
 		tty_fasync(-1, filp, 0);	/* can't block */
 		filp->f_op = &hung_up_tty_fops;
 	}
-	file_list_unlock();
+	file_list_unlock(&tty->tty_files);
 
 	tty_ldisc_hangup(tty);
 
@@ -1419,9 +1419,9 @@ static void release_one_tty(struct work_struct *work)
 	tty_driver_kref_put(driver);
 	module_put(driver->owner);
 
-	file_list_lock();
-	list_del_init(&tty->tty_files);
-	file_list_unlock();
+	file_list_lock(&tty->tty_files);
+	list_del_init(&tty->tty_files.list);
+	file_list_unlock(&tty->tty_files);
 
 	free_tty_struct(tty);
 }
@@ -2767,7 +2767,7 @@ void initialize_tty_struct(struct tty_struct *tty,
 	mutex_init(&tty->echo_lock);
 	spin_lock_init(&tty->read_lock);
 	spin_lock_init(&tty->ctrl_lock);
-	INIT_LIST_HEAD(&tty->tty_files);
+	smp_list_init(&tty->tty_files);
 	INIT_WORK(&tty->SAK_work, do_SAK_work);
 
 	tty->driver = driver;

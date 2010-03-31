@@ -32,9 +32,6 @@ struct files_stat_struct files_stat = {
 	.max_files = NR_FILE
 };
 
-/* public. Not pretty! */
-__cacheline_aligned_in_smp DEFINE_SPINLOCK(files_lock);
-
 /* SLAB cache for file structures */
 static struct kmem_cache *filp_cachep __read_mostly;
 
@@ -127,6 +124,7 @@ struct file *get_empty_filp(void)
 		goto fail_sec;
 
 	INIT_LIST_HEAD(&f->f_u.fu_list);
+	f->f_sb_list = NULL;
 	atomic_long_set(&f->f_count, 1);
 	rwlock_init(&f->f_owner.lock);
 	f->f_cred = get_cred(cred);
@@ -330,45 +328,53 @@ void put_filp(struct file *file)
 	}
 }
 
-void file_move(struct file *file, struct list_head *list)
+void file_move(struct file *file, struct smp_list *slist)
 {
-	if (!list)
+	if (!slist)
 		return;
-	file_list_lock();
-	list_move(&file->f_u.fu_list, list);
-	file_list_unlock();
+	file_list_lock(slist);
+	list_move(&file->f_u.fu_list, &slist->list);
+	file_list_unlock(slist);
+	file->f_sb_list = slist;
 }
 
 void file_kill(struct file *file)
 {
 	if (!list_empty(&file->f_u.fu_list)) {
-		file_list_lock();
+		file_list_lock(file->f_sb_list);
 		list_del_init(&file->f_u.fu_list);
-		file_list_unlock();
+		file_list_unlock(file->f_sb_list);
 	}
 }
 
 int fs_may_remount_ro(struct super_block *sb)
 {
 	struct file *file;
+	unsigned int c;
 
-	/* Check that no files are currently opened for writing. */
-	file_list_lock();
-	list_for_each_entry(file, &sb->s_files, f_u.fu_list) {
-		struct inode *inode = file->f_path.dentry->d_inode;
-
-		/* File with pending delete? */
-		if (inode->i_nlink == 0)
-			goto too_bad;
-
-		/* Writeable file? */
-		if (S_ISREG(inode->i_mode) && (file->f_mode & FMODE_WRITE))
-			goto too_bad;
+	spin_lock(&sb->s_files_lock);	
+	for_each_possible_cpu(c) {
+		/* Check that no files are currently opened for writing. */
+		file_list_lock(&sb->s_files[c]);
+		list_for_each_entry(file, &sb->s_files[c].list, f_u.fu_list) {
+			struct inode *inode = file->f_path.dentry->d_inode;
+			
+			/* File with pending delete? */
+			if (inode->i_nlink == 0)
+				goto too_bad;
+			
+			/* Writeable file? */
+			if (S_ISREG(inode->i_mode) && (file->f_mode & FMODE_WRITE))
+				goto too_bad;
+		}
+		file_list_unlock(&sb->s_files[c]);
 	}
-	file_list_unlock();
+
+	spin_unlock(&sb->s_files_lock);	
 	return 1; /* Tis' cool bro. */
 too_bad:
-	file_list_unlock();
+	spin_unlock(&sb->s_files_lock);	
+	file_list_unlock(&sb->s_files[c]);
 	return 0;
 }
 
@@ -382,34 +388,39 @@ too_bad:
 void mark_files_ro(struct super_block *sb)
 {
 	struct file *f;
+	unsigned int c;
 
 retry:
-	file_list_lock();
-	list_for_each_entry(f, &sb->s_files, f_u.fu_list) {
-		struct vfsmount *mnt;
-		if (!S_ISREG(f->f_path.dentry->d_inode->i_mode))
-		       continue;
-		if (!file_count(f))
-			continue;
-		if (!(f->f_mode & FMODE_WRITE))
-			continue;
-		spin_lock(&f->f_lock);
-		f->f_mode &= ~FMODE_WRITE;
-		spin_unlock(&f->f_lock);
-		if (file_check_writeable(f) != 0)
-			continue;
-		file_release_write(f);
-		mnt = mntget(f->f_path.mnt);
-		file_list_unlock();
-		/*
-		 * This can sleep, so we can't hold
-		 * the file_list_lock() spinlock.
-		 */
-		mnt_drop_write(mnt);
-		mntput(mnt);
-		goto retry;
+	spin_lock(&sb->s_files_lock);
+	for_each_possible_cpu(c) {
+		file_list_lock(&sb->s_files[c]);
+		list_for_each_entry(f, &sb->s_files[c].list, f_u.fu_list) {
+			struct vfsmount *mnt;
+			if (!S_ISREG(f->f_path.dentry->d_inode->i_mode))
+				continue;
+			if (!file_count(f))
+				continue;
+			if (!(f->f_mode & FMODE_WRITE))
+				continue;
+			spin_lock(&f->f_lock);
+			f->f_mode &= ~FMODE_WRITE;
+			spin_unlock(&f->f_lock);
+			if (file_check_writeable(f) != 0)
+				continue;
+			file_release_write(f);
+			mnt = mntget(f->f_path.mnt);
+			file_list_unlock(&sb->s_files[c]);
+			/*
+			 * This can sleep, so we can't hold
+			 * the file_list_lock() spinlock.
+			 */
+			mnt_drop_write(mnt);
+			mntput(mnt);
+			goto retry;
+		}
+		file_list_unlock(&sb->s_files[c]);
 	}
-	file_list_unlock();
+	spin_unlock(&sb->s_files_lock);
 }
 
 void __init files_init(unsigned long mempages)

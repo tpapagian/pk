@@ -841,7 +841,7 @@ static struct file *__dentry_open(struct dentry *dentry, struct vfsmount *mnt,
 	f->f_path.mnt = mnt;
 	f->f_pos = 0;
 	f->f_op = fops_get(inode->i_fop);
-	file_move(f, &inode->i_sb->s_files);
+	file_move(f, &inode->i_sb->s_files[smp_processor_id()]);
 
 	error = security_dentry_open(f, cred);
 	if (error)
