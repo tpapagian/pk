@@ -419,7 +419,7 @@ static void clear_huge_page(struct page *page,
 	might_sleep();
 	for (i = 0; i < sz/PAGE_SIZE; i++) {
 		cond_resched();
-		clear_user_highpage(page + i, addr + i * PAGE_SIZE);
+		clear_user_highpage_nocache(page + i, addr + i * PAGE_SIZE);
 	}
 }
 
@@ -2673,7 +2673,8 @@ int hugetlb_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * get spurious allocation failures if two CPUs race to instantiate
 	 * the same page in the page cache.
 	 */
-	mutex_lock(&hugetlb_instantiation_mutex);
+	//mutex_lock(&hugetlb_instantiation_mutex);
+	mutex_lock(&vma->hugetlb_instantiation_mutex);
 	entry = huge_ptep_get(ptep);
 	if (huge_pte_none(entry)) {
 		ret = hugetlb_no_page(mm, vma, address, ptep, flags);
@@ -2742,7 +2743,8 @@ out_page_table_lock:
 		unlock_page(page);
 
 out_mutex:
-	mutex_unlock(&hugetlb_instantiation_mutex);
+	//mutex_unlock(&hugetlb_instantiation_mutex);
+	mutex_unlock(&vma->hugetlb_instantiation_mutex);
 
 	return ret;
 }

@@ -1288,6 +1288,7 @@ munmap_back:
 	vma->vm_flags = vm_flags;
 	vma->vm_page_prot = vm_get_page_prot(vm_flags);
 	vma->vm_pgoff = pgoff;
+	mutex_init(&vma->hugetlb_instantiation_mutex);
 	INIT_LIST_HEAD(&vma->anon_vma_chain);
 
 	if (file) {

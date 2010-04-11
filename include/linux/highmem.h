@@ -128,6 +128,12 @@ static inline void clear_user_highpage(struct page *page, unsigned long vaddr)
 	clear_user_page(addr, vaddr, page);
 	kunmap_atomic(addr, KM_USER0);
 }
+static inline void clear_user_highpage_nocache(struct page *page, unsigned long vaddr)
+{
+	void *addr = kmap_atomic(page, KM_USER0);
+	clear_user_page_nocache(addr, vaddr, page);
+	kunmap_atomic(addr, KM_USER0);
+}
 #endif
 
 #ifndef __HAVE_ARCH_ALLOC_ZEROED_USER_HIGHPAGE
