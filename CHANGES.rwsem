@@ -1,5 +1,4 @@
-* Use a scalable read-write semaphore for soft super-page fault
-  handling.
+* Use a mutex for each vma for soft super-page fault handling.
   
   Linux' (as up to 2.6.34-rc3) super-page fault handler serialized
   the handling by a single mutex, namely hugetlb_instantiation_mutex.
