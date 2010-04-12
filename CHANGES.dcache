@@ -1,0 +1,2 @@
+* Use a lock-free protocol for checking dentry matches in d_lookup.
+* Use batch references counts for each dentry.
