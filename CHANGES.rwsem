@@ -1,4 +1,8 @@
-* Use a mutex for each vma for soft super-page fault handling.
+* Use a scalable read/write semaphore for soft small-page (4K) 
+  fault handling. However, 2.6.34-rc3 has already fixed this by commit
+  d6cd4715e21508bebbb1928c91d628bd65f5de5f.
+
+* Use one mutex per vma for soft super-page fault handling.
   
   Linux' (as up to 2.6.34-rc3) super-page fault handler serialized
   the handling by a single mutex, namely hugetlb_instantiation_mutex.
