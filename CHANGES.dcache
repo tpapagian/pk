@@ -1,2 +1,4 @@
 * Use a lock-free protocol for checking dentry matches in d_lookup.
-* Use batch references counts for each dentry.
+  This avoid contention on dentry->d_lock.
+* Use batch references counts for each dentry.  This avoids conention
+  on dentry->d_count.
