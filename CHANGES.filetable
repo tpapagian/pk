@@ -1,3 +1,2 @@
-* Use lists in struct super_blocks (instead of global lists) to track
-  open files.
-* Remove the global open files lock and add a per-list lock.
+* Use per-cpu lists for each super_block to track open files.  This
+  avoids contention on a single global open file list.
