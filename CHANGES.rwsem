@@ -1,2 +1,19 @@
 * Use a scalable read-write semaphore for soft super-page fault
   handling.
+  
+  Linux' (as up to 2.6.34-rc3) super-page fault handler serialized
+  the handling by a single mutex, namely hugetlb_instantiation_mutex.
+  This single mutex limit the concurrency. The 'rwsem' patch replaces
+  the mutex with a per-vma mutex to allow concurrent super-page faults
+  on different vmas. The patch improves the performance of Reduce phase 
+  of MapReduce by 37%.
+
+* Improve the performance of super-page fault handler.
+  
+  On soft super-page fault, the handler zeros the page if no zeroed page
+  is found. As the size of super-page is typically large compared with the 
+  capacity of cache, clearing the super-page might pollute the cache and 
+  incurring more cache misses. The 'rwsem' patch takes advantage of the 
+  x64 cache-aware instructions to clear the page without polluting the 
+  cache. This improves the performance of Reduce phase of MapReduce by 17%.
+
