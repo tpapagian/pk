@@ -5,7 +5,7 @@
 #include <linux/spinlock.h>
 
 #define CACHE_PAD_SIZE(sz) \
-	((((sz) & ~(SMP_CACHE_BYTES - 1)) + SMP_CACHE_BYTES) - (sz))
+	(((((sz) - 1) & ~(SMP_CACHE_BYTES - 1)) + SMP_CACHE_BYTES) - (sz))
 
 struct smp_list {
 	struct list_head	list;
