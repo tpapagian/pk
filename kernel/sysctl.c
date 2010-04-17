@@ -76,6 +76,7 @@
 
 
 #if defined(CONFIG_SYSCTL)
+extern int dentry_per_cpu_enable;
 
 /* External variables not in a header file. */
 extern int sysctl_overcommit_memory;
@@ -1330,6 +1331,15 @@ static struct ctl_table fs_table[] = {
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},
+        {
+		.procname       = "dentry-per-cpu",
+		.data           = &dentry_per_cpu_enable,
+		.maxlen         = sizeof(dentry_per_cpu_enable),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = &zero,
+		.extra2         = &one,
+        },
 	{
 		.procname	= "overflowuid",
 		.data		= &fs_overflowuid,

@@ -43,6 +43,8 @@
 static struct dentry * __d_lookup_real(struct dentry * parent, struct qstr * name);
 static void real_dput(struct dentry *dentry);
 
+int dentry_per_cpu_enable = 1;
+
 #define PER_CPU_DCOUNT	     64
 #define PER_CPU_DCOUNT_MAX   (PER_CPU_DCOUNT << 1)
 
@@ -95,6 +97,9 @@ struct dentry *per_cpu_dget(struct dentry *dentry)
 	struct dentry *found;
 	unsigned int c;
 
+	if (dentry_per_cpu_enable == 0)
+		return NULL;
+
 	found = NULL;
 
 	c = smp_processor_id();
@@ -138,6 +143,8 @@ static inline int per_cpu_dentry_grab(struct dentry *dentry, struct dentry * par
 	struct per_cpu_dentry *p;
 	unsigned int gen, c;
 		
+	if (dentry_per_cpu_enable == 0)
+		return 0;
 
 	c = smp_processor_id();
 	t = &per_cpu(dentry_table, c);
@@ -261,6 +268,9 @@ static inline int per_cpu_dentry_insert(struct dentry *dentry)
 	struct per_cpu_dentry *p;
 	struct dentry_table *t;
 	unsigned int c;
+
+	if (dentry_per_cpu_enable == 0)
+		return 0;
 
 	c = smp_processor_id();
 	t = &per_cpu(dentry_table, c);
