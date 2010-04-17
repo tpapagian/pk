@@ -229,8 +229,6 @@ static inline void per_cpu_d_flush(void)
 	struct dentry_table *t;
 	unsigned int c;
 
-	printk(KERN_INFO "per_cpu_d_flush: flushing...\n");
-
 	for_each_possible_cpu(c) {
 		t = &per_cpu(dentry_table, c);		
 
@@ -241,8 +239,6 @@ static inline void per_cpu_d_flush(void)
 		}
 		spin_unlock(&t->lock);
 	}
-
-	printk(KERN_INFO "per_cpu_d_flush: flushed!\n");
 }
 
 static inline void per_cpu_dentry_prune(struct dentry_table *t, int c)
