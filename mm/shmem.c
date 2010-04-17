@@ -1206,6 +1206,18 @@ static inline struct mempolicy *shmem_get_sbmpol(struct shmem_sb_info *sbinfo)
 }
 #endif
 
+static inline void myatomic_dec(volatile int *n)
+{
+  asm volatile("lock; decl %0" : "+m" (*n));
+}
+
+static inline void myatomic_add64(uint64_t i, volatile uint64_t *n)
+{
+  asm volatile("lock; xaddq %0, %1"
+	       : "+r" (i), "+m" (*n)
+	       : : "memory");
+}
+
 /*
  * shmem_getpage - either get the page from swap or allocate a new one
  *
@@ -1385,17 +1397,18 @@ repeat:
 		shmem_swp_unmap(entry);
 		sbinfo = SHMEM_SB(inode->i_sb);
 		if (sbinfo->max_blocks) {
-			spin_lock(&sbinfo->stat_lock);
+		        // spin_lock(&sbinfo->stat_lock);
 			if (sbinfo->free_blocks == 0 ||
 			    shmem_acct_block(info->flags)) {
-				spin_unlock(&sbinfo->stat_lock);
+			    // spin_unlock(&sbinfo->stat_lock);
 				spin_unlock(&info->lock);
 				error = -ENOSPC;
 				goto failed;
 			}
-			sbinfo->free_blocks--;
+			myatomic_dec(&(sbinfo->free_blocks));
+ 		        // sbinfo->free_blocks--;
 			inode->i_blocks += BLOCKS_PER_PAGE;
-			spin_unlock(&sbinfo->stat_lock);
+			// spin_unlock(&sbinfo->stat_lock);
 		} else if (shmem_acct_block(info->flags)) {
 			spin_unlock(&info->lock);
 			error = -ENOSPC;
