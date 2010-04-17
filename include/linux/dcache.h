@@ -88,8 +88,9 @@ full_name_hash(const unsigned char *name, unsigned int len)
 
 struct per_cpu_dentry {
 	unsigned int count;
+	struct list_head list;
 	struct dentry *dentry;
-	char pad[64 - sizeof(unsigned int) - sizeof(struct dentry *)];
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 
 struct dentry {

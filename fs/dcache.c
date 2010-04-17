@@ -50,8 +50,12 @@ static void real_dput(struct dentry *dentry);
 #define PER_CPU_NDENTRY   (1 << PER_CPU_DHASHBITS)
 #define PER_CPU_DHASHMASK (PER_CPU_NDENTRY - 1)
 
+#define PER_CPU_DENTRY_MAX   1024
+
 struct dentry_table {
 	spinlock_t lock;
+	struct list_head list;
+	unsigned int ndentry;
 	char pad[60];
 	struct dentry *dentry[PER_CPU_NDENTRY];
 };
@@ -60,33 +64,14 @@ static DEFINE_PER_CPU_ALIGNED(struct dentry_table, dentry_table);
 struct dentry_stats {
 	unsigned long hits;
 	unsigned long misses;
-	unsigned long evicts;
+	unsigned long prunes;
 	unsigned long failed_grab;
 	unsigned long failed_insert;
 	char pad[24];
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_stats, dentry_stats);
 
-static inline void per_cpu_clear(struct per_cpu_dentry *entry, int c)
-{
-	/* Must hold the dentry_table lock for CPU c */
-	struct dentry *dentry = entry->dentry;
-	struct dentry_table *t;
-	unsigned int i;
-
-	BUG_ON(entry->count != 0);
-
-	/*
-	 * XXX should have a lit of entries
-	 */
-	t = &per_cpu(dentry_table, c);
-	for (i = 0; i < PER_CPU_NDENTRY; i++) {
-		if (dentry == t->dentry[i])
-			t->dentry[i] = NULL;
-	}
-}
-
-static inline void per_cpu_shootdown(struct per_cpu_dentry *entry, int c)
+static inline void per_cpu_shootdown(struct per_cpu_dentry *entry, struct dentry_table *t)
 {
 	/* Must hold the dentry_table lock for CPU c */
 	struct dentry *dentry = entry->dentry;
@@ -99,7 +84,8 @@ static inline void per_cpu_shootdown(struct per_cpu_dentry *entry, int c)
 		atomic_sub(minus, &entry->dentry->d_count);
 
 	entry->count = 0;	
-	per_cpu_clear(entry, c);
+	list_del_init(&entry->list);
+	t->ndentry--;
 	real_dput(dentry);
 }
 
@@ -126,8 +112,10 @@ struct dentry *per_cpu_dget(struct dentry *dentry)
 	if (p->count) {
 		p->count--;
 		found = dentry;
-		if (p->count == 0)
-			per_cpu_clear(p, c);
+		if (p->count == 0) {
+			list_del_init(&p->list);
+			t->ndentry--;
+		}
 	}
 	spin_unlock(&t->lock);
 	return found;
@@ -141,28 +129,17 @@ static inline int d_gen_check(struct dentry *dentry, unsigned int gen)
 	return (curgen == 0) || (curgen != gen);
 }
 
-static inline unsigned long per_cpu_d_hash(struct dentry *parent,
-					   unsigned long hash)
-{
-	hash += ((unsigned long) parent ^ GOLDEN_RATIO_PRIME) / L1_CACHE_BYTES;
-	hash = hash ^ ((hash ^ GOLDEN_RATIO_PRIME) >> PER_CPU_DHASHBITS);
-	return hash & PER_CPU_DHASHMASK;
-}
-
-static inline struct dentry *per_cpu_d_grab(struct dentry * parent, 
-					    struct qstr * name)
+static inline int per_cpu_dentry_grab(struct dentry *dentry, struct dentry * parent, 
+				      struct qstr * name, int *match)
 {
 	unsigned int len = name->len;
 	const unsigned char *str = name->name;
 	unsigned int hash = name->hash;
 	struct dentry_table *t;
-	int c;
-	struct dentry *found = NULL;
-	unsigned long i, j;
+	struct per_cpu_dentry *p;
+	unsigned int gen, c;
+		
 
-	/*
-	 * XXX irq disable?
-	 */
 	c = smp_processor_id();
 	t = &per_cpu(dentry_table, c);
 
@@ -170,150 +147,126 @@ static inline struct dentry *per_cpu_d_grab(struct dentry * parent,
 #ifdef CONFIG_DENTRY_STATS
 		per_cpu(dentry_stats, c).failed_grab++;		
 #endif
-		return NULL;
+		return 0;
 	}	    
 
-	rcu_read_lock();
+	p = per_cpu_ptr(dentry->d_per_cpu, c);
 
-	i = per_cpu_d_hash(parent, hash);
-
-	/*
-	 * XXX for real hash list
-	 */
-	for (j = i; j <= i; j++) {
-		struct per_cpu_dentry *p;
-		struct dentry *dentry;
-		unsigned int gen;
-
-		if (t->dentry[i] == NULL)
-			continue;
-
-		dentry = t->dentry[i];
-		gen = atomic_read(&dentry->d_gen);
-
-		if (dentry->d_name.hash != hash)
-			continue;
-		if (dentry->d_parent != parent)
-			continue;
-
-		/* non-existing due to RCU? */
-		if (d_unhashed(dentry))
-			continue;
-
-		if (parent->d_op && parent->d_op->d_compare) {
-			struct qstr *qstr = &dentry->d_name;
-			int r;
-
-			spin_lock(&dentry->d_lock);
-			if (d_gen_check(dentry, gen)) {
-				spin_unlock(&dentry->d_lock);
-				continue;
-			}
-
-			r = parent->d_op->d_compare(parent, qstr, name);
-			spin_unlock(&dentry->d_lock);
-
-			if (r)
-				continue;
-		} else {
-			unsigned int qlen = dentry->d_name.len;
-			const char *qstr = dentry->d_name.name;
-
-			if (d_gen_check(dentry, gen))
-				continue;
-
-			if (qlen != len)
-				continue;
-			if (memcmp(qstr, str, len))
-				continue;
-		}
-
-		if (d_gen_check(dentry, gen))
-			continue;
-
-		p = per_cpu_ptr(dentry->d_per_cpu, c);
-
-		BUG_ON(p->count == 0);
-
-		p->count--;
-		if (p->count == 0)
-			per_cpu_clear(p, c);
-
-		found = dentry;
-		break;
+	if (p->count == 0) {
+		spin_unlock(&t->lock);
+		return 0;
 	}
-	spin_unlock(&t->lock);
 
- 	rcu_read_unlock();
+	*match = 0;
 
+	gen = atomic_read(&dentry->d_gen);
+
+	if (dentry->d_name.hash != hash)
+		goto done;
+	if (dentry->d_parent != parent)
+		goto done;
+	
+	/* non-existing due to RCU? */
+	if (d_unhashed(dentry))
+		goto done;
+
+	if (parent->d_op && parent->d_op->d_compare) {
+		struct qstr *qstr = &dentry->d_name;
+		int r;
+		
+		spin_lock(&dentry->d_lock);
+		if (d_gen_check(dentry, gen)) {
+			spin_unlock(&dentry->d_lock);
+			goto done;
+		}
+		
+		r = parent->d_op->d_compare(parent, qstr, name);
+		spin_unlock(&dentry->d_lock);
+		
+		if (r)
+			goto done;
+	} else {
+		unsigned int qlen = dentry->d_name.len;
+		const char *qstr = dentry->d_name.name;
+		
+		if (d_gen_check(dentry, gen))
+			goto done;
+		
+		if (qlen != len)
+			goto done;
+		if (memcmp(qstr, str, len))
+			goto done;
+	}
+	
+	if (d_gen_check(dentry, gen))
+		goto done;
+	
+	BUG_ON(p->count == 0);
+	
+	p->count--;
+	if (p->count == 0) {
+		list_del_init(&p->list);
+		t->ndentry--;
+	}
+
+	*match = 1;
+
+done:
 #ifdef CONFIG_DENTRY_STATS
-	if (found)
+	if (*match)
 		per_cpu(dentry_stats, c).hits++;
 	else
 		per_cpu(dentry_stats, c).misses++;
 #endif
 
-	return found;
+	spin_unlock(&t->lock);
+	return 1;
 }
 
 static inline void per_cpu_d_flush(void)
 {
-	struct per_cpu_dentry *p;
+	struct per_cpu_dentry *p, *tmp;
 	struct dentry_table *t;
-	unsigned int i, c;
+	unsigned int c;
 
 	printk(KERN_INFO "per_cpu_d_flush: flushing...\n");
 
 	for_each_possible_cpu(c) {
 		t = &per_cpu(dentry_table, c);		
+
 		spin_lock(&t->lock);
-		for (i = 0; i < PER_CPU_NDENTRY; i++) {
-			if (t->dentry[i]) {
-				p = per_cpu_ptr(t->dentry[i]->d_per_cpu, c);
-
-#if 0
-				printk(KERN_INFO "c %u i %u count %u d_count %u d_gen %u name %s %p\n",
-				       c, i, p->count, atomic_read(&t->dentry[i]->d_count),
-				       atomic_read(&t->dentry[i]->d_gen),
-				       t->dentry[i]->d_name.name,
-				       t->dentry[i]);
-#endif
-
-				per_cpu_shootdown(p, c);
-			}
-		}		
+		list_for_each_entry_safe(p, tmp, &t->list, list) {
+			BUG_ON(p->count == 0);
+			per_cpu_shootdown(p, t);			
+		}
 		spin_unlock(&t->lock);
 	}
 
 	printk(KERN_INFO "per_cpu_d_flush: flushed!\n");
 }
 
-static inline void per_cpu_dump(struct dentry *dentry)
+static inline void per_cpu_dentry_prune(struct dentry_table *t, int c)
 {
-	struct per_cpu_dentry *p;
-	unsigned int c;
+	struct per_cpu_dentry *p, *tmp;
 
-	printk(KERN_INFO "d_count %u, d_gen %u", 
-	       atomic_read(&dentry->d_count), atomic_read(&dentry->d_gen));
-	for_each_possible_cpu(c) {
-		p = per_cpu_ptr(dentry->d_per_cpu, c);
-		printk(KERN_INFO "  c %u count %u %p\n", c, p->count, p);
+	list_for_each_entry_safe(p, tmp, &t->list, list) {
+		BUG_ON(p->count == 0);
+		per_cpu_shootdown(p, t);			
+		if (t->ndentry <= PER_CPU_DENTRY_MAX >> 1)
+			break;
 	}
+
+#ifdef CONFIG_DENTRY_STATS
+	per_cpu(dentry_stats, c).prunes++;
+#endif
 }
 
-static inline int per_cpu_d_insert(struct dentry *dentry)
+static inline int per_cpu_dentry_insert(struct dentry *dentry)
 {
 	struct per_cpu_dentry *p;
 	struct dentry_table *t;
-	unsigned int i, c;
+	unsigned int c;
 
-	/*
-	 * XXX optimize when lock is acquired
-	 */
-
-	/*
-	 * XXX irq disable?
-	 */
 	c = smp_processor_id();
 	t = &per_cpu(dentry_table, c);
 
@@ -326,35 +279,29 @@ static inline int per_cpu_d_insert(struct dentry *dentry)
 
 	p = per_cpu_ptr(dentry->d_per_cpu, c);
 
-	i = per_cpu_d_hash(dentry->d_parent, dentry->d_name.hash);
-	if (t->dentry[i] == dentry) {
+	if (list_empty(&p->list)) {
+		BUG_ON(p->count);
+		list_add_tail(&p->list, &t->list);
+		t->ndentry++;
+	} else {
+		list_move_tail(&p->list, &t->list);
+	}
+
+	if (p->count == 0) {
+		p->count += PER_CPU_DCOUNT + 1;
+		atomic_add(PER_CPU_DCOUNT, &dentry->d_count);
+	} else if (p->count > PER_CPU_DCOUNT_MAX) {
 		p->count++;
-		if (p->count > PER_CPU_DCOUNT_MAX) {
-			p->count -= PER_CPU_DCOUNT;
-			atomic_sub(PER_CPU_DCOUNT, &dentry->d_count);
-		}
-		goto done;
+		p->count -= PER_CPU_DCOUNT;
+		atomic_sub(PER_CPU_DCOUNT, &dentry->d_count);
+	} else {
+		p->count++;
 	}
 
-	if (t->dentry[i] != NULL) {
-#ifdef CONFIG_DENTRY_STATS
-		per_cpu(dentry_stats, c).evicts++;
-#endif
-		per_cpu_shootdown(per_cpu_ptr(t->dentry[i]->d_per_cpu, c), c);
-	}
-	t->dentry[i] = dentry;
+	if (PER_CPU_DENTRY_MAX < t->ndentry)
+		per_cpu_dentry_prune(t, c);
 
-	/* NB If a dentry is moved (renamed) it might appear in the 
-	 * local cache twice.  Add 1 + PER_CPU_DCOUNT references for
-	 * the refernce the caller owned, plus PER_CPU_DCOUNT extra 
-	 * for the local cache.
-	 */
-	p->count += PER_CPU_DCOUNT + 1;
-	atomic_add(PER_CPU_DCOUNT, &dentry->d_count);
-
-done:
 	spin_unlock(&t->lock);
-
 	return 1;
 }
 
@@ -370,14 +317,14 @@ static int dentry_stats_show(struct seq_file *m, void *v)
 			   "%u"
 			   " hits %lu"
 			   " misses %lu"
-			   " evicts %lu"
+			   " prunes %lu"
 			   " failed grab %lu"
 			   " failed insert %lu"
 			   "\n", 
 			   c, 
 			   s->hits, 
 			   s->misses, 
-			   s->evicts, 
+			   s->prunes, 
 			   s->failed_grab, 
 			   s->failed_insert);
 	}
@@ -408,9 +355,6 @@ module_init(proc_dentry_stats_init);
 struct dentry * __d_lookup(struct dentry * parent, 
 			   struct qstr * name)
 {
-	struct dentry *d = per_cpu_d_grab(parent, name);
-	if (d)
-		return d;
 	return __d_lookup_real(parent, name);
 }
 
@@ -640,7 +584,7 @@ void dput(struct dentry *dentry)
 	if (!dentry)
 		return;
 
-	if (per_cpu_d_insert(dentry))
+	if (per_cpu_dentry_insert(dentry))
 		return;
 
 	real_dput(dentry);
@@ -1348,6 +1292,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 			p = per_cpu_ptr(dentry->d_per_cpu, c);
 			p->count = 0;
 			p->dentry = dentry;
+			INIT_LIST_HEAD(&p->list);
 	}
 
 	dentry->d_name.len = name->len;
@@ -1780,6 +1725,82 @@ struct dentry * d_lookup(struct dentry * parent, struct qstr * name)
 }
 EXPORT_SYMBOL(d_lookup);
 
+#if 1
+static struct dentry * __d_lookup_real(struct dentry * parent, struct qstr * name)
+{
+	unsigned int len = name->len;
+	unsigned int hash = name->hash;
+	const unsigned char *str = name->name;
+	struct hlist_head *head = d_hash(parent,hash);
+	struct dentry *found = NULL;
+	struct hlist_node *node;
+	struct dentry *dentry;
+
+	rcu_read_lock();
+
+	
+	
+	hlist_for_each_entry_rcu(dentry, node, head, d_hash) {
+		struct qstr *qstr;
+		int match;
+
+		if (per_cpu_dentry_grab(dentry, parent, name, &match)) {
+			if (match) {
+				found = dentry;
+				break;
+			} else {
+				continue;
+			}
+		}
+
+		if (dentry->d_name.hash != hash)
+			continue;
+		if (dentry->d_parent != parent)
+			continue;
+
+		spin_lock(&dentry->d_lock);
+
+		/*
+		 * Recheck the dentry after taking the lock - d_move may have
+		 * changed things.  Don't bother checking the hash because we're
+		 * about to compare the whole name anyway.
+		 */
+		if (dentry->d_parent != parent)
+			goto next;
+
+		/* non-existing due to RCU? */
+		if (d_unhashed(dentry))
+			goto next;
+
+		/*
+		 * It is safe to compare names since d_move() cannot
+		 * change the qstr (protected by d_lock).
+		 */
+		qstr = &dentry->d_name;
+		if (parent->d_op && parent->d_op->d_compare) {
+			if (parent->d_op->d_compare(parent, qstr, name))
+				goto next;
+		} else {
+			if (qstr->len != len)
+				goto next;
+			if (memcmp(qstr->name, str, len))
+				goto next;
+		}
+
+		atomic_inc(&dentry->d_count);
+		found = dentry;
+		spin_unlock(&dentry->d_lock);
+		break;
+next:
+		spin_unlock(&dentry->d_lock);
+ 	}
+ 	rcu_read_unlock();
+
+ 	return found;
+}
+#endif
+
+#if 0
 static struct dentry * __d_lookup_real(struct dentry * parent, struct qstr * name)
 {
 	unsigned int len = name->len;
@@ -1840,6 +1861,7 @@ next:
 
  	return found;
 }
+#endif
 
 /**
  * d_hash_and_lookup - hash the qstr then search for a dentry
@@ -2720,8 +2742,11 @@ static void __init dcache_init_early(void)
 	for (loop = 0; loop < (1 << d_hash_shift); loop++)
 		INIT_HLIST_HEAD(&dentry_hashtable[loop]);
 
-	for_each_possible_cpu(loop)
+	for_each_possible_cpu(loop) {
                 spin_lock_init(&(per_cpu(dentry_table, loop).lock));
+		INIT_LIST_HEAD(&(per_cpu(dentry_table, loop).list));
+		per_cpu(dentry_table, loop).ndentry = 0;
+	}
 }
 
 static void __init dcache_init(void)
@@ -2755,8 +2780,11 @@ static void __init dcache_init(void)
 	for (loop = 0; loop < (1 << d_hash_shift); loop++)
 		INIT_HLIST_HEAD(&dentry_hashtable[loop]);
 
-	for_each_possible_cpu(loop)
+	for_each_possible_cpu(loop) {
                 spin_lock_init(&(per_cpu(dentry_table, loop).lock));
+		INIT_LIST_HEAD(&(per_cpu(dentry_table, loop).list));
+		per_cpu(dentry_table, loop).ndentry = 0;
+	}
 }
 
 /* SLAB cache for __getname() consumers */
