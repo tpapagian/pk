@@ -56,8 +56,7 @@ struct dentry_table {
 	spinlock_t lock;
 	struct list_head list;
 	unsigned int ndentry;
-	char pad[60];
-	struct dentry *dentry[PER_CPU_NDENTRY];
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_table, dentry_table);
 
@@ -67,7 +66,7 @@ struct dentry_stats {
 	unsigned long prunes;
 	unsigned long failed_grab;
 	unsigned long failed_insert;
-	char pad[24];
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_stats, dentry_stats);
 
