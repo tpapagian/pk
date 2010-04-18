@@ -90,6 +90,7 @@ struct per_cpu_dentry {
 	unsigned int count;
 	struct list_head list;
 	struct dentry *dentry;
+	struct per_cpu_dentry __percpu *base;
 	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 

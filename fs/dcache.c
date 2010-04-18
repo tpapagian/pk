@@ -53,11 +53,18 @@ int dentry_per_cpu_enable = 1;
 #define PER_CPU_DHASHMASK (PER_CPU_NDENTRY - 1)
 
 #define PER_CPU_DENTRY_MAX   1024
+#define PER_CPU_MAX_FREE     1024
 
 struct dentry_table {
 	spinlock_t lock;
 	struct list_head list;
 	unsigned int ndentry;
+
+
+	struct list_head free_list;
+	spinlock_t free_lock;
+	unsigned int free_count;
+
 	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_table, dentry_table);
@@ -71,6 +78,49 @@ struct dentry_stats {
 	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_stats, dentry_stats);
+
+static inline struct per_cpu_dentry __percpu *dentry_alloc_percpu(void)
+{	
+	struct per_cpu_dentry __percpu *percpu;
+	struct dentry_table *t;
+	int c;
+
+	c = smp_processor_id();
+	t = &per_cpu(dentry_table, c);
+
+	spin_lock(&t->free_lock);
+	if (list_empty(&t->free_list))
+		percpu = alloc_percpu(struct per_cpu_dentry);
+	else {
+		struct per_cpu_dentry *p;
+		p = list_first_entry(&t->free_list, struct per_cpu_dentry, list);
+		list_del_init(&p->list);
+		t->free_count--;
+		percpu = p->base;
+	}
+	spin_unlock(&t->free_lock);
+
+	return percpu;
+}
+
+static inline void dentry_free_percpu(struct per_cpu_dentry __percpu *percpu)
+{
+	struct dentry_table *t;
+	int c;
+
+	c = smp_processor_id();
+	t = &per_cpu(dentry_table, c);
+
+	spin_lock(&t->free_lock);
+	if (t->free_count > PER_CPU_MAX_FREE) {
+		free_percpu(percpu);
+	} else {
+		struct per_cpu_dentry *p = per_cpu_ptr(percpu, c);
+		list_add(&p->list, &t->free_list);
+		t->free_count++;
+	}
+	spin_unlock(&t->free_lock);
+}
 
 static inline void per_cpu_shootdown(struct per_cpu_dentry *entry, struct dentry_table *t)
 {
@@ -314,10 +364,12 @@ static inline int per_cpu_dentry_insert(struct dentry *dentry)
 static int dentry_stats_show(struct seq_file *m, void *v)
 {
 	struct dentry_stats *s;
+	struct dentry_table *t;
 	unsigned int c;
 
 	for_each_possible_cpu(c) {
 		s = &per_cpu(dentry_stats, c);		
+		t = &per_cpu(dentry_table, c);
 		seq_printf(m, 
 			   "%u"
 			   " hits %lu"
@@ -325,13 +377,15 @@ static int dentry_stats_show(struct seq_file *m, void *v)
 			   " prunes %lu"
 			   " failed grab %lu"
 			   " failed insert %lu"
+			   " free count %u"
 			   "\n", 
 			   c, 
 			   s->hits, 
 			   s->misses, 
 			   s->prunes, 
 			   s->failed_grab, 
-			   s->failed_insert);
+			   s->failed_insert,
+			   t->free_count);
 	}
 
         return 0;
@@ -400,7 +454,7 @@ static void __d_free(struct dentry *dentry)
 	WARN_ON(!list_empty(&dentry->d_alias));
 	if (dname_external(dentry))
 		kfree(dentry->d_name.name);
-	free_percpu(dentry->d_per_cpu);
+	dentry_free_percpu(dentry->d_per_cpu);
 	kmem_cache_free(dentry_cache, dentry); 
 }
 
@@ -1284,7 +1338,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	}	
 	dentry->d_name.name = dname;
 	
-	dentry->d_per_cpu = alloc_percpu(struct per_cpu_dentry);
+	dentry->d_per_cpu = dentry_alloc_percpu();
 	if (!dentry->d_per_cpu) {
 		if (name->len > DNAME_INLINE_LEN-1)
 			kfree(dname);
@@ -1293,11 +1347,12 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	}
 
 	for_each_possible_cpu(c) {
-			struct per_cpu_dentry *p;
-			p = per_cpu_ptr(dentry->d_per_cpu, c);
-			p->count = 0;
-			p->dentry = dentry;
-			INIT_LIST_HEAD(&p->list);
+		struct per_cpu_dentry *p;
+		p = per_cpu_ptr(dentry->d_per_cpu, c);
+		p->count = 0;
+		p->dentry = dentry;
+		INIT_LIST_HEAD(&p->list);
+		p->base = dentry->d_per_cpu;
 	}
 
 	dentry->d_name.len = name->len;
@@ -2724,6 +2779,22 @@ static int __init set_dhash_entries(char *str)
 }
 __setup("dhash_entries=", set_dhash_entries);
 
+static void __init per_cpu_init(void)
+{
+	struct dentry_table *t;
+	int c;
+
+	for_each_possible_cpu(c) {
+		t = &per_cpu(dentry_table, c);
+                spin_lock_init(&t->lock);
+		spin_lock_init(&t->free_lock);
+		INIT_LIST_HEAD(&t->free_list);
+		INIT_LIST_HEAD(&t->list);
+		t->ndentry = 0;
+		t->free_count = 0;
+	}
+}
+
 static void __init dcache_init_early(void)
 {
 	int loop;
@@ -2747,11 +2818,7 @@ static void __init dcache_init_early(void)
 	for (loop = 0; loop < (1 << d_hash_shift); loop++)
 		INIT_HLIST_HEAD(&dentry_hashtable[loop]);
 
-	for_each_possible_cpu(loop) {
-                spin_lock_init(&(per_cpu(dentry_table, loop).lock));
-		INIT_LIST_HEAD(&(per_cpu(dentry_table, loop).list));
-		per_cpu(dentry_table, loop).ndentry = 0;
-	}
+	per_cpu_init();
 }
 
 static void __init dcache_init(void)
@@ -2785,11 +2852,7 @@ static void __init dcache_init(void)
 	for (loop = 0; loop < (1 << d_hash_shift); loop++)
 		INIT_HLIST_HEAD(&dentry_hashtable[loop]);
 
-	for_each_possible_cpu(loop) {
-                spin_lock_init(&(per_cpu(dentry_table, loop).lock));
-		INIT_LIST_HEAD(&(per_cpu(dentry_table, loop).list));
-		per_cpu(dentry_table, loop).ndentry = 0;
-	}
+	per_cpu_init();
 }
 
 /* SLAB cache for __getname() consumers */
