@@ -75,6 +75,8 @@ struct dentry_stats {
 	unsigned long prunes;
 	unsigned long failed_grab;
 	unsigned long failed_insert;
+	unsigned long failed_alloc;
+	unsigned long failed_free;
 	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_stats, dentry_stats);
@@ -88,7 +90,13 @@ static inline struct per_cpu_dentry __percpu *dentry_alloc_percpu(void)
 	c = smp_processor_id();
 	t = &per_cpu(dentry_table, c);
 
-	spin_lock(&t->free_lock);
+	if (!spin_trylock(&t->free_lock)) {
+#ifdef CONFIG_DENTRY_STATS
+		per_cpu(dentry_stats, c).failed_alloc++;		
+#endif
+		return alloc_percpu(struct per_cpu_dentry);
+	}
+
 	if (list_empty(&t->free_list))
 		percpu = alloc_percpu(struct per_cpu_dentry);
 	else {
@@ -111,7 +119,14 @@ static inline void dentry_free_percpu(struct per_cpu_dentry __percpu *percpu)
 	c = smp_processor_id();
 	t = &per_cpu(dentry_table, c);
 
-	spin_lock(&t->free_lock);
+	if (!spin_trylock(&t->free_lock)) {
+#ifdef CONFIG_DENTRY_STATS
+		per_cpu(dentry_stats, c).failed_free++;		
+#endif
+		free_percpu(percpu);
+		return;
+	}
+
 	if (t->free_count > PER_CPU_MAX_FREE) {
 		free_percpu(percpu);
 	} else {
@@ -377,6 +392,8 @@ static int dentry_stats_show(struct seq_file *m, void *v)
 			   " prunes %lu"
 			   " failed grab %lu"
 			   " failed insert %lu"
+			   " failed alloc %lu"
+			   " failed free %lu"
 			   " free count %u"
 			   "\n", 
 			   c, 
@@ -385,6 +402,8 @@ static int dentry_stats_show(struct seq_file *m, void *v)
 			   s->prunes, 
 			   s->failed_grab, 
 			   s->failed_insert,
+			   s->failed_alloc, 
+			   s->failed_free,
 			   t->free_count);
 	}
 
