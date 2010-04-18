@@ -40,7 +40,6 @@
 
 #define CONFIG_DENTRY_STATS
 
-static struct dentry * __d_lookup_real(struct dentry * parent, struct qstr * name);
 static void real_dput(struct dentry *dentry);
 
 int dentry_per_cpu_enable = 1;
@@ -48,12 +47,8 @@ int dentry_per_cpu_enable = 1;
 #define PER_CPU_DCOUNT	     64
 #define PER_CPU_DCOUNT_MAX   (PER_CPU_DCOUNT << 1)
 
-#define PER_CPU_DHASHBITS 7
-#define PER_CPU_NDENTRY   (1 << PER_CPU_DHASHBITS)
-#define PER_CPU_DHASHMASK (PER_CPU_NDENTRY - 1)
-
 #define PER_CPU_DENTRY_MAX   1024
-#define PER_CPU_MAX_FREE     1024
+#define PER_CPU_FREE_MAX     1024
 
 struct dentry_table {
 	spinlock_t lock;
@@ -127,7 +122,7 @@ static inline void dentry_free_percpu(struct per_cpu_dentry __percpu *percpu)
 		return;
 	}
 
-	if (t->free_count > PER_CPU_MAX_FREE) {
+	if (t->free_count > PER_CPU_FREE_MAX) {
 		free_percpu(percpu);
 	} else {
 		struct per_cpu_dentry *p = per_cpu_ptr(percpu, c);
@@ -169,10 +164,6 @@ struct dentry *per_cpu_dget(struct dentry *dentry)
 
 	c = smp_processor_id();
 	t = &per_cpu(dentry_table, c);
-
-	/*
-	 * XXX optimize lock stuff.  maybe should just use an atomic count
-	 */
 
 	if (!spin_trylock(&t->lock))
 		return NULL;
@@ -429,12 +420,6 @@ static int __init proc_dentry_stats_init(void)
 }
 module_init(proc_dentry_stats_init);
 #endif
-
-struct dentry * __d_lookup(struct dentry * parent, 
-			   struct qstr * name)
-{
-	return __d_lookup_real(parent, name);
-}
 
 int sysctl_vfs_cache_pressure __read_mostly = 100;
 EXPORT_SYMBOL_GPL(sysctl_vfs_cache_pressure);
@@ -1804,8 +1789,7 @@ struct dentry * d_lookup(struct dentry * parent, struct qstr * name)
 }
 EXPORT_SYMBOL(d_lookup);
 
-#if 1
-static struct dentry * __d_lookup_real(struct dentry * parent, struct qstr * name)
+struct dentry * __d_lookup(struct dentry * parent, struct qstr * name)
 {
 	unsigned int len = name->len;
 	unsigned int hash = name->hash;
@@ -1816,8 +1800,6 @@ static struct dentry * __d_lookup_real(struct dentry * parent, struct qstr * nam
 	struct dentry *dentry;
 
 	rcu_read_lock();
-
-	
 	
 	hlist_for_each_entry_rcu(dentry, node, head, d_hash) {
 		struct qstr *qstr;
@@ -1877,70 +1859,6 @@ next:
 
  	return found;
 }
-#endif
-
-#if 0
-static struct dentry * __d_lookup_real(struct dentry * parent, struct qstr * name)
-{
-	unsigned int len = name->len;
-	unsigned int hash = name->hash;
-	const unsigned char *str = name->name;
-	struct hlist_head *head = d_hash(parent,hash);
-	struct dentry *found = NULL;
-	struct hlist_node *node;
-	struct dentry *dentry;
-
-	rcu_read_lock();
-	
-	hlist_for_each_entry_rcu(dentry, node, head, d_hash) {
-		struct qstr *qstr;
-
-		if (dentry->d_name.hash != hash)
-			continue;
-		if (dentry->d_parent != parent)
-			continue;
-
-		spin_lock(&dentry->d_lock);
-
-		/*
-		 * Recheck the dentry after taking the lock - d_move may have
-		 * changed things.  Don't bother checking the hash because we're
-		 * about to compare the whole name anyway.
-		 */
-		if (dentry->d_parent != parent)
-			goto next;
-
-		/* non-existing due to RCU? */
-		if (d_unhashed(dentry))
-			goto next;
-
-		/*
-		 * It is safe to compare names since d_move() cannot
-		 * change the qstr (protected by d_lock).
-		 */
-		qstr = &dentry->d_name;
-		if (parent->d_op && parent->d_op->d_compare) {
-			if (parent->d_op->d_compare(parent, qstr, name))
-				goto next;
-		} else {
-			if (qstr->len != len)
-				goto next;
-			if (memcmp(qstr->name, str, len))
-				goto next;
-		}
-
-		atomic_inc(&dentry->d_count);
-		found = dentry;
-		spin_unlock(&dentry->d_lock);
-		break;
-next:
-		spin_unlock(&dentry->d_lock);
- 	}
- 	rcu_read_unlock();
-
- 	return found;
-}
-#endif
 
 /**
  * d_hash_and_lookup - hash the qstr then search for a dentry
