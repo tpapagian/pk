@@ -43,6 +43,7 @@
 static void real_dput(struct dentry *dentry);
 
 int dentry_per_cpu_enable = 1;
+static atomic_t per_cpu_flushing;
 
 #define PER_CPU_DCOUNT	     64
 #define PER_CPU_DCOUNT_MAX   (PER_CPU_DCOUNT << 1)
@@ -132,9 +133,9 @@ static inline void dentry_free_percpu(struct per_cpu_dentry __percpu *percpu)
 	spin_unlock(&t->free_lock);
 }
 
-static inline void per_cpu_shootdown(struct per_cpu_dentry *entry, struct dentry_table *t)
+static inline void per_cpu_shootdown(struct per_cpu_dentry *entry)
 {
-	/* Must hold the dentry_table lock for CPU c */
+	/* Must NOT hold the dentry_table lock for CPU c */
 	struct dentry *dentry = entry->dentry;
 	unsigned int minus;
 
@@ -145,8 +146,6 @@ static inline void per_cpu_shootdown(struct per_cpu_dentry *entry, struct dentry
 		atomic_sub(minus, &entry->dentry->d_count);
 
 	entry->count = 0;	
-	list_del_init(&entry->list);
-	t->ndentry--;
 	real_dput(dentry);
 }
 
@@ -287,32 +286,46 @@ done:
 
 static inline void per_cpu_d_flush(void)
 {
-	struct per_cpu_dentry *p, *tmp;
+	struct per_cpu_dentry *p;
 	struct dentry_table *t;
 	unsigned int c;
+
+	atomic_inc(&per_cpu_flushing);
 
 	for_each_possible_cpu(c) {
 		t = &per_cpu(dentry_table, c);		
 
 		spin_lock(&t->lock);
-		list_for_each_entry_safe(p, tmp, &t->list, list) {
+		while (!list_empty(&t->list)) {
+			p = list_first_entry(&t->list, struct per_cpu_dentry, list);
 			BUG_ON(p->count == 0);
-			per_cpu_shootdown(p, t);			
+			list_del_init(&p->list);
+			t->ndentry--;
+			spin_unlock(&t->lock);
+			per_cpu_shootdown(p);
+			spin_lock(&t->lock);
 		}
-		spin_unlock(&t->lock);
+		spin_unlock(&t->lock);		
 	}
+
+	atomic_dec(&per_cpu_flushing);
 }
 
 static inline void per_cpu_dentry_prune(struct dentry_table *t, int c)
 {
-	struct per_cpu_dentry *p, *tmp;
+	struct per_cpu_dentry *p;
 
-	list_for_each_entry_safe(p, tmp, &t->list, list) {
+	spin_lock(&t->lock);
+	while (!list_empty(&t->list) && t->ndentry > (PER_CPU_DENTRY_MAX >> 1)) {
+		p = list_first_entry(&t->list, struct per_cpu_dentry, list);
 		BUG_ON(p->count == 0);
-		per_cpu_shootdown(p, t);			
-		if (t->ndentry <= PER_CPU_DENTRY_MAX >> 1)
-			break;
+		list_del_init(&p->list);
+		t->ndentry--;
+		spin_unlock(&t->lock);
+		per_cpu_shootdown(p);
+		spin_lock(&t->lock);
 	}
+	spin_unlock(&t->lock);		
 
 #ifdef CONFIG_DENTRY_STATS
 	per_cpu(dentry_stats, c).prunes++;
@@ -338,6 +351,11 @@ static inline int per_cpu_dentry_insert(struct dentry *dentry)
 		return 0;
 	}
 
+	if (atomic_read(&per_cpu_flushing)) {
+		spin_unlock(&t->lock);
+		return 0;
+	}
+
 	p = per_cpu_ptr(dentry->d_per_cpu, c);
 
 	if (list_empty(&p->list)) {
@@ -358,11 +376,11 @@ static inline int per_cpu_dentry_insert(struct dentry *dentry)
 	} else {
 		p->count++;
 	}
+	spin_unlock(&t->lock);
 
 	if (PER_CPU_DENTRY_MAX < t->ndentry)
 		per_cpu_dentry_prune(t, c);
 
-	spin_unlock(&t->lock);
 	return 1;
 }
 
@@ -1030,8 +1048,6 @@ static void shrink_dcache_for_umount_subtree(struct dentry *dentry)
 	__d_drop(dentry);
 	spin_unlock(&dcache_lock);
 
-	//per_cpu_d_flush();
-	
 	for (;;) {
 		/* descend to the first leaf in the current subtree */
 		while (!list_empty(&dentry->d_subdirs)) {
