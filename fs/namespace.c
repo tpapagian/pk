@@ -61,6 +61,8 @@ EXPORT_SYMBOL_GPL(fs_kobj);
 #define PER_CPU_MNTCOUNT	     64
 #define PER_CPU_MNTCOUNT_MAX   	     (PER_CPU_MNTCOUNT << 1)
 
+static atomic_t per_cpu_flushing;
+
 static inline void real_mntput_no_expire(struct vfsmount *mnt);
 
 struct mntlist {
@@ -153,6 +155,11 @@ static inline int per_cpu_mntput_no_expire(struct vfsmount *mnt)
 	if (!spin_trylock(&l->lock))
 		return 0;
 
+	if (atomic_read(&per_cpu_flushing)) {
+                spin_unlock(&l->lock);
+                return 0;
+        }
+
 	if (p->count) {
 		p->count++;
 		if (p->count > PER_CPU_MNTCOUNT_MAX) {
@@ -175,29 +182,35 @@ static inline int per_cpu_mntput_no_expire(struct vfsmount *mnt)
 
 static inline void per_cpu_flush(void)
 {
-	struct per_cpu_vfsmount *p, *tmp;
+	struct per_cpu_vfsmount *p;
+	unsigned int minus, c;
+	struct vfsmount *mnt;
 	struct mntlist *l;	
-	int c;
+
+	atomic_inc(&per_cpu_flushing);
 	
 	for_each_possible_cpu(c) {
 		l = &per_cpu(mntlist, c);
 
 		spin_lock(&l->lock);
-		list_for_each_entry_safe(p, tmp, &l->list, list) {
-			struct vfsmount *mnt;
-			unsigned int minus;
+		while (!list_empty(&l->list)) {
+			p = list_first_entry(&l->list, struct per_cpu_vfsmount, list);
+			list_del_init(&p->list);
+			spin_unlock(&l->lock);
 
-			mnt = p->mnt;
+			mnt = p->mnt;			
 			minus = p->count - 1;
 			if (minus)
 				atomic_sub(minus, &mnt->mnt_count);
 			real_mntput_no_expire(mnt);
-
 			p->count = 0;
-			list_del_init(&p->list);
+
+			spin_lock(&l->lock);
 		}
 		spin_unlock(&l->lock);
 	}
+
+	atomic_dec(&per_cpu_flushing);
 }
 
 struct vfsmount *per_cpu_mntget(struct vfsmount *mnt)
