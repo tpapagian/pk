@@ -198,13 +198,13 @@ static inline void per_cpu_flush(void)
 		while (!list_empty(&l->list)) {
 			p = list_first_entry(&l->list, struct per_cpu_vfsmount, list);
 			list_del_init(&p->list);
-			spin_unlock(&l->lock);
 
 			mnt = p->mnt;			
 			minus = p->count - 1;
 			if (minus)
 				atomic_sub(minus, &mnt->mnt_count);
 			p->count = 0;
+			spin_unlock(&l->lock);
 			real_mntput_no_expire(mnt);
 			spin_lock(&l->lock);
 		}
