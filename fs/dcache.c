@@ -93,16 +93,17 @@ static inline struct per_cpu_dentry __percpu *dentry_alloc_percpu(void)
 		return alloc_percpu(struct per_cpu_dentry);
 	}
 
-	if (list_empty(&t->free_list))
+	if (list_empty(&t->free_list)) {
+		spin_unlock(&t->free_lock);
 		percpu = alloc_percpu(struct per_cpu_dentry);
-	else {
+	} else {
 		struct per_cpu_dentry *p;
 		p = list_first_entry(&t->free_list, struct per_cpu_dentry, list);
 		list_del_init(&p->list);
 		t->free_count--;
+		spin_unlock(&t->free_lock);
 		percpu = p->base;
 	}
-	spin_unlock(&t->free_lock);
 
 	return percpu;
 }
@@ -124,13 +125,14 @@ static inline void dentry_free_percpu(struct per_cpu_dentry __percpu *percpu)
 	}
 
 	if (t->free_count > PER_CPU_FREE_MAX) {
+		spin_unlock(&t->free_lock);
 		free_percpu(percpu);
 	} else {
 		struct per_cpu_dentry *p = per_cpu_ptr(percpu, c);
 		list_add(&p->list, &t->free_list);
 		t->free_count++;
+		spin_unlock(&t->free_lock);
 	}
-	spin_unlock(&t->free_lock);
 }
 
 static inline void per_cpu_shootdown(struct per_cpu_dentry *entry)
