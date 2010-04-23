@@ -44,6 +44,7 @@ static void real_dput(struct dentry *dentry);
 
 int dentry_per_cpu_enable = 1;
 static atomic_t per_cpu_flushing;
+struct mutex per_cpu_flush_mutex;
 
 #define PER_CPU_DCOUNT	     64
 #define PER_CPU_DCOUNT_MAX   (PER_CPU_DCOUNT << 1)
@@ -200,7 +201,7 @@ static inline int per_cpu_dentry_grab(struct dentry *dentry, struct dentry * par
 	struct dentry_table *t;
 	struct per_cpu_dentry *p;
 	unsigned int gen, c;
-		
+
 	if (dentry_per_cpu_enable == 0)
 		return 0;
 
@@ -293,6 +294,7 @@ static inline void per_cpu_d_flush(void)
 	struct dentry_table *t;
 	unsigned int c;
 
+	mutex_lock(&per_cpu_flush_mutex);
 	atomic_inc(&per_cpu_flushing);
 
 	for_each_possible_cpu(c) {
@@ -311,6 +313,7 @@ static inline void per_cpu_d_flush(void)
 	}
 
 	atomic_dec(&per_cpu_flushing);
+	mutex_unlock(&per_cpu_flush_mutex);
 }
 
 static inline void per_cpu_dentry_prune(struct dentry_table *t, int c)
@@ -352,7 +355,7 @@ static inline int per_cpu_dentry_insert(struct dentry *dentry)
 		return 0;
 	}
 
-	if (atomic_read(&per_cpu_flushing)) {
+	if (atomic_read(&per_cpu_flushing) || d_unhashed(dentry)) {
 		spin_unlock(&t->lock);
 		return 0;
 	}
@@ -1147,6 +1150,8 @@ void shrink_dcache_for_umount(struct super_block *sb)
 {
 	struct dentry *dentry;
 
+	atomic_inc(&per_cpu_flushing);
+
 	if (down_read_trylock(&sb->s_umount))
 		BUG();
 
@@ -1161,6 +1166,8 @@ void shrink_dcache_for_umount(struct super_block *sb)
 		dentry = hlist_entry(sb->s_anon.first, struct dentry, d_hash);
 		shrink_dcache_for_umount_subtree(dentry);
 	}
+
+	atomic_dec(&per_cpu_flushing);
 }
 
 /*
@@ -2747,6 +2754,8 @@ static void __init per_cpu_init(void)
 		t->ndentry = 0;
 		t->free_count = 0;
 	}
+
+	mutex_init(&per_cpu_flush_mutex);
 }
 
 static void __init dcache_init_early(void)
