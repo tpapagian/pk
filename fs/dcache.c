@@ -135,7 +135,7 @@ static inline void dentry_free_percpu(struct per_cpu_dentry __percpu *percpu)
 	}
 }
 
-static inline void per_cpu_shootdown(struct per_cpu_dentry *entry)
+static inline void per_cpu_shootdown(struct per_cpu_dentry *entry, spinlock_t *lock)
 {
 	/* Must NOT hold the dentry_table lock for CPU c */
 	struct dentry *dentry = entry->dentry;
@@ -148,6 +148,7 @@ static inline void per_cpu_shootdown(struct per_cpu_dentry *entry)
 		atomic_sub(minus, &entry->dentry->d_count);
 
 	entry->count = 0;	
+	spin_unlock(lock);
 	real_dput(dentry);
 }
 
@@ -303,8 +304,7 @@ static inline void per_cpu_d_flush(void)
 			BUG_ON(p->count == 0);
 			list_del_init(&p->list);
 			t->ndentry--;
-			spin_unlock(&t->lock);
-			per_cpu_shootdown(p);
+			per_cpu_shootdown(p, &t->lock);
 			spin_lock(&t->lock);
 		}
 		spin_unlock(&t->lock);		
@@ -323,8 +323,7 @@ static inline void per_cpu_dentry_prune(struct dentry_table *t, int c)
 		BUG_ON(p->count == 0);
 		list_del_init(&p->list);
 		t->ndentry--;
-		spin_unlock(&t->lock);
-		per_cpu_shootdown(p);
+		per_cpu_shootdown(p, &t->lock);
 		spin_lock(&t->lock);
 	}
 	spin_unlock(&t->lock);		
