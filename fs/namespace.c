@@ -62,6 +62,8 @@ EXPORT_SYMBOL_GPL(fs_kobj);
 #define PER_CPU_MNTCOUNT_MAX   	     (PER_CPU_MNTCOUNT << 1)
 
 static atomic_t per_cpu_flushing;
+static struct list_head flush_list;
+static spinlock_t flush_list_lock;
 
 static inline void real_mntput_no_expire(struct vfsmount *mnt);
 
@@ -202,15 +204,33 @@ static inline void per_cpu_flush(void)
 			minus = p->count - 1;
 			if (minus)
 				atomic_sub(minus, &mnt->mnt_count);
-			real_mntput_no_expire(mnt);
 			p->count = 0;
-
+			real_mntput_no_expire(mnt);
 			spin_lock(&l->lock);
 		}
 		spin_unlock(&l->lock);
 	}
 
 	atomic_dec(&per_cpu_flushing);
+}
+
+static inline void per_cpu_flush_mnt(struct vfsmount *mnt)
+{
+	struct per_cpu_vfsmount *p;
+	struct mntlist *l;
+	unsigned int c;
+
+	spin_lock(&flush_list_lock);
+	for_each_possible_cpu(c) {
+		l = &per_cpu(mntlist, c);
+		p = per_cpu_ptr(mnt->mnt_per_cpu, c);
+		
+		spin_lock(&l->lock);
+		if (!list_empty(&p->list))
+			list_move(&p->list, &flush_list);
+		spin_unlock(&l->lock);
+	}
+	spin_unlock(&flush_list_lock);
 }
 
 struct vfsmount *per_cpu_mntget(struct vfsmount *mnt)
@@ -744,6 +764,7 @@ static void detach_mnt(struct vfsmount *mnt, struct path *old_path)
 	mnt->mnt_parent = mnt;
 	mnt->mnt_mountpoint = mnt->mnt_root;
 	list_del_init(&mnt->mnt_child);
+	per_cpu_flush_mnt(mnt);
 	list_del_init(&mnt->mnt_hash);
 	old_path->dentry->d_mounted--;
 }
@@ -1275,6 +1296,7 @@ void release_mounts(struct list_head *head)
 	struct vfsmount *mnt;
 	while (!list_empty(head)) {
 		mnt = list_first_entry(head, struct vfsmount, mnt_hash);
+		per_cpu_flush_mnt(mnt);
 		list_del_init(&mnt->mnt_hash);
 		if (mnt->mnt_parent != mnt) {
 			struct dentry *dentry;
@@ -1297,8 +1319,10 @@ void umount_tree(struct vfsmount *mnt, int propagate, struct list_head *kill)
 {
 	struct vfsmount *p;
 
-	for (p = mnt; p; p = next_mnt(p, mnt))
+	for (p = mnt; p; p = next_mnt(p, mnt)) {
+		per_cpu_flush_mnt(p);
 		list_move(&p->mnt_hash, kill);
+	}
 
 	if (propagate)
 		propagate_umount(kill);
@@ -1694,6 +1718,7 @@ static int attach_recursive_mnt(struct vfsmount *source_mnt,
 	}
 
 	list_for_each_entry_safe(child, p, &tree_list, mnt_hash) {
+		per_cpu_flush_mnt(child);
 		list_del_init(&child->mnt_hash);
 		commit_tree(child);
 	}
@@ -2247,6 +2272,26 @@ long do_mount(char *dev_name, char *dir_name, char *type_page,
 	int retval = 0;
 	int mnt_flags = 0;
 
+	spin_lock(&flush_list_lock);
+	while (!list_empty(&flush_list)) {
+		struct per_cpu_vfsmount *p;	
+		struct vfsmount *mnt;
+		unsigned int minus;
+
+		p = list_first_entry(&flush_list, struct per_cpu_vfsmount, list);
+		list_del_init(&p->list);
+		spin_unlock(&flush_list_lock);
+		
+		mnt = p->mnt;
+		minus = p->count - 1;
+		if (minus)
+			atomic_sub(minus, &mnt->mnt_count);
+		p->count = 0;
+		real_mntput_no_expire(mnt);
+		spin_lock(&flush_list_lock);
+	}
+	spin_unlock(&flush_list_lock);
+
 	/* Discard magic */
 	if ((flags & MS_MGC_MSK) == MS_MGC_VAL)
 		flags &= ~MS_MGC_MSK;
@@ -2620,7 +2665,9 @@ void __init mnt_init(void)
                 spin_lock_init(&(per_cpu(mntlist, u).lock));
 		INIT_LIST_HEAD(&(per_cpu(mntlist, u).list));
 	}
-
+	spin_lock_init(&flush_list_lock);
+	INIT_LIST_HEAD(&flush_list);
+	
 	init_rwsem(&namespace_sem);
 
 	mnt_cache = kmem_cache_create("mnt_cache", sizeof(struct vfsmount),
