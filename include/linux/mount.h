@@ -54,8 +54,8 @@ struct per_cpu_vfsmount {
 	struct vfsmount *mnt;
 	unsigned int count;
 	unsigned int expiry_mark;
-	char pad[64 - sizeof(struct list_head) - 2*sizeof(unsigned int) - 
-		 sizeof(struct vfsmount *)];
+	unsigned int unhashed;
+	char __pad[0] __attribute__((aligned(64)));
 };
 
 struct vfsmount {

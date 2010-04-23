@@ -157,7 +157,7 @@ static inline int per_cpu_mntput_no_expire(struct vfsmount *mnt)
 	if (!spin_trylock(&l->lock))
 		return 0;
 
-	if (atomic_read(&per_cpu_flushing)) {
+	if (atomic_read(&per_cpu_flushing) || p->unhashed) {
                 spin_unlock(&l->lock);
                 return 0;
         }
@@ -226,8 +226,9 @@ static inline void per_cpu_flush_mnt(struct vfsmount *mnt)
 		p = per_cpu_ptr(mnt->mnt_per_cpu, c);
 		
 		spin_lock(&l->lock);
-		if (!list_empty(&p->list))
+		if (!list_empty(&p->list) && p->unhashed == 0)
 			list_move(&p->list, &flush_list);
+		p->unhashed = 1;
 		spin_unlock(&l->lock);
 	}
 	spin_unlock(&flush_list_lock);
@@ -2287,6 +2288,7 @@ long do_mount(char *dev_name, char *dir_name, char *type_page,
 		if (minus)
 			atomic_sub(minus, &mnt->mnt_count);
 		p->count = 0;
+		p->unhashed = 0;
 		real_mntput_no_expire(mnt);
 		spin_lock(&flush_list_lock);
 	}
