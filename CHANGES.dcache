@@ -1,0 +1,15 @@
+* Use a lock-free protocol for checking dentry matches in d_lookup.
+  This avoid contention on dentry->d_lock.
+* Use batch references counts for each dentry.  This avoids conention
+  on dentry->d_count.
+* Cache percpu allocations to avoid contention on the percpu
+  allocator.
+* You can (mostly) disable dcache optimizations:
+    # echo 0 > /proc/sys/fs/dentry
+  and re-enable:
+    # echo 1 > /proc/sys/fs/dentry
+* /proc/dentry-stats contains statistics that indicate how well the
+  optimizations perform.  If you noticed contention in the dcache
+  during benchmarking take two samples of /proc/dentry-stats while
+  your benchmark is running.  Look at fs/dcache.c to figure out what
+  they mean or send them to Silas.

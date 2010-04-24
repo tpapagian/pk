@@ -31,6 +31,9 @@ const struct file_operations generic_ro_fops = {
 
 EXPORT_SYMBOL(generic_ro_fops);
 
+/* Controlled by sysctl fs/enable_lseek_lock */
+int enable_lseek_lock;
+
 /**
  * generic_file_llseek_unlocked - lockless generic llseek implementation
  * @file:	file structure to seek on
@@ -47,7 +50,7 @@ generic_file_llseek_unlocked(struct file *file, loff_t offset, int origin)
 
 	switch (origin) {
 	case SEEK_END:
-		offset += inode->i_size;
+		offset += i_size_read(inode);
 		break;
 	case SEEK_CUR:
 		/*
@@ -88,10 +91,19 @@ EXPORT_SYMBOL(generic_file_llseek_unlocked);
 loff_t generic_file_llseek(struct file *file, loff_t offset, int origin)
 {
 	loff_t rval;
+	int lock = enable_lseek_lock;
 
-	mutex_lock(&file->f_dentry->d_inode->i_mutex);
+	/* XXX(Austin): Patches that remove this lock have been
+	 * summarily rejected because they make access to f_pos by
+	 * holders of the i_mutex lock non-atomic.  It's hard to say
+	 * if this actually matters.  f_pos atomicity is a complete
+	 * mess in general.
+	 */
+	if (lock)
+		mutex_lock(&file->f_dentry->d_inode->i_mutex);
 	rval = generic_file_llseek_unlocked(file, offset, origin);
-	mutex_unlock(&file->f_dentry->d_inode->i_mutex);
+	if (lock)
+		mutex_unlock(&file->f_dentry->d_inode->i_mutex);
 
 	return rval;
 }
