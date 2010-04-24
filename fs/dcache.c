@@ -44,7 +44,7 @@ static void real_dput(struct dentry *dentry);
 
 int dentry_per_cpu_enable = 1;
 static atomic_t per_cpu_flushing;
-struct mutex per_cpu_flush_mutex;
+static struct mutex per_cpu_flush_mutex;
 
 #define PER_CPU_DCOUNT	     64
 #define PER_CPU_DCOUNT_MAX   (PER_CPU_DCOUNT << 1)
