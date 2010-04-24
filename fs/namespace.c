@@ -34,6 +34,10 @@
 #include "pnode.h"
 #include "internal.h"
 
+#include <linux/proc_fs.h>
+
+#define CONFIG_VFSMOUNT_STATS
+
 #define HASH_SHIFT ilog2(PAGE_SIZE / sizeof(struct list_head))
 #define HASH_SIZE (1UL << HASH_SHIFT)
 
@@ -53,6 +57,254 @@ static struct rw_semaphore namespace_sem;
 /* /sys/fs */
 struct kobject *fs_kobj;
 EXPORT_SYMBOL_GPL(fs_kobj);
+
+#define PER_CPU_MNTCOUNT	     64
+#define PER_CPU_MNTCOUNT_MAX   	     (PER_CPU_MNTCOUNT << 1)
+
+static atomic_t per_cpu_flushing;
+static struct mutex per_cpu_flush_mutex;
+
+static inline void real_mntput_no_expire(struct vfsmount *mnt);
+
+struct mntlist {
+	struct list_head list;
+	spinlock_t lock;
+};
+static DEFINE_PER_CPU_ALIGNED(struct mntlist, mntlist);
+
+struct vfsmount_stats {
+	unsigned long hits;
+	unsigned long misses;
+	unsigned long timeout;
+	unsigned long duplicates;
+};
+static DEFINE_PER_CPU_ALIGNED(struct vfsmount_stats, vfsmount_stats);
+
+#ifdef CONFIG_VFSMOUNT_STATS
+static int vfsmount_stats_show(struct seq_file *m, void *v)
+{
+	struct vfsmount_stats *s;
+	unsigned int c;
+
+	for_each_possible_cpu(c) {
+		s = &per_cpu(vfsmount_stats, c);		
+		seq_printf(m, 
+			   "%u"
+			   " hits %lu"
+			   " misses %lu"
+			   " timeout %lu"
+			   " duplicates %lu"
+			   "\n", 
+			   c, 
+			   s->hits, 
+			   s->misses, 
+			   s->timeout, 
+			   s->duplicates); 
+	}
+
+        return 0;
+}
+
+static int vfsmount_stats_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, vfsmount_stats_show, NULL);
+}
+
+static const struct file_operations proc_vfsmount_stats_operations = {
+        .open           = vfsmount_stats_open,
+        .read           = seq_read,
+        .llseek         = seq_lseek,
+        .release        = single_release,
+};
+
+static int __init proc_vfsmount_stats_init(void)
+{
+        proc_create("vfsmount-stats", 0, NULL, &proc_vfsmount_stats_operations);
+        return 0;
+}
+module_init(proc_vfsmount_stats_init);
+#endif
+
+static inline int per_cpu_expiry_mark_xchg(struct vfsmount *mnt, unsigned int i)
+{
+	struct per_cpu_vfsmount *p;
+	unsigned int n;
+	int c;
+
+	n = ~0;
+	for_each_possible_cpu(c) {
+		p = per_cpu_ptr(mnt->mnt_per_cpu, c);
+		n &= xchg(&p->expiry_mark, i);
+	}
+
+	return n;
+}
+
+static inline int per_cpu_mntput_no_expire(struct vfsmount *mnt)
+{
+	struct per_cpu_vfsmount *p;
+	struct mntlist *l;
+	int c;
+
+	if (atomic_read(&mnt->mnt_count) <= 2)
+		return 0;
+
+	c = smp_processor_id();
+	p = per_cpu_ptr(mnt->mnt_per_cpu, c);
+	l = &per_cpu(mntlist, c);
+
+	if (!spin_trylock(&l->lock))
+		return 0;
+
+	if (atomic_read(&per_cpu_flushing)) {
+                spin_unlock(&l->lock);
+                return 0;
+        }
+
+	if (p->count) {
+		p->count++;
+		if (p->count > PER_CPU_MNTCOUNT_MAX) {
+			p->count -= PER_CPU_MNTCOUNT;
+			atomic_sub(PER_CPU_MNTCOUNT, &mnt->mnt_count);
+		}
+	} else {
+		BUG_ON(!list_empty(&p->list));
+		
+		/* We have one ref and we add PER_CPU_MNTCOUNT more */
+		p->count = PER_CPU_MNTCOUNT + 1;
+		atomic_add(PER_CPU_MNTCOUNT, &mnt->mnt_count);
+		list_add(&p->list, &l->list);
+	}
+
+	spin_unlock(&l->lock);
+
+	return 1;
+}
+
+static inline void per_cpu_flush(void)
+{
+	struct per_cpu_vfsmount *p;
+	unsigned int minus, c;
+	struct vfsmount *mnt;
+	struct mntlist *l;	
+
+	mutex_lock(&per_cpu_flush_mutex);
+	atomic_inc(&per_cpu_flushing);
+	
+	for_each_possible_cpu(c) {
+		l = &per_cpu(mntlist, c);
+
+		spin_lock(&l->lock);
+		while (!list_empty(&l->list)) {
+			p = list_first_entry(&l->list, struct per_cpu_vfsmount, list);
+			list_del_init(&p->list);
+
+			mnt = p->mnt;			
+			minus = p->count - 1;
+			if (minus)
+				atomic_sub(minus, &mnt->mnt_count);
+			p->count = 0;
+			spin_unlock(&l->lock);
+			real_mntput_no_expire(mnt);
+
+			spin_lock(&l->lock);
+		}
+		spin_unlock(&l->lock);
+	}
+
+	atomic_dec(&per_cpu_flushing);
+	mutex_unlock(&per_cpu_flush_mutex);
+}
+
+struct vfsmount *per_cpu_mntget(struct vfsmount *mnt)
+{
+	struct per_cpu_vfsmount *p;
+	struct vfsmount *found;
+	struct mntlist *l;	
+	int c;
+
+	found = NULL;
+
+	c = smp_processor_id();
+	l = &per_cpu(mntlist, c);	
+	p = per_cpu_ptr(mnt->mnt_per_cpu, c);
+
+	if (!spin_trylock(&l->lock))
+		return NULL;
+
+	if (p->count) {
+		p->count--;
+		found = mnt;
+		if (p->count == 0)
+			list_del_init(&p->list);
+	}
+
+	spin_unlock(&l->lock);
+	return found;
+}
+EXPORT_SYMBOL(per_cpu_mntget);
+
+static inline struct vfsmount *per_cpu_lookup_mnt(struct path *path)
+{
+	struct per_cpu_vfsmount *p;
+	struct vfsmount *found;
+	struct mntlist *l;	
+	unsigned int i;
+	int c;
+
+	c = smp_processor_id();
+	l = &per_cpu(mntlist, c);	
+
+	if (!spin_trylock(&l->lock))
+		return NULL;
+
+	found = NULL;
+
+	i = 0;
+	list_for_each_entry(p, &l->list, list) {
+		struct vfsmount *par = p->mnt;
+
+		if (i >= 16) {
+#ifdef CONFIG_VFSMOUNT_STATS
+			per_cpu(vfsmount_stats, c).timeout++;
+#endif
+			found = NULL;
+			goto done;
+		}
+		
+		if (par->mnt_parent == path->mnt && 
+		    par->mnt_mountpoint == path->dentry) 
+		{
+			if (found) {
+#ifdef CONFIG_VFSMOUNT_STATS
+				per_cpu(vfsmount_stats, c).duplicates++;
+#endif
+				found = NULL;
+				goto done;
+			}
+			found = par;
+		}
+		i++;
+	}
+
+done:
+	if (found) {
+#ifdef CONFIG_VFSMOUNT_STATS
+		per_cpu(vfsmount_stats, c).hits++;		
+#endif
+		p = per_cpu_ptr(found->mnt_per_cpu, c);
+		p->count--;
+		if (p->count == 0)
+			list_del_init(&p->list);
+	} else {
+#ifdef CONFIG_VFSMOUNT_STATS
+	    per_cpu(vfsmount_stats, c).misses++;		
+#endif
+	}
+
+	spin_unlock(&l->lock);
+	return found;
+}
 
 static inline unsigned long hash(struct vfsmount *mnt, struct dentry *dentry)
 {
@@ -129,7 +381,7 @@ struct vfsmount *alloc_vfsmnt(const char *name)
 {
 	struct vfsmount *mnt = kmem_cache_zalloc(mnt_cache, GFP_KERNEL);
 	if (mnt) {
-		int err;
+		int err, c;
 
 		err = mnt_alloc_id(mnt);
 		if (err)
@@ -150,6 +402,7 @@ struct vfsmount *alloc_vfsmnt(const char *name)
 		INIT_LIST_HEAD(&mnt->mnt_share);
 		INIT_LIST_HEAD(&mnt->mnt_slave_list);
 		INIT_LIST_HEAD(&mnt->mnt_slave);
+
 #ifdef CONFIG_SMP
 		mnt->mnt_writers = alloc_percpu(int);
 		if (!mnt->mnt_writers)
@@ -157,9 +410,24 @@ struct vfsmount *alloc_vfsmnt(const char *name)
 #else
 		mnt->mnt_writers = 0;
 #endif
+
+		mnt->mnt_per_cpu = alloc_percpu(struct per_cpu_vfsmount);
+		if (!mnt->mnt_per_cpu)
+			goto out_free_writers;
+		for_each_possible_cpu(c) {
+			struct per_cpu_vfsmount *p;
+			p = per_cpu_ptr(mnt->mnt_per_cpu, c);
+			INIT_LIST_HEAD(&p->list);
+			p->count = 0;
+			p->expiry_mark = 0;
+			p->mnt = mnt;
+		}
+
 	}
 	return mnt;
 
+out_free_writers:
+	free_percpu(mnt->mnt_writers);
 #ifdef CONFIG_SMP
 out_free_devname:
 	kfree(mnt->mnt_devname);
@@ -405,6 +673,7 @@ void free_vfsmnt(struct vfsmount *mnt)
 	free_percpu(mnt->mnt_writers);
 #endif
 	kmem_cache_free(mnt_cache, mnt);
+	free_percpu(mnt->mnt_per_cpu);
 }
 
 /*
@@ -439,6 +708,10 @@ struct vfsmount *__lookup_mnt(struct vfsmount *mnt, struct dentry *dentry,
 struct vfsmount *lookup_mnt(struct path *path)
 {
 	struct vfsmount *child_mnt;
+
+	if ((child_mnt = per_cpu_lookup_mnt(path)))
+		return child_mnt;
+
 	spin_lock(&vfsmount_lock);
 	if ((child_mnt = __lookup_mnt(path->mnt, path->dentry, 1)))
 		mntget(child_mnt);
@@ -615,7 +888,7 @@ static inline void __mntput(struct vfsmount *mnt)
 	deactivate_super(sb);
 }
 
-void mntput_no_expire(struct vfsmount *mnt)
+static inline void real_mntput_no_expire(struct vfsmount *mnt)
 {
 repeat:
 	if (atomic_dec_and_lock(&mnt->mnt_count, &vfsmount_lock)) {
@@ -631,6 +904,13 @@ repeat:
 		security_sb_umount_close(mnt);
 		goto repeat;
 	}
+}
+
+void mntput_no_expire(struct vfsmount *mnt)
+{
+	if (per_cpu_mntput_no_expire(mnt))
+		return;
+	real_mntput_no_expire(mnt);
 }
 
 EXPORT_SYMBOL(mntput_no_expire);
@@ -949,6 +1229,8 @@ int may_umount_tree(struct vfsmount *mnt)
 	int minimum_refs = 0;
 	struct vfsmount *p;
 
+	per_cpu_flush();
+
 	spin_lock(&vfsmount_lock);
 	for (p = mnt; p; p = next_mnt(p, mnt)) {
 		actual_refs += atomic_read(&p->mnt_count);
@@ -1050,6 +1332,8 @@ static int do_umount(struct vfsmount *mnt, int flags)
 	if (retval)
 		return retval;
 
+	per_cpu_flush();
+
 	/*
 	 * Allow userspace to request a mountpoint be expired rather than
 	 * unmounting unconditionally. Unmount only happens if:
@@ -1063,9 +1347,15 @@ static int do_umount(struct vfsmount *mnt, int flags)
 
 		if (atomic_read(&mnt->mnt_count) != 2)
 			return -EBUSY;
+		
 
+#if 1
+		if (!per_cpu_expiry_mark_xchg(mnt, 1))
+			return -EAGAIN;
+#else
 		if (!xchg(&mnt->mnt_expiry_mark, 1))
 			return -EAGAIN;
+#endif
 	}
 
 	/*
@@ -1771,9 +2061,15 @@ void mark_mounts_for_expiry(struct list_head *mounts)
 	 *   cleared by mntput())
 	 */
 	list_for_each_entry_safe(mnt, next, mounts, mnt_expire) {
+#if 1
+		if (!per_cpu_expiry_mark_xchg(mnt, 1) ||
+			propagate_mount_busy(mnt, 1))
+			continue;
+#else
 		if (!xchg(&mnt->mnt_expiry_mark, 1) ||
 			propagate_mount_busy(mnt, 1))
 			continue;
+#endif
 		list_move(&mnt->mnt_expire, &graveyard);
 	}
 	while (!list_empty(&graveyard)) {
@@ -2322,6 +2618,12 @@ void __init mnt_init(void)
 {
 	unsigned u;
 	int err;
+
+	for_each_possible_cpu(u) {
+                spin_lock_init(&(per_cpu(mntlist, u).lock));
+		INIT_LIST_HEAD(&(per_cpu(mntlist, u).list));
+	}
+	mutex_init(&per_cpu_flush_mutex);
 
 	init_rwsem(&namespace_sem);
 

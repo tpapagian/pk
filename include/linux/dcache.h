@@ -81,13 +81,23 @@ full_name_hash(const unsigned char *name, unsigned int len)
  * large memory footprint increase).
  */
 #ifdef CONFIG_64BIT
-#define DNAME_INLINE_LEN_MIN 32 /* 192 bytes */
+#define DNAME_INLINE_LEN_MIN 16 /* 192 bytes */
 #else
-#define DNAME_INLINE_LEN_MIN 40 /* 128 bytes */
+#define DNAME_INLINE_LEN_MIN 24 /* 128 bytes */
 #endif
+
+struct per_cpu_dentry {
+	unsigned int count;
+	struct list_head list;
+	struct dentry *dentry;
+	struct per_cpu_dentry __percpu *base;
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+};
 
 struct dentry {
 	atomic_t d_count;
+	atomic_t d_gen;
+
 	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
 	int d_mounted;
@@ -115,6 +125,8 @@ struct dentry {
 	const struct dentry_operations *d_op;
 	struct super_block *d_sb;	/* The root of the dentry tree */
 	void *d_fsdata;			/* fs-specific data */
+	
+	struct per_cpu_dentry __percpu *d_per_cpu;
 
 	unsigned char d_iname[DNAME_INLINE_LEN_MIN];	/* small names */
 };
@@ -329,10 +341,15 @@ extern char *dentry_path(struct dentry *, char *, int);
  *	needs and they take necessary precautions) you should hold dcache_lock
  *	and call dget_locked() instead of dget().
  */
+
+extern struct dentry *per_cpu_dget(struct dentry *dentry);
  
 static inline struct dentry *dget(struct dentry *dentry)
 {
 	if (dentry) {
+		if (per_cpu_dget(dentry))
+			return dentry;
+
 		BUG_ON(!atomic_read(&dentry->d_count));
 		atomic_inc(&dentry->d_count);
 	}

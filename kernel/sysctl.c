@@ -76,6 +76,7 @@
 
 
 #if defined(CONFIG_SYSCTL)
+extern int dentry_per_cpu_enable;
 
 /* External variables not in a header file. */
 extern int sysctl_overcommit_memory;
@@ -102,6 +103,7 @@ extern int sysctl_nr_trim_pages;
 #ifdef CONFIG_BLOCK
 extern int blk_iopoll_enabled;
 #endif
+extern int enable_lseek_lock;
 
 /* Constants used for minimum and  maximum */
 #ifdef CONFIG_DETECT_SOFTLOCKUP
@@ -1330,6 +1332,15 @@ static struct ctl_table fs_table[] = {
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},
+        {
+		.procname       = "dentry-per-cpu",
+		.data           = &dentry_per_cpu_enable,
+		.maxlen         = sizeof(dentry_per_cpu_enable),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = &zero,
+		.extra2         = &one,
+        },
 	{
 		.procname	= "overflowuid",
 		.data		= &fs_overflowuid,
@@ -1423,6 +1434,15 @@ static struct ctl_table fs_table[] = {
 		.child		= binfmt_misc_table,
 	},
 #endif
+	{
+		.procname	= "enable_lseek_lock",
+		.data		= &enable_lseek_lock,
+		.maxlen		= sizeof(enable_lseek_lock),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero,
+		.extra2		= &two,
+	},
 /*
  * NOTE: do not add new entries to this table unless you have read
  * Documentation/sysctl/ctl_unnumbered.txt
