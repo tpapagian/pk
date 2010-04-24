@@ -355,7 +355,7 @@ static inline int per_cpu_dentry_insert(struct dentry *dentry)
 		return 0;
 	}
 
-	if (atomic_read(&per_cpu_flushing) || d_unhashed(dentry)) {
+	if (atomic_read(&per_cpu_flushing)) {
 		spin_unlock(&t->lock);
 		return 0;
 	}
