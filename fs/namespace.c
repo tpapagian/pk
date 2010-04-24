@@ -62,6 +62,7 @@ EXPORT_SYMBOL_GPL(fs_kobj);
 #define PER_CPU_MNTCOUNT_MAX   	     (PER_CPU_MNTCOUNT << 1)
 
 static atomic_t per_cpu_flushing;
+static struct mutex per_cpu_flush_mutex;
 
 static inline void real_mntput_no_expire(struct vfsmount *mnt);
 
@@ -187,6 +188,7 @@ static inline void per_cpu_flush(void)
 	struct vfsmount *mnt;
 	struct mntlist *l;	
 
+	mutex_lock(&per_cpu_flush_mutex);
 	atomic_inc(&per_cpu_flushing);
 	
 	for_each_possible_cpu(c) {
@@ -196,14 +198,14 @@ static inline void per_cpu_flush(void)
 		while (!list_empty(&l->list)) {
 			p = list_first_entry(&l->list, struct per_cpu_vfsmount, list);
 			list_del_init(&p->list);
-			spin_unlock(&l->lock);
 
 			mnt = p->mnt;			
 			minus = p->count - 1;
 			if (minus)
 				atomic_sub(minus, &mnt->mnt_count);
-			real_mntput_no_expire(mnt);
 			p->count = 0;
+			spin_unlock(&l->lock);
+			real_mntput_no_expire(mnt);
 
 			spin_lock(&l->lock);
 		}
@@ -211,6 +213,7 @@ static inline void per_cpu_flush(void)
 	}
 
 	atomic_dec(&per_cpu_flushing);
+	mutex_unlock(&per_cpu_flush_mutex);
 }
 
 struct vfsmount *per_cpu_mntget(struct vfsmount *mnt)
@@ -2620,6 +2623,7 @@ void __init mnt_init(void)
                 spin_lock_init(&(per_cpu(mntlist, u).lock));
 		INIT_LIST_HEAD(&(per_cpu(mntlist, u).list));
 	}
+	mutex_init(&per_cpu_flush_mutex);
 
 	init_rwsem(&namespace_sem);
 
