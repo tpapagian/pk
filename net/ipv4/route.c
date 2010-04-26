@@ -115,6 +115,9 @@
 
 #define RT_GC_TIMEOUT (300*HZ)
 
+/* Controlled by sysctl fs/enable_rt_peer_lock */
+int enable_rt_peer_lock;
+
 static int ip_rt_max_size;
 static int ip_rt_gc_timeout __read_mostly	= RT_GC_TIMEOUT;
 static int ip_rt_gc_interval __read_mostly	= 60 * HZ;
