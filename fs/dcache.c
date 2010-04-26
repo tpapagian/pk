@@ -469,11 +469,30 @@ static struct kmem_cache *dentry_cache __read_mostly;
 static unsigned int d_hash_mask __read_mostly;
 static unsigned int d_hash_shift __read_mostly;
 static struct hlist_head *dentry_hashtable __read_mostly;
+static struct percpu_counter nr_dentry;
 
 /* Statistics gathering. */
 struct dentry_stat_t dentry_stat = {
 	.age_limit = 45,
 };
+
+/*
+ * Handle nr_dentry sysctl
+ */
+#if defined(CONFIG_SYSCTL) && defined(CONFIG_PROC_FS)
+int proc_nr_dentry(ctl_table *table, int write,
+		   void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	dentry_stat.nr_dentry = percpu_counter_sum_positive(&nr_dentry);
+	return proc_dointvec(table, write, buffer, lenp, ppos);
+}
+#else
+int proc_nr_dentry(ctl_table *table, int write,
+		   void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return -ENOSYS;
+}
+#endif
 
 static void __d_free(struct dentry *dentry)
 {
@@ -491,8 +510,7 @@ static void d_callback(struct rcu_head *head)
 }
 
 /*
- * no dcache_lock, please.  The caller must decrement dentry_stat.nr_dentry
- * inside dcache_lock.
+ * no dcache_lock, please.
  */
 static void d_free(struct dentry *dentry)
 {
@@ -503,6 +521,7 @@ static void d_free(struct dentry *dentry)
 		__d_free(dentry);
 	else
 		call_rcu(&dentry->d_u.d_rcu, d_callback);
+	percpu_counter_dec(&nr_dentry);
 }
 
 /*
@@ -581,7 +600,6 @@ static struct dentry *d_kill(struct dentry *dentry)
 	struct dentry *parent;
 
 	list_del(&dentry->d_u.d_child);
-	dentry_stat.nr_dentry--;	/* For d_free, below */
 	/*drops the locks, at that point nobody can reach this dentry */
 	dentry_iput(dentry);
 	if (IS_ROOT(dentry))
@@ -1042,7 +1060,6 @@ EXPORT_SYMBOL(shrink_dcache_sb);
 static void shrink_dcache_for_umount_subtree(struct dentry *dentry)
 {
 	struct dentry *parent;
-	unsigned detached = 0;
 
 	BUG_ON(!IS_ROOT(dentry));
 
@@ -1101,7 +1118,6 @@ static void shrink_dcache_for_umount_subtree(struct dentry *dentry)
 			}
 
 			list_del(&dentry->d_u.d_child);
-			detached++;
 
 			inode = dentry->d_inode;
 			if (inode) {
@@ -1119,7 +1135,7 @@ static void shrink_dcache_for_umount_subtree(struct dentry *dentry)
 			 * otherwise we ascend to the parent and move to the
 			 * next sibling if there is one */
 			if (!parent)
-				goto out;
+				return;
 
 			dentry = parent;
 
@@ -1128,11 +1144,6 @@ static void shrink_dcache_for_umount_subtree(struct dentry *dentry)
 		dentry = list_entry(dentry->d_subdirs.next,
 				    struct dentry, d_u.d_child);
 	}
-out:
-	/* several dentries were freed, need to correct nr_dentry */
-	spin_lock(&dcache_lock);
-	dentry_stat.nr_dentry -= detached;
-	spin_unlock(&dcache_lock);
 }
 
 /*
@@ -1393,8 +1404,6 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	dentry->d_flags = DCACHE_UNHASHED;
 	spin_lock_init(&dentry->d_lock);
 	dentry->d_inode = NULL;
-	dentry->d_parent = NULL;
-	dentry->d_sb = NULL;
 	dentry->d_op = NULL;
 	dentry->d_fsdata = NULL;
 	dentry->d_mounted = 0;
@@ -1406,16 +1415,15 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	if (parent) {
 		dentry->d_parent = dget(parent);
 		dentry->d_sb = parent->d_sb;
+		spin_lock(&dcache_lock);
+		list_add(&dentry->d_u.d_child, &parent->d_subdirs);
+		spin_unlock(&dcache_lock);
 	} else {
+		dentry->d_parent = NULL;
+		dentry->d_sb = NULL;
 		INIT_LIST_HEAD(&dentry->d_u.d_child);
 	}
-
-	spin_lock(&dcache_lock);
-	if (parent)
-		list_add(&dentry->d_u.d_child, &parent->d_subdirs);
-	dentry_stat.nr_dentry++;
-	spin_unlock(&dcache_lock);
-
+	percpu_counter_inc(&nr_dentry);
 	return dentry;
 }
 EXPORT_SYMBOL(d_alloc);
@@ -2788,6 +2796,7 @@ static void __init dcache_init(void)
 {
 	int loop;
 
+	percpu_counter_init(&nr_dentry, 0);
 	/* 
 	 * A constructor could be added for stable state like the lists,
 	 * but it is probably not worth it because of the cache nature
