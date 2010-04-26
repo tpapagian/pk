@@ -102,6 +102,7 @@ extern int sysctl_nr_trim_pages;
 #ifdef CONFIG_BLOCK
 extern int blk_iopoll_enabled;
 #endif
+extern int enable_skb_remote_alloc;
 
 /* Constants used for minimum and  maximum */
 #ifdef CONFIG_DETECT_SOFTLOCKUP
@@ -1269,6 +1270,15 @@ static struct ctl_table vm_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero,
 		.extra2		= &one,
+	},
+	{
+		.procname       = "enable_skb_remote_alloc",
+		.data           = &enable_skb_remote_alloc,
+		.maxlen         = sizeof(enable_skb_remote_alloc),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = &zero,
+		.extra2         = &two,
 	},
 #endif
 
