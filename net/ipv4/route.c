@@ -1295,6 +1295,8 @@ void rt_bind_peer(struct rtable *rt, int create)
 	struct inet_peer *peer;
 
 	peer = inet_getpeer(rt->rt_dst, create);
+	if (!enable_rt_peer_lock && !peer)
+		return;
 
 	spin_lock_bh(&rt_peer_lock);
 	if (rt->peer == NULL) {
