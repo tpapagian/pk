@@ -37,19 +37,12 @@ static struct kmem_cache *filp_cachep __read_mostly;
 
 static struct percpu_counter nr_files __cacheline_aligned_in_smp;
 
-static inline void file_free_rcu(struct rcu_head *head)
-{
-	struct file *f = container_of(head, struct file, f_u.fu_rcuhead);
-
-	put_cred(f->f_cred);
-	kmem_cache_free(filp_cachep, f);
-}
-
 static inline void file_free(struct file *f)
 {
 	percpu_counter_dec(&nr_files);
 	file_check_state(f);
-	call_rcu(&f->f_u.fu_rcuhead, file_free_rcu);
+	put_cred(f->f_cred);
+	kmem_cache_free(filp_cachep, f);
 }
 
 /*
@@ -279,6 +272,14 @@ struct file *fget(unsigned int fd)
 			rcu_read_unlock();
 			return NULL;
 		}
+		/*
+		 * Now we have a stable reference to an object.
+		 * Check if other threads freed file and re-allocated it.
+		 */
+		if (unlikely(file != fcheck_files(files, fd))) {
+			put_filp(file);
+			file = NULL;
+		}
 	}
 	rcu_read_unlock();
 
@@ -306,9 +307,19 @@ struct file *fget_light(unsigned int fd, int *fput_needed)
 		rcu_read_lock();
 		file = fcheck_files(files, fd);
 		if (file) {
-			if (atomic_long_inc_not_zero(&file->f_count))
+			if (atomic_long_inc_not_zero(&file->f_count)) {
 				*fput_needed = 1;
-			else
+				/*
+				 * Now we have a stable reference to an object.
+				 * Check if other threads freed this file and
+				 * re-allocated it.
+				 */
+				if (unlikely(file != fcheck_files(files, fd))) {
+					*fput_needed = 0;
+					put_filp(file);
+					file = NULL;
+				}
+			} else
 				/* Didn't get the reference, someone's freed */
 				file = NULL;
 		}
@@ -428,7 +439,8 @@ void __init files_init(unsigned long mempages)
 	int n; 
 
 	filp_cachep = kmem_cache_create("filp", sizeof(struct file), 0,
-			SLAB_HWCACHE_ALIGN | SLAB_PANIC, NULL);
+			SLAB_HWCACHE_ALIGN | SLAB_DESTROY_BY_RCU | SLAB_PANIC,
+			NULL);
 
 	/*
 	 * One file with associated inode and dcache is very roughly 1K.

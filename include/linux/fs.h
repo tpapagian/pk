@@ -913,13 +913,8 @@ static inline int ra_has_index(struct file_ra_state *ra, pgoff_t index)
 #define FILE_MNT_WRITE_RELEASED	2
 
 struct file {
-	/*
-	 * fu_list becomes invalid after file_free is called and queued via
-	 * fu_rcuhead for RCU freeing
-	 */
 	union {
 		struct list_head	fu_list;
-		struct rcu_head 	fu_rcuhead;
 	} f_u;
 	struct smp_list		*f_sb_list;
 	struct path		f_path;

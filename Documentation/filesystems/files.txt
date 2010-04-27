@@ -78,13 +78,28 @@ the fdtable structure -
    that look-up may race with the last put() operation on the
    file structure. This is avoided using atomic_long_inc_not_zero()
    on ->f_count :
+   As file structures are allocated with SLAB_DESTROY_BY_RCU,
+   they can also be freed before a RCU grace period, and reused,
+   but still as a struct file.
+   It is necessary to check again after getting
+   a stable reference (ie after atomic_long_inc_not_zero()),
+   that fcheck_files(files, fd) points to the same file.
 
 	rcu_read_lock();
 	file = fcheck_files(files, fd);
 	if (file) {
-		if (atomic_long_inc_not_zero(&file->f_count))
+		if (atomic_long_inc_not_zero(&file->f_count)) {
 			*fput_needed = 1;
-		else
+			/*
+			 * Now we have a stable reference to an object.
+			 * Check if other threads freed file and reallocated it.
+			 */
+			if (file != fcheck_files(files, fd)) {
+				*fput_needed = 0;
+				put_filp(file);
+				file = NULL;
+			}
+		} else
 		/* Didn't get the reference, someone's freed */
 			file = NULL;
 	}
@@ -95,6 +110,8 @@ the fdtable structure -
    atomic_long_inc_not_zero() detects if refcounts is already zero or
    goes to zero during increment. If it does, we fail
    fget()/fget_light().
+   The second call to fcheck_files(files, fd) checks that this filp
+   was not freed, then reused by an other thread.
 
 6. Since both fdtable and file structures can be looked up
    lock-free, they must be installed using rcu_assign_pointer()
