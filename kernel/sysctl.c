@@ -76,9 +76,6 @@
 
 
 #if defined(CONFIG_SYSCTL)
-/* skb-local-alloc switch */
-extern int enable_skb_remote_alloc;
-
 /* External variables not in a header file. */
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
@@ -94,6 +91,8 @@ extern int pid_max;
 extern int min_free_kbytes;
 extern int pid_max_min, pid_max_max;
 extern int sysctl_drop_caches;
+/* skb-local-alloc switch */
+extern int enable_skb_remote_alloc;
 extern int percpu_pagelist_fraction;
 extern int compat_log;
 extern int latencytop_enabled;
