@@ -9,8 +9,6 @@
 #include <linux/limits.h>
 #include <linux/ioctl.h>
 
-#define KERNEL_HAS_IPUT_SINGLE
-
 /*
  * It's silly to have NR_OPEN bigger than NR_FILE, but you can change
  * the file limit at runtime and only root can increase the per-process
@@ -2187,6 +2185,7 @@ static inline struct inode *new_inode_single(struct super_block *sb)
 	return __new_inode(sb, 1);
 }
 extern void iput_single(struct inode *);
+#define KERNEL_HAS_IPUT_SINGLE
 
 extern void __insert_inode_hash(struct inode *, unsigned long hashval);
 extern void remove_inode_hash(struct inode *);
