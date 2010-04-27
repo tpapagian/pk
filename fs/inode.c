@@ -269,6 +269,14 @@ void destroy_inode(struct inode *inode)
 		kmem_cache_free(inode_cachep, (inode));
 }
 
+void iput_single(struct inode *inode)
+{
+	if (atomic_dec_and_test(&inode->i_count)) {
+		destroy_inode(inode);
+		percpu_counter_dec(&nr_inodes);
+	}
+}
+
 /*
  * These are initializations that only need to be done
  * once, because the fields are idempotent across use
@@ -685,8 +693,9 @@ static int last_ino_get(void)
 #endif
 
 /**
- *	new_inode 	- obtain an inode
+ *	__new_inode 	- obtain an inode
  *	@sb: superblock
+ *	@single: if true, dont link new inode in a list	
  *
  *	Allocates a new inode for given superblock. The default gfp_mask
  *	for allocations related to inode->i_mapping is GFP_HIGHUSER_MOVABLE.
@@ -696,7 +705,7 @@ static int last_ino_get(void)
  *	newly created inode's mapping
  *
  */
-struct inode *new_inode(struct super_block *sb)
+struct inode *__new_inode(struct super_block *sb, int single)
 {
 	/*
 	 * On a 32bit, non LFS stat() call, glibc will generate an EOVERFLOW
@@ -705,19 +714,23 @@ struct inode *new_inode(struct super_block *sb)
 	 */
 	struct inode *inode;
 
-	spin_lock_prefetch(&inode_lock);
-
 	inode = alloc_inode(sb);
 	if (inode) {
 		inode->i_state = 0;
 		inode->i_ino = last_ino_get();
-		spin_lock(&inode_lock);
-		__inode_add_to_lists(sb, NULL, inode);
-		spin_unlock(&inode_lock);
+		if (single) {
+			percpu_counter_inc(&nr_inodes);
+  			INIT_LIST_HEAD(&inode->i_list);
+  			INIT_LIST_HEAD(&inode->i_sb_list);
+ 		} else {
+			spin_lock(&inode_lock);
+			__inode_add_to_lists(sb, NULL, inode);
+			spin_unlock(&inode_lock);
+		}
 	}
 	return inode;
 }
-EXPORT_SYMBOL(new_inode);
+EXPORT_SYMBOL(__new_inode);
 
 void unlock_new_inode(struct inode *inode)
 {
