@@ -623,7 +623,11 @@ static void dput_single(struct dentry *dentry)
 		return;
 	inode = dentry->d_inode;
 	if (inode)
-		iput(inode);
+#ifdef KERNEL_HAS_IPUT_SINGLE
+	    iput_single(inode);
+#else
+	    iput(inode);
+#endif
 	d_free(dentry);
 }
 
