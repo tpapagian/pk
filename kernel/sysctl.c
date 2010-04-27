@@ -76,6 +76,8 @@
 
 
 #if defined(CONFIG_SYSCTL)
+/* skb-local-alloc switch */
+extern int enable_skb_remote_alloc;
 
 /* External variables not in a header file. */
 extern int sysctl_overcommit_memory;
@@ -102,7 +104,6 @@ extern int sysctl_nr_trim_pages;
 #ifdef CONFIG_BLOCK
 extern int blk_iopoll_enabled;
 #endif
-extern int enable_skb_remote_alloc;
 
 /* Constants used for minimum and  maximum */
 #ifdef CONFIG_DETECT_SOFTLOCKUP
@@ -1271,6 +1272,7 @@ static struct ctl_table vm_table[] = {
 		.extra1		= &zero,
 		.extra2		= &one,
 	},
+#endif
 	{
 		.procname       = "enable_skb_remote_alloc",
 		.data           = &enable_skb_remote_alloc,
@@ -1280,7 +1282,6 @@ static struct ctl_table vm_table[] = {
 		.extra1         = &zero,
 		.extra2         = &two,
 	},
-#endif
 
 /*
  * NOTE: do not add new entries to this table unless you have read
