@@ -103,8 +103,32 @@ static DECLARE_RWSEM(iprune_sem);
  * Statistics gathering..
  */
 struct inodes_stat_t inodes_stat;
+static struct percpu_counter nr_inodes;
 
 static struct kmem_cache *inode_cachep __read_mostly;
+
+int get_nr_inodes(void)
+{
+	return percpu_counter_sum_positive(&nr_inodes);
+}
+
+/*
+ * Handle nr_dentry sysctl
+ */
+#if defined(CONFIG_SYSCTL) && defined(CONFIG_PROC_FS)
+int proc_nr_inodes(ctl_table *table, int write,
+		   void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	inodes_stat.nr_inodes = get_nr_inodes();
+	return proc_dointvec(table, write, buffer, lenp, ppos);
+}
+#else
+int proc_nr_inodes(ctl_table *table, int write,
+		   void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return -ENOSYS;
+}
+#endif
 
 static void wake_up_inode(struct inode *inode)
 {
@@ -353,9 +377,7 @@ static void dispose_list(struct list_head *head)
 		destroy_inode(inode);
 		nr_disposed++;
 	}
-	spin_lock(&inode_lock);
-	inodes_stat.nr_inodes -= nr_disposed;
-	spin_unlock(&inode_lock);
+	percpu_counter_sub(&nr_inodes, nr_disposed);
 }
 
 /*
@@ -603,7 +625,7 @@ static inline void
 __inode_add_to_lists(struct super_block *sb, struct hlist_head *head,
 			struct inode *inode)
 {
-	inodes_stat.nr_inodes++;
+	percpu_counter_inc(&nr_inodes);
 	list_add(&inode->i_list, &inode_in_use);
 	list_add(&inode->i_sb_list, &sb->s_inodes);
 	if (head)
@@ -1202,8 +1224,8 @@ void generic_delete_inode(struct inode *inode)
 	list_del_init(&inode->i_sb_list);
 	WARN_ON(inode->i_state & I_NEW);
 	inode->i_state |= I_FREEING;
-	inodes_stat.nr_inodes--;
 	spin_unlock(&inode_lock);
+	percpu_counter_dec(&nr_inodes);
 
 	security_inode_delete(inode);
 
@@ -1262,8 +1284,8 @@ int generic_detach_inode(struct inode *inode)
 	list_del_init(&inode->i_sb_list);
 	WARN_ON(inode->i_state & I_NEW);
 	inode->i_state |= I_FREEING;
-	inodes_stat.nr_inodes--;
 	spin_unlock(&inode_lock);
+	percpu_counter_dec(&nr_inodes);
 	return 1;
 }
 EXPORT_SYMBOL_GPL(generic_detach_inode);
@@ -1564,6 +1586,7 @@ void __init inode_init(void)
 {
 	int loop;
 
+	percpu_counter_init(&nr_inodes, 0);
 	/* inode slab cache */
 	inode_cachep = kmem_cache_create("inode_cache",
 					 sizeof(struct inode),
