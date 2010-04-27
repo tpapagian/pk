@@ -77,6 +77,10 @@
 
 #if defined(CONFIG_SYSCTL)
 
+
+/* rt_peer_lock switch */
+extern int enable_rt_peer_lock;
+
 /* External variables not in a header file. */
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
@@ -102,11 +106,6 @@ extern int sysctl_nr_trim_pages;
 #ifdef CONFIG_BLOCK
 extern int blk_iopoll_enabled;
 #endif
-
-
-
-
-extern int enable_rt_peer_lock;
 
 /* Constants used for minimum and  maximum */
 #ifdef CONFIG_DETECT_SOFTLOCKUP
