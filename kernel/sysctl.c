@@ -76,8 +76,6 @@
 
 
 #if defined(CONFIG_SYSCTL)
-extern int dentry_per_cpu_enable;
-
 /* External variables not in a header file. */
 extern int sysctl_overcommit_memory;
 extern int sysctl_overcommit_ratio;
@@ -194,6 +192,8 @@ extern struct ctl_table epoll_table[];
 #ifdef HAVE_ARCH_PICK_MMAP_LAYOUT
 int sysctl_legacy_va_layout;
 #endif
+
+extern int dentry_per_cpu_enable;
 
 /* The default sysctl tables: */
 
