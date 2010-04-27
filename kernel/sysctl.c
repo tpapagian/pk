@@ -102,6 +102,10 @@ extern int sysctl_nr_trim_pages;
 #ifdef CONFIG_BLOCK
 extern int blk_iopoll_enabled;
 #endif
+
+
+
+
 extern int enable_rt_peer_lock;
 
 /* Constants used for minimum and  maximum */
@@ -354,6 +358,15 @@ static struct ctl_table kern_table[] = {
 		.maxlen		= sizeof(unsigned int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname       = "enable_rt_peer_lock",
+		.data           = &enable_rt_peer_lock,
+		.maxlen         = sizeof(enable_rt_peer_lock),
+		.mode           = 0644,
+		.proc_handler   = proc_dointvec_minmax,
+		.extra1         = &zero,
+		.extra2         = &two,
 	},
 #ifdef CONFIG_PROVE_LOCKING
 	{
@@ -1424,15 +1437,6 @@ static struct ctl_table fs_table[] = {
 		.child		= binfmt_misc_table,
 	},
 #endif
-	{
-		.procname       = "enable_rt_peer_lock",
-		.data           = &enable_rt_peer_lock,
-		.maxlen         = sizeof(enable_rt_peer_lock),
-		.mode           = 0644,
-		.proc_handler   = proc_dointvec_minmax,
-		.extra1         = &zero,
-		.extra2         = &two,
-	},
 /*
  * NOTE: do not add new entries to this table unless you have read
  * Documentation/sysctl/ctl_unnumbered.txt
