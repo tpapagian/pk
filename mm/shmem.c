@@ -106,6 +106,8 @@ enum sgp_type {
 	SGP_WRITE,	/* may exceed i_size, may allocate page */
 };
 
+#define ORDER 4
+
 #ifdef CONFIG_TMPFS
 static unsigned long shmem_default_max_blocks(void)
 {
@@ -228,6 +230,14 @@ static struct backing_dev_info shmem_backing_dev_info  __read_mostly = {
 
 static LIST_HEAD(shmem_swaplist);
 static DEFINE_MUTEX(shmem_swaplist_mutex);
+
+struct batch_page {
+  struct page *end_page;
+  struct page *next_page;
+  spinlock_t batch_page_lock;
+};
+
+DEFINE_PER_CPU(struct batch_page, batch);
 
 static void shmem_free_blocks(struct inode *inode, long pages)
 {
@@ -1163,6 +1173,9 @@ static struct page *shmem_swapin(swp_entry_t entry, gfp_t gfp,
 	return page;
 }
 
+
+extern struct page *alloc_pages_vma(gfp_t gfp, struct vm_area_struct *vma, unsigned long addr, int order);
+
 static struct page *shmem_alloc_page(gfp_t gfp,
 			struct shmem_inode_info *info, unsigned long idx)
 {
@@ -1178,6 +1191,38 @@ static struct page *shmem_alloc_page(gfp_t gfp,
 	 * alloc_page_vma() will drop the shared policy reference
 	 */
 	return alloc_page_vma(gfp, &pvma, 0);
+}
+static struct page *shmem_alloc_pages(gfp_t gfp,
+				      struct shmem_inode_info *info, unsigned long idx, int *new)
+{
+	struct vm_area_struct pvma;
+	struct page *filepage;
+	struct batch_page *b = &per_cpu(batch, smp_processor_id());
+
+	spin_lock(&(b->batch_page_lock));
+	if (b->next_page < b->end_page ) {
+	  filepage = b->next_page;
+	  b->next_page = b->next_page + 1;
+	  spin_unlock(&(b->batch_page_lock));
+	} else {
+	  spin_unlock(&(b->batch_page_lock));
+	  /* Create a pseudo vma that just contains the policy */
+	  pvma.vm_start = 0;
+	  pvma.vm_pgoff = idx;
+	  pvma.vm_ops = NULL;
+	  pvma.vm_policy = mpol_shared_policy_lookup(&info->policy, idx);
+
+	  /*
+	   * alloc_page_vma() will drop the shared policy reference
+	   */
+	  filepage = alloc_pages_vma(gfp, &pvma, 0, ORDER);
+	  *new = 0;
+	  spin_lock(&(b->batch_page_lock));
+	  b->end_page = filepage + (1 << ORDER);
+	  b->next_page = filepage + 1;
+	  spin_unlock(&(b->batch_page_lock));
+	}
+	return filepage;
 }
 #else /* !CONFIG_NUMA */
 #ifdef CONFIG_TMPFS
@@ -1417,9 +1462,11 @@ repeat:
 
 		if (!filepage) {
 			int ret;
+			int new = 0;
 
 			spin_unlock(&info->lock);
-			filepage = shmem_alloc_page(gfp, info, idx);
+			// filepage = shmem_alloc_page(gfp, info, idx);
+			filepage = shmem_alloc_pages(gfp, info, idx, &new);
 			if (!filepage) {
 				shmem_unacct_blocks(info->flags, 1);
 				shmem_free_blocks(inode, 1);
@@ -1440,7 +1487,8 @@ repeat:
 			}
 
 			spin_lock(&info->lock);
-			entry = shmem_swp_alloc(info, idx, sgp);
+
+			entry = shmem_swp_alloc(info, idx, sgp); 
 			if (IS_ERR(entry))
 				error = PTR_ERR(entry);
 			else {
@@ -1450,9 +1498,11 @@ repeat:
 			ret = error || swap.val;
 			if (ret)
 				mem_cgroup_uncharge_cache_page(filepage);
-			else
-				ret = add_to_page_cache_lru(filepage, mapping,
-						idx, GFP_NOWAIT);
+			else {
+			  if (new)
+				ret = add_to_page_cache_lru(filepage, mapping,    
+							    idx, GFP_NOWAIT); 
+			}
 			/*
 			 * At add_to_page_cache_lru() failure, uncharge will
 			 * be done automatically.
@@ -1470,9 +1520,9 @@ repeat:
 			info->flags |= SHMEM_PAGEIN;
 		}
 
-		info->alloced++;
+		info->alloced++; 
 		spin_unlock(&info->lock);
-		clear_highpage(filepage);
+		clear_highpage(filepage); 
 		flush_dcache_page(filepage);
 		SetPageUptodate(filepage);
 		if (sgp == SGP_DIRTY)
@@ -1656,7 +1706,7 @@ shmem_write_end(struct file *file, struct address_space *mapping,
 
 	set_page_dirty(page);
 	unlock_page(page);
-	page_cache_release(page);
+	// page_cache_release(page);
 
 	return copied;
 }

@@ -1708,6 +1708,37 @@ alloc_page_vma(gfp_t gfp, struct vm_area_struct *vma, unsigned long addr)
 	return __alloc_pages_nodemask(gfp, 0, zl, policy_nodemask(gfp, pol));
 }
 
+struct page *
+alloc_pages_vma(gfp_t gfp, struct vm_area_struct *vma, unsigned long addr, int order)
+{
+	struct mempolicy *pol = get_vma_policy(current, vma, addr);
+	struct zonelist *zl;
+
+	if (unlikely(pol->mode == MPOL_INTERLEAVE)) {
+		unsigned nid;
+
+		nid = interleave_nid(pol, vma, addr, PAGE_SHIFT);
+		mpol_cond_put(pol);
+		return alloc_page_interleave(gfp, order, nid);
+	}
+	zl = policy_zonelist(gfp, pol);
+	if (unlikely(mpol_needs_cond_ref(pol))) {
+		/*
+		 * slow path: ref counted shared policy
+		 */
+		struct page *page =  __alloc_pages_nodemask(gfp, order,
+						zl, policy_nodemask(gfp, pol));
+		__mpol_put(pol);
+		return page;
+	}
+	/*
+	 * fast path:  default or task policy
+	 */
+	return __alloc_pages_nodemask(gfp, order, zl, policy_nodemask(gfp, pol));
+}
+
+
+
 /**
  * 	alloc_pages_current - Allocate pages.
  *
