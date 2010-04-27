@@ -610,6 +610,23 @@ static struct dentry *d_kill(struct dentry *dentry)
 	return parent;
 }
 
+/*
+ * special version of dput() for pipes/sockets/anon.
+ * These dentries are not present in hash table, we can avoid
+ * taking/dirtying dcache_lock
+ */
+static void dput_single(struct dentry *dentry)
+{
+	struct inode *inode;
+	
+	if (!atomic_dec_and_test(&dentry->d_count))
+		return;
+	inode = dentry->d_inode;
+	if (inode)
+		iput(inode);
+	d_free(dentry);
+}
+
 /* 
  * This is dput
  *
@@ -641,6 +658,12 @@ static struct dentry *d_kill(struct dentry *dentry)
 
 static void real_dput(struct dentry *dentry)
 {
+	/*
+	 * single dentries (sockets/pipes/anon) fast path
+	 */
+	if (dentry->d_flags & DCACHE_SINGLE)
+		return dput_single(dentry);
+
 repeat:
 	if (atomic_read(&dentry->d_count) == 1)
 		might_sleep();
@@ -1569,6 +1592,47 @@ struct dentry * d_alloc_root(struct inode * root_inode)
 	return res;
 }
 EXPORT_SYMBOL(d_alloc_root);
+
+static void fsnotify_d_instantiate_helper(struct dentry *dentry, 
+					  struct inode *inode)
+{
+	if (!inode)
+		return;
+#ifdef CONFIG_FSNOTIFY
+	spin_lock(&dcache_lock);
+	fsnotify_d_instantiate(entry, inode);
+	spin_unlock(&dcache_lock);
+#endif
+}
+
+/**
+ * d_alloc_single - allocate SINGLE dentry
+ * @name: dentry name, given in a qstr structure
+ * @inode: inode to allocate the dentry for
+ *
+ * Allocate an SINGLE dentry for the inode given. The inode is
+ * instantiated and returned. %NULL is returned if there is insufficient
+ * memory.
+ * - SINGLE dentries have themselves as a parent.
+ * - SINGLE dentries are not hashed into global hash table
+ * - their d_alias list is empty
+ */
+struct dentry *d_alloc_single(const struct qstr *name, struct inode *inode)
+{
+	struct dentry *entry;
+
+	entry = d_alloc(NULL, name);
+	if (entry) {
+		entry->d_sb = inode->i_sb;
+		entry->d_parent = entry;
+		entry->d_flags |= DCACHE_SINGLE | DCACHE_DISCONNECTED;
+		entry->d_inode = inode;
+
+		fsnotify_d_instantiate_helper(entry, inode);
+		security_d_instantiate(entry, inode);
+	}
+	return entry;
+}
 
 static inline struct hlist_head *d_hash(struct dentry *parent,
 					unsigned long hash)

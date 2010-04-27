@@ -971,13 +971,12 @@ struct file *create_write_pipe(int flags)
 		goto err;
 
 	err = -ENOMEM;
-	path.dentry = d_alloc(pipe_mnt->mnt_sb->s_root, &name);
+	path.dentry = d_alloc_single(&name, inode);
 	if (!path.dentry)
 		goto err_inode;
 	path.mnt = mntget(pipe_mnt);
 
 	path.dentry->d_op = &pipefs_dentry_operations;
-	d_instantiate(path.dentry, inode);
 
 	err = -ENFILE;
 	f = alloc_file(&path, FMODE_WRITE, &write_pipefifo_fops);

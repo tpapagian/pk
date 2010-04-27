@@ -197,6 +197,14 @@ d_iput:		no		no		no       yes
 #define DCACHE_COOKIE		0x0040	/* For use by dcookie subsystem */
 
 #define DCACHE_FSNOTIFY_PARENT_WATCHED	0x0080 /* Parent inode is watched by some fsnotify listener */
+#define DCACHE_SINGLE          0x0040
+	/*
+	 * socket, pipe or anonymous fd dentry
+	 * - SINGLE dentries have themselves as a parent.
+	 * - SINGLE dentries are not hashed into global hash table
+	 * - Their d_alias list is empty
+	 * - They dont need dcache_lock synchronization
+	 */
 
 extern spinlock_t dcache_lock;
 extern seqlock_t rename_lock;
@@ -256,6 +264,7 @@ extern void shrink_dcache_sb(struct super_block *);
 extern void shrink_dcache_parent(struct dentry *);
 extern void shrink_dcache_for_umount(struct super_block *);
 extern int d_invalidate(struct dentry *);
+extern struct dentry *d_alloc_single(const struct qstr *, struct inode *);
 
 /* only used at mount-time */
 extern struct dentry * d_alloc_root(struct inode *);
