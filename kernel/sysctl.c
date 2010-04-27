@@ -76,7 +76,19 @@
 
 
 #if defined(CONFIG_SYSCTL)
+
+
+
+
+
+
+
+
+/* Switch for per-cpu dentry optimizations */
 extern int dentry_per_cpu_enable;
+
+
+
 
 /* External variables not in a header file. */
 extern int sysctl_overcommit_memory;
