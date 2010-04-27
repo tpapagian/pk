@@ -1121,7 +1121,8 @@ static int __init init_pipe_fs(void)
 		if (IS_ERR(pipe_mnt)) {
 			err = PTR_ERR(pipe_mnt);
 			unregister_filesystem(&pipe_fs_type);
-		}
+		} else
+			pipe_mnt->mnt_sb->s_flags |= MS_NOREFCOUNT;
 	}
 	return err;
 }

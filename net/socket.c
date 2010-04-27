@@ -2406,6 +2406,7 @@ static int __init sock_init(void)
 	init_inodecache();
 	register_filesystem(&sock_fs_type);
 	sock_mnt = kern_mount(&sock_fs_type);
+	sock_mnt->mnt_sb->s_flags |= MS_NOREFCOUNT;
 
 	/* The real protocol initialization is performed in later initcalls.
 	 */

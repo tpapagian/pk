@@ -205,7 +205,9 @@ static inline void per_cpu_flush(void)
 				atomic_sub(minus, &mnt->mnt_count);
 			p->count = 0;
 			spin_unlock(&l->lock);
-			real_mntput_no_expire(mnt);
+
+			if (!(mnt->mnt_sb->s_flags & MS_NOREFCOUNT))
+				real_mntput_no_expire(mnt);
 
 			spin_lock(&l->lock);
 		}

@@ -13,13 +13,11 @@
 #include <linux/list.h>
 #include <linux/nodemask.h>
 #include <linux/spinlock.h>
+#include <linux/fs.h>
 #include <asm/atomic.h>
 
 #include <linux/percpu.h>
 
-struct super_block;
-struct vfsmount;
-struct dentry;
 struct mnt_namespace;
 
 #define MNT_NOSUID	0x01
@@ -114,7 +112,7 @@ extern struct vfsmount *per_cpu_mntget(struct vfsmount *mnt);
 
 static inline struct vfsmount *mntget(struct vfsmount *mnt)
 {
-	if (mnt) {
+	if (mnt && !(mnt->mnt_sb->s_flags & MS_NOREFCOUNT)) {
 		if (per_cpu_mntget(mnt) == NULL)
 			atomic_inc(&mnt->mnt_count);
 	}
@@ -143,7 +141,7 @@ static inline void per_cpu_set_mnt_expiry_mark(struct vfsmount *mnt)
 
 static inline void mntput(struct vfsmount *mnt)
 {
-	if (mnt) {
+	if (mnt && !(mnt->mnt_sb->s_flags & MS_NOREFCOUNT)) {
 #if 1
 		per_cpu_set_mnt_expiry_mark(mnt);
 #else
