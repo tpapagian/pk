@@ -70,6 +70,9 @@
 
 #include "kmap_skb.h"
 
+/* Controlled by sysctl fs/enable_skb_remote_alloc */
+int enable_skb_remote_alloc;
+
 static struct kmem_cache *skbuff_head_cache __read_mostly;
 static struct kmem_cache *skbuff_fclone_cache __read_mostly;
 
@@ -256,8 +259,11 @@ EXPORT_SYMBOL(__alloc_skb);
 struct sk_buff *__netdev_alloc_skb(struct net_device *dev,
 		unsigned int length, gfp_t gfp_mask)
 {
-	int node = dev->dev.parent ? dev_to_node(dev->dev.parent) : -1;
+	int node = -1;
 	struct sk_buff *skb;
+
+	if (enable_skb_remote_alloc)
+		node = dev->dev.parent ? dev_to_node(dev->dev.parent) : -1;
 
 	skb = __alloc_skb(length + NET_SKB_PAD, gfp_mask, 0, node);
 	if (likely(skb)) {
@@ -270,8 +276,11 @@ EXPORT_SYMBOL(__netdev_alloc_skb);
 
 struct page *__netdev_alloc_page(struct net_device *dev, gfp_t gfp_mask)
 {
-	int node = dev->dev.parent ? dev_to_node(dev->dev.parent) : -1;
+	int node = -1;
 	struct page *page;
+
+	if (enable_skb_remote_alloc)
+		node = dev->dev.parent ? dev_to_node(dev->dev.parent) : -1;
 
 	page = alloc_pages_node(node, gfp_mask, 0);
 	return page;

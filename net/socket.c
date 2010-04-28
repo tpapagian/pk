@@ -353,7 +353,7 @@ static int sock_alloc_file(struct socket *sock, struct file **f, int flags)
 	if (unlikely(fd < 0))
 		return fd;
 
-	path.dentry = d_alloc(sock_mnt->mnt_sb->s_root, &name);
+	path.dentry = d_alloc_single(&name, SOCK_INODE(sock));
 	if (unlikely(!path.dentry)) {
 		put_unused_fd(fd);
 		return -ENOMEM;
@@ -361,7 +361,6 @@ static int sock_alloc_file(struct socket *sock, struct file **f, int flags)
 	path.mnt = mntget(sock_mnt);
 
 	path.dentry->d_op = &sockfs_dentry_operations;
-	d_instantiate(path.dentry, SOCK_INODE(sock));
 	SOCK_INODE(sock)->i_fop = &socket_file_ops;
 
 	file = alloc_file(&path, FMODE_READ | FMODE_WRITE,
@@ -2406,6 +2405,7 @@ static int __init sock_init(void)
 	init_inodecache();
 	register_filesystem(&sock_fs_type);
 	sock_mnt = kern_mount(&sock_fs_type);
+	sock_mnt->mnt_sb->s_flags |= MS_NOREFCOUNT;
 
 	/* The real protocol initialization is performed in later initcalls.
 	 */
