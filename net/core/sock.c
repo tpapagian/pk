@@ -1579,6 +1579,66 @@ int sk_wait_data(struct sock *sk, long *timeo)
 }
 EXPORT_SYMBOL(sk_wait_data);
 
+static int percpu_mem_schedule(struct proto *prot, int amt)
+{
+	struct percpu_proto *p;
+	int got;
+
+	if (prot->percpu == NULL)
+		return 0;
+
+	p = &prot->percpu[smp_processor_id()];
+	if (!spin_trylock(&p->lock))
+		return 0;
+
+	got = 0;
+	if (p->count >= amt) {
+		got = amt;
+		p->count -= got;
+	}
+	spin_unlock(&p->lock);
+
+	return got;
+}
+
+static int percpu_mem_reclaim(struct proto *prot, int amt)
+{
+	struct percpu_proto *p;
+	int count;
+
+	if (prot->percpu == NULL)
+		return 0;
+
+	p = &prot->percpu[smp_processor_id()];
+	if (!spin_trylock(&p->lock))
+		return 0;
+
+	/* XXX when should we give back to prot->memory_allocated */
+
+	p->count += amt;
+	count = p->count;
+	spin_unlock(&p->lock);	
+	return count;
+}
+
+int proto_percpu_mem_gather(struct proto *prot)
+{
+	struct percpu_proto *p;
+	int c;
+
+	if (prot->percpu != NULL) {
+		for_each_possible_cpu(c) {
+			p = &prot->percpu[smp_processor_id()];
+			if (spin_trylock(&p->lock)) {
+				atomic_add(p->count, prot->memory_allocated);
+				p->count = 0;
+				spin_unlock(&p->lock);
+			}
+		}
+	}
+	return atomic_read(prot->memory_allocated);
+}
+
 /**
  *	__sk_mem_schedule - increase sk_forward_alloc and memory_allocated
  *	@sk: socket
@@ -1596,7 +1656,10 @@ int __sk_mem_schedule(struct sock *sk, int size, int kind)
 	int allocated;
 
 	sk->sk_forward_alloc += amt * SK_MEM_QUANTUM;
-	allocated = atomic_add_return(amt, prot->memory_allocated);
+	if (percpu_mem_schedule(prot, amt))
+		allocated = atomic_read(prot->memory_allocated);
+	else
+		allocated = atomic_add_return(amt, prot->memory_allocated);
 
 	/* Under limit. */
 	if (allocated <= prot->sysctl_mem[0]) {
@@ -1606,9 +1669,12 @@ int __sk_mem_schedule(struct sock *sk, int size, int kind)
 	}
 
 	/* Under pressure. */
-	if (allocated > prot->sysctl_mem[1])
-		if (prot->enter_memory_pressure)
+	if (allocated > prot->sysctl_mem[1]) {
+		allocated = proto_percpu_mem_gather(prot);
+		if (allocated > prot->sysctl_mem[1] && 
+		    prot->enter_memory_pressure)
 			prot->enter_memory_pressure(sk);
+	}
 
 	/* Over hard limit. */
 	if (allocated > prot->sysctl_mem[2])
@@ -1666,9 +1732,10 @@ EXPORT_SYMBOL(__sk_mem_schedule);
 void __sk_mem_reclaim(struct sock *sk)
 {
 	struct proto *prot = sk->sk_prot;
+	int amt = sk->sk_forward_alloc >> SK_MEM_QUANTUM_SHIFT;
 
-	atomic_sub(sk->sk_forward_alloc >> SK_MEM_QUANTUM_SHIFT,
-		   prot->memory_allocated);
+	if (!percpu_mem_reclaim(prot, amt))
+		atomic_sub(amt, prot->memory_allocated);
 	sk->sk_forward_alloc &= SK_MEM_QUANTUM - 1;
 
 	if (prot->memory_pressure && *prot->memory_pressure &&

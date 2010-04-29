@@ -250,6 +250,7 @@ extern int sysctl_tcp_thin_dupack;
 extern atomic_t tcp_memory_allocated;
 extern struct percpu_counter tcp_sockets_allocated;
 extern int tcp_memory_pressure;
+extern struct percpu_proto tcp_percpu_proto[];
 
 /*
  * The next routines deal with comparing 32 bit unsigned ints
