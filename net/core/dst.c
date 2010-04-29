@@ -60,7 +60,8 @@ static int alloc_per_cpu_dst_entry(struct dst_entry *dst)
 	memset(dst->per_cpu, 0, sizeof(dst->per_cpu));
 
 	for_each_possible_cpu(c) { 
-		p = kmem_cache_alloc(per_cpu_cache, GFP_ATOMIC);
+		p = kmem_cache_alloc_node(per_cpu_cache, GFP_ATOMIC, 
+					  cpu_to_node(c));
 		if (p == NULL) {
 			free_per_cpu_dst_entry(dst);
 			return -ENOMEM;;
