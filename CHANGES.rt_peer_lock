@@ -1,0 +1,12 @@
+If peer is null, there is no need to acquire the lock.
+    
+Draw the truth table:
+    
+peer  rt->peer| peer  rt->peer
+0     0       | 0     0
+0     1       | 0     1
+1     0       | NO CHANGE TO
+1     1       | THE CODE HERE
+    
+The only time the code is executed is if peer != 0.
+When peer == 0, the code does empty work by acquiring the lock.
