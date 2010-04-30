@@ -130,6 +130,9 @@
 #include <net/tcp.h>
 #endif
 
+static unsigned int sk_percpu_batch = 64;
+static unsigned int sk_percpu_max = 256;
+
 /*
  * Each address family might have different locking rules, so we have
  * one slock key per address family:
@@ -1238,8 +1241,28 @@ void sk_setup_caps(struct sock *sk, struct dst_entry *dst)
 }
 EXPORT_SYMBOL_GPL(sk_setup_caps);
 
+static struct ctl_table sock_ctl_table[] = {
+	{	
+		.procname	= "sk_percpu_batch",
+		.data		= &sk_percpu_batch,
+		.maxlen		= sizeof(sk_percpu_batch),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{	
+		.procname	= "sk_percpu_max",
+		.data		= &sk_percpu_max,
+		.maxlen		= sizeof(sk_percpu_max),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ },
+};
+
 void __init sk_init(void)
 {
+	struct ctl_path path[] = { { "net" }, { NULL } };
+
 	if (totalram_pages <= 4096) {
 		sysctl_wmem_max = 32767;
 		sysctl_rmem_max = 32767;
@@ -1249,6 +1272,8 @@ void __init sk_init(void)
 		sysctl_wmem_max = 131071;
 		sysctl_rmem_max = 131071;
 	}
+
+	register_sysctl_paths(path, sock_ctl_table);
 }
 
 /*
@@ -1582,7 +1607,6 @@ EXPORT_SYMBOL(sk_wait_data);
 static int percpu_mem_schedule(struct proto *prot, int amt)
 {
 	struct percpu_proto *p;
-	int got;
 
 	if (prot->percpu == NULL)
 		return 0;
@@ -1591,20 +1615,21 @@ static int percpu_mem_schedule(struct proto *prot, int amt)
 	if (!spin_trylock(&p->lock))
 		return 0;
 
-	got = 0;
-	if (p->count >= amt) {
-		got = amt;
-		p->count -= got;
+	if (p->count < amt) {
+		int count = sk_percpu_batch > amt ? sk_percpu_batch : amt;
+		atomic_add(count, prot->memory_allocated);
+		p->count += count;
 	}
-	spin_unlock(&p->lock);
+	
+	p->count -= amt;
 
-	return got;
+	spin_unlock(&p->lock);
+	return 1;
 }
 
 static int percpu_mem_reclaim(struct proto *prot, int amt)
 {
 	struct percpu_proto *p;
-	int count;
 
 	if (prot->percpu == NULL)
 		return 0;
@@ -1613,12 +1638,15 @@ static int percpu_mem_reclaim(struct proto *prot, int amt)
 	if (!spin_trylock(&p->lock))
 		return 0;
 
-	/* XXX when should we give back to prot->memory_allocated */
-
-	p->count += amt;
-	count = p->count;
-	spin_unlock(&p->lock);	
-	return count;
+	p->count += amt;	
+	if (p->count > sk_percpu_max) {
+		int count = sk_percpu_max / 2 > 1 ? sk_percpu_max / 2 : 1;
+		p->count -= count;
+		atomic_sub(count, prot->memory_allocated);
+	}
+		
+	spin_unlock(&p->lock);
+	return 1;
 }
 
 int proto_percpu_mem_gather(struct proto *prot)
@@ -1630,7 +1658,7 @@ int proto_percpu_mem_gather(struct proto *prot)
 		for_each_possible_cpu(c) {
 			p = &prot->percpu[smp_processor_id()];
 			if (spin_trylock(&p->lock)) {
-				atomic_add(p->count, prot->memory_allocated);
+				atomic_sub(p->count, prot->memory_allocated);
 				p->count = 0;
 				spin_unlock(&p->lock);
 			}
