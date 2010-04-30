@@ -115,6 +115,9 @@
 
 #define RT_GC_TIMEOUT (300*HZ)
 
+/* Controlled by sysctl fs/enable_rt_peer_lock */
+int enable_rt_peer_lock;
+
 static int ip_rt_max_size;
 static int ip_rt_gc_timeout __read_mostly	= RT_GC_TIMEOUT;
 static int ip_rt_gc_interval __read_mostly	= 60 * HZ;
@@ -1295,6 +1298,8 @@ void rt_bind_peer(struct rtable *rt, int create)
 	struct inet_peer *peer;
 
 	peer = inet_getpeer(rt->rt_dst, create);
+	if (!enable_rt_peer_lock && !peer)
+		return;
 
 	spin_lock_bh(&rt_peer_lock);
 	if (rt->peer == NULL) {

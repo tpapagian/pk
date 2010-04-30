@@ -2537,6 +2537,7 @@ struct proto tcp_prot = {
 	.compat_setsockopt	= compat_tcp_setsockopt,
 	.compat_getsockopt	= compat_tcp_getsockopt,
 #endif
+	.percpu			= tcp_percpu_proto,
 };
 
 

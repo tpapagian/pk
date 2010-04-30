@@ -130,6 +130,9 @@
 #include <net/tcp.h>
 #endif
 
+static unsigned int sk_percpu_batch = 64;
+static unsigned int sk_percpu_max = 256;
+
 /*
  * Each address family might have different locking rules, so we have
  * one slock key per address family:
@@ -1238,8 +1241,28 @@ void sk_setup_caps(struct sock *sk, struct dst_entry *dst)
 }
 EXPORT_SYMBOL_GPL(sk_setup_caps);
 
+static struct ctl_table sock_ctl_table[] = {
+	{	
+		.procname	= "sk_percpu_batch",
+		.data		= &sk_percpu_batch,
+		.maxlen		= sizeof(sk_percpu_batch),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{	
+		.procname	= "sk_percpu_max",
+		.data		= &sk_percpu_max,
+		.maxlen		= sizeof(sk_percpu_max),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{ },
+};
+
 void __init sk_init(void)
 {
+	struct ctl_path path[] = { { "net" }, { NULL } };
+
 	if (totalram_pages <= 4096) {
 		sysctl_wmem_max = 32767;
 		sysctl_rmem_max = 32767;
@@ -1249,6 +1272,8 @@ void __init sk_init(void)
 		sysctl_wmem_max = 131071;
 		sysctl_rmem_max = 131071;
 	}
+
+	register_sysctl_paths(path, sock_ctl_table);
 }
 
 /*
@@ -1579,6 +1604,69 @@ int sk_wait_data(struct sock *sk, long *timeo)
 }
 EXPORT_SYMBOL(sk_wait_data);
 
+static int percpu_mem_schedule(struct proto *prot, int amt)
+{
+	struct percpu_proto *p;
+
+	if (prot->percpu == NULL)
+		return 0;
+
+	p = &prot->percpu[smp_processor_id()];
+	if (!spin_trylock(&p->lock))
+		return 0;
+
+	if (p->count < amt) {
+		int count = sk_percpu_batch > amt ? sk_percpu_batch : amt;
+		atomic_add(count, prot->memory_allocated);
+		p->count += count;
+	}
+	
+	p->count -= amt;
+
+	spin_unlock(&p->lock);
+	return 1;
+}
+
+static int percpu_mem_reclaim(struct proto *prot, int amt)
+{
+	struct percpu_proto *p;
+
+	if (prot->percpu == NULL)
+		return 0;
+
+	p = &prot->percpu[smp_processor_id()];
+	if (!spin_trylock(&p->lock))
+		return 0;
+
+	p->count += amt;	
+	if (p->count > sk_percpu_max) {
+		int count = sk_percpu_max / 2 > 1 ? sk_percpu_max / 2 : 1;
+		p->count -= count;
+		atomic_sub(count, prot->memory_allocated);
+	}
+		
+	spin_unlock(&p->lock);
+	return 1;
+}
+
+int proto_percpu_mem_gather(struct proto *prot)
+{
+	struct percpu_proto *p;
+	int c;
+
+	if (prot->percpu != NULL) {
+		for_each_possible_cpu(c) {
+			p = &prot->percpu[smp_processor_id()];
+			if (spin_trylock(&p->lock)) {
+				atomic_sub(p->count, prot->memory_allocated);
+				p->count = 0;
+				spin_unlock(&p->lock);
+			}
+		}
+	}
+	return atomic_read(prot->memory_allocated);
+}
+
 /**
  *	__sk_mem_schedule - increase sk_forward_alloc and memory_allocated
  *	@sk: socket
@@ -1596,7 +1684,10 @@ int __sk_mem_schedule(struct sock *sk, int size, int kind)
 	int allocated;
 
 	sk->sk_forward_alloc += amt * SK_MEM_QUANTUM;
-	allocated = atomic_add_return(amt, prot->memory_allocated);
+	if (percpu_mem_schedule(prot, amt))
+		allocated = atomic_read(prot->memory_allocated);
+	else
+		allocated = atomic_add_return(amt, prot->memory_allocated);
 
 	/* Under limit. */
 	if (allocated <= prot->sysctl_mem[0]) {
@@ -1606,9 +1697,12 @@ int __sk_mem_schedule(struct sock *sk, int size, int kind)
 	}
 
 	/* Under pressure. */
-	if (allocated > prot->sysctl_mem[1])
-		if (prot->enter_memory_pressure)
+	if (allocated > prot->sysctl_mem[1]) {
+		allocated = proto_percpu_mem_gather(prot);
+		if (allocated > prot->sysctl_mem[1] && 
+		    prot->enter_memory_pressure)
 			prot->enter_memory_pressure(sk);
+	}
 
 	/* Over hard limit. */
 	if (allocated > prot->sysctl_mem[2])
@@ -1666,9 +1760,10 @@ EXPORT_SYMBOL(__sk_mem_schedule);
 void __sk_mem_reclaim(struct sock *sk)
 {
 	struct proto *prot = sk->sk_prot;
+	int amt = sk->sk_forward_alloc >> SK_MEM_QUANTUM_SHIFT;
 
-	atomic_sub(sk->sk_forward_alloc >> SK_MEM_QUANTUM_SHIFT,
-		   prot->memory_allocated);
+	if (!percpu_mem_reclaim(prot, amt))
+		atomic_sub(amt, prot->memory_allocated);
 	sk->sk_forward_alloc &= SK_MEM_QUANTUM - 1;
 
 	if (prot->memory_pressure && *prot->memory_pressure &&

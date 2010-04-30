@@ -52,6 +52,7 @@
 
 #ifndef __ASSEMBLY__
 void clear_page(void *page);
+void clear_page_nocache(void *page);
 void copy_page(void *to, void *from);
 
 /* duplicated to the one in bootmem.h */

@@ -868,10 +868,6 @@ struct net_device {
  * Cache line mostly used on receive path (including eth_type_trans())
  */
 	unsigned long		last_rx;	/* Time of last Rx	*/
-	/* Interface address info used in eth_type_trans() */
-	unsigned char		*dev_addr;	/* hw address, (before bcast
-						   because most packets are
-						   unicast) */
 
 	struct netdev_hw_addr_list	dev_addrs; /* list of device
 						      hw addresses */
@@ -883,13 +879,18 @@ struct net_device {
 	struct netdev_queue	*_tx ____cacheline_aligned_in_smp;
 
 	/* Number of TX queues allocated at alloc_netdev_mq() time  */
-	unsigned int		num_tx_queues;
+	unsigned int		num_tx_queues ____cacheline_aligned_in_smp;
 
 	/* Number of TX queues currently active in device  */
 	unsigned int		real_num_tx_queues;
 
+	/* Interface address info used in eth_type_trans() */
+	unsigned char		*dev_addr;	/* hw address, (before bcast
+						   because most packets are
+						   unicast) */
+
 	/* root qdisc from userspace point of view */
-	struct Qdisc		*qdisc;
+	struct Qdisc		*qdisc ____cacheline_aligned_in_smp;
 
 	unsigned long		tx_queue_len;	/* Max frames per queue allowed */
 	spinlock_t		tx_global_lock;

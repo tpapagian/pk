@@ -36,6 +36,12 @@
 
 struct sk_buff;
 
+struct per_cpu_dst_entry {
+	unsigned int count;
+	spinlock_t lock;
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+};
+
 struct dst_entry {
 	struct rcu_head		rcu_head;
 	struct dst_entry	*child;
@@ -77,19 +83,25 @@ struct dst_entry {
 	__u32			__pad2;
 #endif
 
+	struct per_cpu_dst_entry *per_cpu[NR_CPUS];
 
 	/*
 	 * Align __refcnt to a 64 bytes alignment
 	 * (L1_CACHE_SIZE would be too much)
 	 */
 #ifdef CONFIG_64BIT
-	long			__pad_to_align_refcnt[1];
+	/* aligned SMP_CACHE_BYTES below should handle this */
+#if 0
+	long			__pad_to_align_refcnt[6];
+#endif
 #endif
 	/*
 	 * __refcnt wants to be on a different cache line from
 	 * input/output/ops or performance tanks badly
 	 */
-	atomic_t		__refcnt;	/* client references	*/
+	atomic_t		__refcnt /* client references	*/
+	__attribute__((__aligned__(SMP_CACHE_BYTES)));	
+
 	int			__use;
 	unsigned long		lastuse;
 	union {
@@ -153,11 +165,23 @@ dst_metric_locked(struct dst_entry *dst, int metric)
 
 static inline void dst_hold(struct dst_entry * dst)
 {
+	struct per_cpu_dst_entry *p;
+
 	/*
 	 * If your kernel compilation stops here, please check
 	 * __pad_to_align_refcnt declaration in struct dst_entry
 	 */
 	BUILD_BUG_ON(offsetof(struct dst_entry, __refcnt) & 63);
+	
+	p = dst->per_cpu[smp_processor_id()];
+	if (spin_trylock(&p->lock)) {
+		if (p->count) {
+			p->count--;
+			spin_unlock(&p->lock);
+			return;
+		}
+		spin_unlock(&p->lock);		
+	} 
 	atomic_inc(&dst->__refcnt);
 }
 

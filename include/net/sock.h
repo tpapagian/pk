@@ -644,6 +644,14 @@ struct timewait_sock_ops;
 struct inet_hashinfo;
 struct raw_hashinfo;
 
+struct percpu_proto {
+	spinlock_t lock;
+	int count;
+	char pag[0] __attribute__((__aligned__(64)));
+};
+
+int proto_percpu_mem_gather(struct proto *prot);
+
 /* Networking protocol blocks we attach to sockets.
  * socket layer -> transport layer interface
  * transport -> network interface is defined by struct inet_proto
@@ -735,6 +743,8 @@ struct proto {
 	} h;
 
 	struct module		*owner;
+
+	struct percpu_proto	*percpu;
 
 	char			name[32];
 
