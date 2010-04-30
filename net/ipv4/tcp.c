@@ -293,7 +293,7 @@ atomic_t tcp_memory_allocated	/* Current allocated memory. */
 	 __cacheline_aligned_in_smp;
 EXPORT_SYMBOL(tcp_memory_allocated);
 
-struct percpu_proto tcp_percpu_proto[NR_CPUS] 
+struct percpu_proto tcp_percpu_proto[NR_CPUS]
        __cacheline_aligned_in_smp;
 
 /*
@@ -3186,6 +3186,9 @@ void __init tcp_init(void)
 	unsigned long jiffy = jiffies;
 
 	BUILD_BUG_ON(sizeof(struct tcp_skb_cb) > sizeof(skb->cb));
+
+	for_each_possible_cpu(i)
+		spin_lock_init(&tcp_percpu_proto[i].lock);
 
 	percpu_counter_init(&tcp_sockets_allocated, 0);
 	percpu_counter_init(&tcp_orphan_count, 0);
