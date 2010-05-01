@@ -436,7 +436,7 @@ struct device {
 
 	dev_t			devt;	/* dev_t, creates the sysfs "dev" */
 
-	spinlock_t		devres_lock;
+	spinlock_t		devres_lock ____cacheline_aligned_in_smp;
 	struct list_head	devres_head;
 
 	struct klist_node	knode_class;
