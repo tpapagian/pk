@@ -1640,7 +1640,7 @@ static int percpu_mem_reclaim(struct proto *prot, int amt)
 
 	p->count += amt;	
 	if (p->count > sk_percpu_max) {
-		int count = sk_percpu_max / 2 > 1 ? sk_percpu_max / 2 : 1;
+		int count = (sk_percpu_max >> 1) > 1 ? (sk_percpu_max >> 1) : 1;
 		p->count -= count;
 		atomic_sub(count, prot->memory_allocated);
 	}
