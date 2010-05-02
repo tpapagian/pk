@@ -890,10 +890,10 @@ struct net_device {
 						   unicast) */
 
 	/* root qdisc from userspace point of view */
-	struct Qdisc		*qdisc ____cacheline_aligned_in_smp;
+	struct Qdisc		*qdisc;
 
 	unsigned long		tx_queue_len;	/* Max frames per queue allowed */
-	spinlock_t		tx_global_lock;
+	spinlock_t		tx_global_lock ____cacheline_aligned_in_smp;
 /*
  * One part is mostly used on xmit path (device)
  */
