@@ -121,6 +121,9 @@ EXPORT_SYMBOL(sysctl_udp_wmem_min);
 atomic_t udp_memory_allocated;
 EXPORT_SYMBOL(udp_memory_allocated);
 
+struct percpu_proto udp_percpu_proto[NR_CPUS]
+       __cacheline_aligned_in_smp;
+
 #define MAX_UDP_PORTS 65536
 #define PORTS_PER_CHAIN (MAX_UDP_PORTS / UDP_HTABLE_SIZE_MIN)
 
@@ -1842,6 +1845,7 @@ struct proto udp_prot = {
 	.compat_setsockopt = compat_udp_setsockopt,
 	.compat_getsockopt = compat_udp_getsockopt,
 #endif
+	.percpu		   = udp_percpu_proto,
 };
 EXPORT_SYMBOL(udp_prot);
 
@@ -2106,6 +2110,10 @@ void __init udp_table_init(struct udp_table *table, const char *name)
 void __init udp_init(void)
 {
 	unsigned long nr_pages, limit;
+	int i;
+
+	for_each_possible_cpu(i)
+		spin_lock_init(&udp_percpu_proto[i].lock);
 
 	udp_table_init(&udp_table, "UDP");
 	/* Set the pressure threshold up by the same strategy of TCP. It is a
