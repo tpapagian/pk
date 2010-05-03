@@ -18,7 +18,8 @@ void __syscount_start(unsigned long call)
 	if (!current)
 		return;
 
-	getnstimeofday(&current->syscount);
+	cputime_to_timespec(current->stime, &current->syscount);
+	//getnstimeofday(&current->syscount);
 	current->syscount_call = call;
 	current->syscount_start = 1;
 }
@@ -34,7 +35,8 @@ void syscount_end(void)
 
 	if (current->syscount_start) {
 		call = current->syscount_call;
-		getnstimeofday(&ts);
+		cputime_to_timespec(current->stime, &ts);
+		//getnstimeofday(&ts);
 		diff = timespec_sub(ts, current->syscount);
 		cnt = get_cpu_var(syscount);
 		cnt[call].elp = timespec_add_safe(cnt[call].elp, diff);
