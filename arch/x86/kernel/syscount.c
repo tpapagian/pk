@@ -59,8 +59,9 @@ static int syscount_proc_show(struct seq_file *m, void *v)
 			elp = timespec_add_safe(elp, cnt->elp);
 		}
 
-		seq_printf(m, "%u %lu %lu %lu\n", 
-			   i, tot, elp.tv_sec, elp.tv_nsec);
+		if (tot)
+			seq_printf(m, "%u %lu %lu %lu\n", 
+				   i, tot, elp.tv_sec, elp.tv_nsec);
 	}
 
         return 0;
