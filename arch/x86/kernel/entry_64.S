@@ -484,7 +484,30 @@ system_call_fastpath:
 	cmpq $__NR_syscall_max,%rax
 	ja badsys
 	movq %r10,%rcx
+#if 0
 	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
+#else
+	pushq %rdi
+	pushq %rsi
+	pushq %rdx
+	pushq %rcx
+	pushq %r8
+	pushq %r9
+	pushq %rax
+	movq %rax, %rdi
+	call __syscount_start
+	popq %rax
+	popq %r9
+	popq %r8
+	popq %rcx
+	popq %rdx
+	popq %rsi
+	popq %rdi
+	call *sys_call_table(,%rax,8)  # XXX:    rip relative
+	pushq %rax
+	call syscount_end
+	popq %rax
+#endif
 	movq %rax,RAX-ARGOFFSET(%rsp)
 /*
  * Syscall return path ending with SYSRET (fast path)
