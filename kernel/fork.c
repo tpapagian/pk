@@ -322,6 +322,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	getnstimeofday(&loop_start);
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
 		struct timespec copy_start, copy_stop;
+		struct timespec kmem_start, kmem_stop;
+		struct timespec rest_start, rest_stop;
+
 		struct file *file;
 
 		if (mpnt->vm_flags & VM_DONTCOPY) {
@@ -338,9 +341,15 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 				goto fail_nomem;
 			charge = len;
 		}
+
+		getnstimeofday(&kmem_start);
 		tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 		if (!tmp)
 			goto fail_nomem;
+		getnstimeofday(&kmem_stop);
+		syscount_add(SYSCOUNT_DUP_MMAP_KMEM, kmem_start, kmem_stop);
+
+		getnstimeofday(&rest_start);
 		*tmp = *mpnt;
 		INIT_LIST_HEAD(&tmp->anon_vma_chain);
 		pol = mpol_dup(vma_policy(mpnt));
@@ -354,6 +363,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		tmp->vm_mm = mm;
 		tmp->vm_next = NULL;
 		file = tmp->vm_file;
+		getnstimeofday(&rest_stop);
+		syscount_add(SYSCOUNT_DUP_MMAP_REST, rest_start, rest_stop);
 		if (file) {
 			struct inode *inode = file->f_path.dentry->d_inode;
 			struct address_space *mapping = file->f_mapping;

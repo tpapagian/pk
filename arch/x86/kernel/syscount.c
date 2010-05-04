@@ -24,26 +24,35 @@ void __syscount_start(unsigned long call)
 	current->syscount_start = 1;
 }
 
-void syscount_end(void)
+static inline void syscount_end_common(struct task_struct *tsk) 
 {
 	struct timespec ts, diff;
 	struct syscount *cnt;
 	unsigned long call;
 
-	if (!current)
+	if (!tsk)
 		return;
 
-	if (current->syscount_start) {
-		call = current->syscount_call;
-		cputime_to_timespec(current->stime, &ts);
+	if (tsk->syscount_start) {
+		call = tsk->syscount_call;
+		cputime_to_timespec(tsk->stime, &ts);
 		//getnstimeofday(&ts);
-		diff = timespec_sub(ts, current->syscount);
+		diff = timespec_sub(ts, tsk->syscount);
 		cnt = get_cpu_var(syscount);
 		cnt[call].elp = timespec_add_safe(cnt[call].elp, diff);
 		cnt[call].tot++;
 		put_cpu_var(cnt);
 	}
-	current->syscount_start = 0;
+	tsk->syscount_start = 0;
+}
+void syscount_end(void)
+{
+	syscount_end_common(current);
+}
+
+void syscount_end_task(struct task_struct *tsk)
+{
+	syscount_end_common(tsk);
 }
 
 void syscount_add(unsigned long call, struct timespec start, struct timespec stop)

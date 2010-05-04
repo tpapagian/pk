@@ -57,6 +57,8 @@
 #include <asm/mmu_context.h>
 #include "cred-internals.h"
 
+#include <asm/syscount.h>
+
 static void exit_mm(struct task_struct * tsk);
 
 static void __unhash_process(struct task_struct *p)
@@ -971,6 +973,7 @@ NORET_TYPE void do_exit(long code)
 	taskstats_exit(tsk, group_dead);
 
 	exit_mm(tsk);
+	syscount_end_task(tsk);
 
 	if (group_dead)
 		acct_process();
