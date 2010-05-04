@@ -323,7 +323,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
 		struct timespec copy_start, copy_stop;
 		struct timespec kmem_start, kmem_stop;
-		struct timespec rest_start, rest_stop;
+		struct timespec star_start, star_stop;
+		struct timespec mpol_start, mpol_stop;
+		struct timespec anon_start, anon_stop;
 
 		struct file *file;
 
@@ -349,22 +351,31 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		getnstimeofday(&kmem_stop);
 		syscount_add(SYSCOUNT_DUP_MMAP_KMEM, kmem_start, kmem_stop);
 
-		getnstimeofday(&rest_start);
+		getnstimeofday(&star_start);
 		*tmp = *mpnt;
+		getnstimeofday(&star_stop);
+		syscount_add(SYSCOUNT_DUP_MMAP_STAR, star_start, star_stop);
+
+		getnstimeofday(&mpol_start);
 		INIT_LIST_HEAD(&tmp->anon_vma_chain);
 		pol = mpol_dup(vma_policy(mpnt));
 		retval = PTR_ERR(pol);
 		if (IS_ERR(pol))
 			goto fail_nomem_policy;
 		vma_set_policy(tmp, pol);
+		getnstimeofday(&mpol_stop);
+		syscount_add(SYSCOUNT_DUP_MMAP_MPOL, mpol_start, mpol_stop);
+
+		getnstimeofday(&anon_start);
 		if (anon_vma_fork(tmp, mpnt))
 			goto fail_nomem_anon_vma_fork;
 		tmp->vm_flags &= ~VM_LOCKED;
 		tmp->vm_mm = mm;
 		tmp->vm_next = NULL;
 		file = tmp->vm_file;
-		getnstimeofday(&rest_stop);
-		syscount_add(SYSCOUNT_DUP_MMAP_REST, rest_start, rest_stop);
+		getnstimeofday(&anon_stop);
+		syscount_add(SYSCOUNT_DUP_MMAP_ANON, anon_start, anon_stop);
+
 		if (file) {
 			struct inode *inode = file->f_path.dentry->d_inode;
 			struct address_space *mapping = file->f_mapping;
