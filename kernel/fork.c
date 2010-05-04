@@ -357,6 +357,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		if (file) {
 			struct inode *inode = file->f_path.dentry->d_inode;
 			struct address_space *mapping = file->f_mapping;
+			struct timespec file_start, file_stop;
+			getnstimeofday(&file_start);
 
 			get_file(file);
 			if (tmp->vm_flags & VM_DENYWRITE)
@@ -370,6 +372,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 			vma_prio_tree_add(tmp, mpnt);
 			flush_dcache_mmap_unlock(mapping);
 			spin_unlock(&mapping->i_mmap_lock);
+
+			getnstimeofday(&file_stop);
+			syscount_add(SYSCOUNT_DUP_MMAP_FILE, file_start, file_stop);
 		}
 
 		/*
