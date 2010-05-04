@@ -4,14 +4,14 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 
-#include <asm/unistd.h>
+#include <asm/syscount.h>
 
 struct syscount {
 	struct timespec elp;
 	unsigned long tot;
 };
 
-static DEFINE_PER_CPU(struct syscount, syscount[NR_syscalls]);
+static DEFINE_PER_CPU(struct syscount, syscount[SYSCOUNT_MAX_CALLS]);
 
 void __syscount_start(unsigned long call)
 {
@@ -46,12 +46,24 @@ void syscount_end(void)
 	current->syscount_start = 0;
 }
 
+void syscount_add(unsigned long call, struct timespec start, struct timespec stop)
+{
+	struct timespec diff;	
+	struct syscount *cnt;
+
+	diff = timespec_sub(stop, start);
+	cnt = get_cpu_var(syscount);
+	cnt[call].elp = timespec_add_safe(cnt[call].elp, diff);
+	cnt[call].tot++;
+	put_cpu_var(cnt);	
+}
+
 static int syscount_proc_show(struct seq_file *m, void *v)
 {
 	struct syscount *cnt;
         unsigned int c, i;
 	
-	for (i = 0; i < NR_syscalls; i++) {
+	for (i = 0; i < SYSCOUNT_MAX_CALLS; i++) {
 		struct timespec elp = { 0, 0 };
 		unsigned long tot = 0;
 

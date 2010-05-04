@@ -75,6 +75,8 @@
 
 #include <trace/events/sched.h>
 
+#include <asm/syscount.h>
+
 /*
  * Protected counters by write_lock_irq(&tasklist_lock)
  */
@@ -293,6 +295,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	unsigned long charge;
 	struct mempolicy *pol;
 
+	struct timespec loop_start, loop_stop;
+
 	down_write(&oldmm->mmap_sem);
 	flush_cache_dup_mm(oldmm);
 	/*
@@ -315,7 +319,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	if (retval)
 		goto out;
 
+	getnstimeofday(&loop_start);
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
+		struct timespec copy_start, copy_stop;
 		struct file *file;
 
 		if (mpnt->vm_flags & VM_DONTCOPY) {
@@ -385,7 +391,12 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		rb_parent = &tmp->vm_rb;
 
 		mm->map_count++;
+		getnstimeofday(&copy_start);
 		retval = copy_page_range(mm, oldmm, mpnt);
+		if (retval == 0) {
+			getnstimeofday(&copy_stop);
+			syscount_add(SYSCOUNT_DUP_MMAP_COPY, copy_start, copy_stop);
+		}
 
 		if (tmp->vm_ops && tmp->vm_ops->open)
 			tmp->vm_ops->open(tmp);
@@ -393,6 +404,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		if (retval)
 			goto out;
 	}
+	getnstimeofday(&loop_stop);
+	syscount_add(SYSCOUNT_DUP_MMAP_LOOP, loop_start, loop_stop);
+
 	/* a new mm has just been created */
 	arch_dup_mmap(oldmm, mm);
 	retval = 0;
