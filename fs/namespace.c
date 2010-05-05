@@ -58,8 +58,9 @@ static struct rw_semaphore namespace_sem;
 struct kobject *fs_kobj;
 EXPORT_SYMBOL_GPL(fs_kobj);
 
-#define PER_CPU_MNTCOUNT	     64
-#define PER_CPU_MNTCOUNT_MAX   	     (PER_CPU_MNTCOUNT << 1)
+static int per_cpu_mntcount = 64;
+static int per_cpu_max_search = 128;
+static int per_cpu_strict = 1;
 
 static atomic_t per_cpu_flushing;
 static struct mutex per_cpu_flush_mutex;
@@ -163,16 +164,16 @@ static inline int per_cpu_mntput_no_expire(struct vfsmount *mnt)
 
 	if (p->count) {
 		p->count++;
-		if (p->count > PER_CPU_MNTCOUNT_MAX) {
-			p->count -= PER_CPU_MNTCOUNT;
-			atomic_sub(PER_CPU_MNTCOUNT, &mnt->mnt_count);
+		if (p->count > (per_cpu_mntcount << 1)) {
+			p->count -= per_cpu_mntcount;
+			atomic_sub(per_cpu_mntcount, &mnt->mnt_count);
 		}
 	} else {
 		BUG_ON(!list_empty(&p->list));
 		
 		/* We have one ref and we add PER_CPU_MNTCOUNT more */
-		p->count = PER_CPU_MNTCOUNT + 1;
-		atomic_add(PER_CPU_MNTCOUNT, &mnt->mnt_count);
+		p->count = per_cpu_mntcount + 1;
+		atomic_add(per_cpu_mntcount, &mnt->mnt_count);
 		list_add(&p->list, &l->list);
 	}
 
@@ -255,7 +256,7 @@ static inline struct vfsmount *per_cpu_lookup_mnt(struct path *path)
 	int c;
 
 	c = smp_processor_id();
-	l = &per_cpu(mntlist, c);	
+	l = &per_cpu(mntlist, c);
 
 	if (!spin_trylock(&l->lock))
 		return NULL;
@@ -266,7 +267,7 @@ static inline struct vfsmount *per_cpu_lookup_mnt(struct path *path)
 	list_for_each_entry(p, &l->list, list) {
 		struct vfsmount *par = p->mnt;
 
-		if (i >= 16) {
+		if (i >= per_cpu_max_search) {
 #ifdef CONFIG_VFSMOUNT_STATS
 			per_cpu(vfsmount_stats, c).timeout++;
 #endif
@@ -285,6 +286,8 @@ static inline struct vfsmount *per_cpu_lookup_mnt(struct path *path)
 				goto done;
 			}
 			found = par;
+			if (!per_cpu_strict)
+				break;
 		}
 		i++;
 	}
@@ -298,6 +301,8 @@ done:
 		p->count--;
 		if (p->count == 0)
 			list_del_init(&p->list);
+		else
+			list_move(&p->list, &l->list);
 	} else {
 #ifdef CONFIG_VFSMOUNT_STATS
 	    per_cpu(vfsmount_stats, c).misses++;		
@@ -2616,10 +2621,38 @@ static void __init init_mount_tree(void)
 	set_fs_root(current->fs, &root);
 }
 
+static struct ctl_table vfsmount_ctl_table[] = {                                                                                                                                                                 
+    {
+	.procname       = "per_cpu_mntcount",
+	.data           = &per_cpu_mntcount,
+	.maxlen         = sizeof(per_cpu_mntcount),
+	.mode           = 0644,
+	.proc_handler   = proc_dointvec,
+    },
+    {
+	.procname       = "per_cpu_max_search",
+	.data           = &per_cpu_max_search,
+	.maxlen         = sizeof(per_cpu_max_search),
+	.mode           = 0644,
+	.proc_handler   = proc_dointvec,
+    },
+    {
+	.procname       = "per_cpu_strict",
+	.data           = &per_cpu_strict,
+	.maxlen         = sizeof(per_cpu_strict),
+	.mode           = 0644,
+	.proc_handler   = proc_dointvec,
+    },
+    { },
+};
+
 void __init mnt_init(void)
 {
+	struct ctl_path path[] = { { "fs" }, { NULL } };
 	unsigned u;
 	int err;
+
+	register_sysctl_paths(path, vfsmount_ctl_table);
 
 	for_each_possible_cpu(u) {
                 spin_lock_init(&(per_cpu(mntlist, u).lock));
