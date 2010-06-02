@@ -24,6 +24,7 @@
 #include <linux/ima.h>
 
 #include <asm/atomic.h>
+#include <asm/syscount.h>
 
 #include "internal.h"
 
@@ -235,6 +236,9 @@ void __fput(struct file *file)
 	struct dentry *dentry = file->f_path.dentry;
 	struct vfsmount *mnt = file->f_path.mnt;
 	struct inode *inode = dentry->d_inode;
+	struct timespec start, stop;
+
+	getnstimeofday(&start);
 
 	might_sleep();
 
@@ -266,6 +270,9 @@ void __fput(struct file *file)
 	file_free(file);
 	dput(dentry);
 	mntput(mnt);
+
+	getnstimeofday(&stop);
+	syscount_add(SYSCOUNT_FPUT, start, stop);
 }
 
 struct file *fget(unsigned int fd)
