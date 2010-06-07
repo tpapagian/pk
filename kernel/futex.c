@@ -66,7 +66,7 @@
 
 int __read_mostly futex_cmpxchg_enabled;
 
-#define FUTEX_HASHBITS (CONFIG_BASE_SMALL ? 4 : 10)
+#define FUTEX_HASHBITS (CONFIG_BASE_SMALL ? 4 : 14)
 
 /*
  * Priority Inheritance state:
