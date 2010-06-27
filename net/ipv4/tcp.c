@@ -2224,6 +2224,11 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 	lock_sock(sk);
 
 	switch (optname) {
+	case TCP_MULTI_ACCEPT:
+		if (val != 1)
+			return -EINVAL;
+		icsk->icsk_multi_accept = 1;
+		break;
 	case TCP_MAXSEG:
 		/* Values greater than interface MTU won't take effect. However
 		 * at the point when this call is done we typically don't yet

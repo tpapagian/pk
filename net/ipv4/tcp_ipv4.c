@@ -1884,6 +1884,8 @@ static int tcp_v4_init_sock(struct sock *sk)
 	tp->af_specific = &tcp_sock_ipv4_specific;
 #endif
 
+	icsk->icsk_multi_accept = 0;
+
 	/* TCP Cookie Transactions */
 	if (sysctl_tcp_cookie_size > 0) {
 		/* Default, cookies without s_data_payload. */
