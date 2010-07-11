@@ -212,6 +212,8 @@ int inet_listen(struct socket *sock, int backlog)
 		if (err)
 			goto out;
 	}
+
+	// AP: TODO This need to be done per cloned listen socket
 	sk->sk_max_ack_backlog = backlog;
 	err = 0;
 
@@ -655,7 +657,7 @@ EXPORT_SYMBOL(inet_stream_connect);
 
 int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 {
-	struct sock *sk1 = sock->sk;
+	struct sock *sk1 = icsk_get_local_listen(sock->sk);
 	int err = -EINVAL;
 	struct sock *sk2 = sk1->sk_prot->accept(sk1, flags, &err);
 

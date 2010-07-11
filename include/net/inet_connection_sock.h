@@ -88,6 +88,8 @@ struct inet_connection_sock {
 	/* inet_sock has to be the first member! */
 	struct inet_sock	  icsk_inet;
 	int			  icsk_multi_accept;
+	struct sock 		  **icsk_ma_sks;
+	struct socket		  *icsk_ma_socks;
 	struct request_sock_queue icsk_accept_queue;
 	struct inet_bind_bucket	  *icsk_bind_hash;
 	unsigned long		  icsk_timeout;
@@ -148,6 +150,20 @@ static inline void *inet_csk_ca(const struct sock *sk)
 extern struct sock *inet_csk_clone(struct sock *sk,
 				   const struct request_sock *req,
 				   const gfp_t priority);
+
+
+static inline struct sock *icsk_get_local_listen(struct sock *sk)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct sock *tsk = sk;
+	if (icsk->icsk_multi_accept) {
+		tsk = icsk->icsk_ma_sks[smp_processor_id()];
+#ifdef DEBUG_AP
+		printk("icsk_get_local_listen CPU=%d sk=%p tsk=%p\n", smp_processor_id(), sk, tsk);
+#endif
+	}
+	return tsk;
+}
 
 enum inet_csk_ack_state_t {
 	ICSK_ACK_SCHED	= 1,
