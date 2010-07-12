@@ -823,6 +823,7 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 			err = -ENOMEM; // AP: TODO not sure if this is the right error type
 			goto clone_error;
 		}
+		printk("cloned socket %p\n", newsk);
 
 		// AP: TODO there is probably a bunch of stuff that needs to
 		// be cleared/set to make cloning complete.
@@ -857,6 +858,8 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 		err = __inet_csk_listen_start_one(icsk->icsk_ma_sks[s], nr_table_entries);
 		if (err)
 			goto start_error;
+
+		icsk->icsk_ma_sks[s]->sk_max_ack_backlog = nr_table_entries;
 	}
 
 	/* There is race window here: we announce ourselves listening,
