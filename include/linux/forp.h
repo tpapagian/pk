@@ -8,11 +8,9 @@
 #define INIT_FORP		.forp_curr_stack = -1,
 
 struct forp_ret_stack {
-	unsigned long ret;
-	unsigned long func;
+	unsigned int id;
 	unsigned long long calltime;
 	unsigned long long subtime;
-	unsigned long fp;
 };
 
 extern void forp_init_task(struct task_struct *t);

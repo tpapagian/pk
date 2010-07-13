@@ -1479,7 +1479,8 @@ struct task_struct {
 	struct list_head	*scm_work_list;
 #ifdef CONFIG_FORP
 	int forp_curr_stack;
-	struct forp_ret_stack *forp_stack;
+	struct forp_ret_stack forp_stack[FORP_RETSTACK_DEPTH];
+	u64 forp_timestamp;
 #endif
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	/* Index of current stored address in ret_stack */
