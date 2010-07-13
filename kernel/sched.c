@@ -71,6 +71,7 @@
 #include <linux/debugfs.h>
 #include <linux/ctype.h>
 #include <linux/ftrace.h>
+#include <linux/forp.h>
 
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
@@ -5265,6 +5266,7 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 	 */
 	idle->sched_class = &idle_sched_class;
 	ftrace_graph_init_task(idle);
+	forp_init_task(idle);
 }
 
 /*
