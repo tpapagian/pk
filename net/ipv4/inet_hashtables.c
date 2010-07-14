@@ -183,6 +183,7 @@ begin:
 	if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
 		goto begin;
 	if (result) {
+		result = icsk_get_local_listen(result);
 		if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
 			result = NULL;
 		else if (unlikely(compute_score(result, net, hnum, daddr,
@@ -193,8 +194,6 @@ begin:
 	}
 	rcu_read_unlock();
 
-	if (result)
-		result = icsk_get_local_listen(result);
 
 	return result;
 }
