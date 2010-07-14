@@ -110,6 +110,7 @@ void forp_unregister(void)
 	struct forp_rec *rec;
 	int i, cpu;
 
+	mutex_lock(&forp_mu);
 	for (i = 0; i < FORP_REC_SIZE; i++) {
 		for_each_possible_cpu(cpu) {
 			rec = &per_cpu(forp_recs[i], cpu);
@@ -120,6 +121,7 @@ void forp_unregister(void)
 		}
 	}
 	unregister_trace_sched_switch(forp_probe_sched_switch);
+	mutex_unlock(&forp_mu);
 }
 
 void forp_start(unsigned int id)
