@@ -68,6 +68,12 @@ forp_probe_sched_switch(struct rq *__rq, struct task_struct *prev,
 		next->forp_stack[index].calltime += timestamp;
 }
 
+static inline void forp_reset_rec(struct forp_rec *rec)
+{
+	rec->time = 0;
+	rec->count = 0;
+}
+
 void forp_register(struct forp_rec *recs, int n)
 {
 	struct forp_rec *dst, *src;
@@ -79,11 +85,9 @@ void forp_register(struct forp_rec *recs, int n)
 		for (i = 0; i < n; i++) {
 			dst = &per_cpu(forp_recs[i], cpu);
 			src = &recs[i];
-			
-			dst->id = i;
-			dst->time = 0;
-			dst->count = 0;
 
+			forp_reset_rec(dst);
+			dst->id = i;
 			dst->depth = src->depth;
 			dst->name = src->name;
 		}
@@ -138,20 +142,10 @@ static int forp_open_rec(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
-			     size_t cnt, loff_t *ppos)
+static int forp_snprintf_recs(struct forp_rec *recs, char *buf, int sz)
 {
-	unsigned long cpu = (unsigned long)filp->private_data;
-	char *buf, *p;
-	int i, r;
-	/* About 256 characters per line */
-	int sz = FORP_REC_SIZE * 256;
-
-	buf = kmalloc(sz, GFP_KERNEL);
-	if (buf == NULL)
-		return -ENOMEM;
-
-	mutex_lock(&forp_mu);
+	int r, i;
+	char *p;
 
 	r = 0;
 	p = buf;
@@ -160,10 +154,10 @@ static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
 		      "Hit    Time\n"
 		      "  --------                               "
 		      "---    ----\n");
-	p = &buf[r];
+	p += r;
 
 	for (i = 0; i < FORP_REC_SIZE; i++) {
-		struct forp_rec *rec = &per_cpu(forp_recs[i], cpu);
+		struct forp_rec *rec = &recs[i];
 		if (rec->count)
 			r += snprintf(p, sz - r, 
 				      "  %-30.30s  %10llu    %10llu\n",
@@ -171,25 +165,107 @@ static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
 		p = &buf[r];
 	}
 
+	return r;
+}
+
+static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
+			     size_t cnt, loff_t *ppos)
+{
+	unsigned long cpu = (unsigned long)filp->private_data;
+	char *buf;
+	int r;
+	/* About 256 characters per line */
+	int sz = FORP_REC_SIZE * 256;
+
+	buf = kmalloc(sz, GFP_KERNEL);
+	if (buf == NULL)
+		return -ENOMEM;
+
+	mutex_lock(&forp_mu);
+	r = forp_snprintf_recs(&per_cpu(forp_recs[0], cpu), buf, sz);
+	mutex_unlock(&forp_mu);
+
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
 	kfree(buf);
 
-	mutex_unlock(&forp_mu);
 	return r;
 }
 
 static ssize_t forp_write_rec(struct file *filp, const char __user *ubuf,
 			      size_t cnt, loff_t *ppos)
 {
+	unsigned long cpu = (unsigned long)filp->private_data;
+	int i;
+
 	mutex_lock(&forp_mu);
+	for (i = 0; i < FORP_REC_SIZE; i++)
+		forp_reset_rec(&per_cpu(forp_recs[i], cpu));
 	mutex_unlock(&forp_mu);
-	return -ENOSYS;
+	return cnt;
 }
 
 static const struct file_operations forp_rec_ops = {
 	.open 	    = forp_open_rec,
 	.read 	    = forp_read_rec,
 	.write 	    = forp_write_rec,
+};
+
+static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
+				 size_t cnt, loff_t *ppos)
+{
+	int i, cpu, r;
+	/* About 256 characters per line */
+	int sz = FORP_REC_SIZE * 256;
+	char *buf;
+
+	struct forp_rec *recs = kzalloc(FORP_REC_SIZE * sizeof(struct forp_rec), GFP_KERNEL);
+	if (recs == NULL)
+		return -ENOMEM;
+
+	buf = kmalloc(sz, GFP_KERNEL);
+	if (buf == NULL) {
+		kfree(recs);
+		return -ENOMEM;
+	}
+
+	mutex_lock(&forp_mu);
+
+	for (i = 0; i < FORP_REC_SIZE; i++) {
+		for_each_possible_cpu(cpu) {
+			struct forp_rec *r = &per_cpu(forp_recs[i], cpu);
+			recs[i].time += r->time;
+			recs[i].count += r->count;		
+			/* Need to set these only for the first cpu */
+			recs[i].name = r->name;
+			recs[i].depth = r->depth;
+			recs[i].id = r->id;
+		}
+	}
+	mutex_unlock(&forp_mu);
+
+	r = forp_snprintf_recs(recs, buf, sz);
+	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+	kfree(buf);
+	kfree(recs);
+	return r;
+}
+
+static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
+				  size_t cnt, loff_t *ppos)
+{
+	int cpu, i;
+
+	mutex_lock(&forp_mu);
+	for_each_possible_cpu(cpu)
+		for (i = 0; i < FORP_REC_SIZE; i++)
+			forp_reset_rec(&per_cpu(forp_recs[i], cpu));
+	mutex_unlock(&forp_mu);
+	return cnt;
+}
+
+static const struct file_operations forp_all_rec_ops = {
+	.read 	    = forp_read_all_rec,
+	.write 	    = forp_write_all_rec,
 };
 
 static __init int forp_init_debugfs(void)
@@ -221,12 +297,10 @@ static __init int forp_init_debugfs(void)
 		}
 	}
 
-#if 0
 	if (debugfs_create_file("forp-all", 0644, d, NULL, &forp_all_rec_ops) == NULL) {
 		WARN(1, "Could not create summary file\n");
 		return -ENOMEM;
 	}
-#endif
 
 	return 0;
 }
