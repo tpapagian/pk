@@ -1,4 +1,0 @@
-Need to modify following functions to pick the listen socket of the local core:
-
-net/ipv4/af_inet.c: inet_accept
-include/net/inet_hashtables.h: __inet_lookup_skb
