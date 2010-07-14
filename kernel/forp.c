@@ -107,6 +107,18 @@ void forp_register(struct forp_rec *recs, int n)
 
 void forp_unregister(void)
 {
+	struct forp_rec *rec;
+	int i, cpu;
+
+	for (i = 0; i < FORP_REC_SIZE; i++) {
+		for_each_possible_cpu(cpu) {
+			rec = &per_cpu(forp_recs[i], cpu);
+			forp_reset_rec(rec);
+			rec->id = 0;
+			rec->name = NULL;
+			rec->depth = 0;
+		}
+	}
 	unregister_trace_sched_switch(forp_probe_sched_switch);
 }
 
@@ -144,28 +156,26 @@ static int forp_open_rec(struct inode *inode, struct file *filp)
 
 static int forp_snprintf_recs(struct forp_rec *recs, char *buf, int sz)
 {
-	int r, i;
-	char *p;
+	char *p, *e;
+	int i;
 
-	r = 0;
 	p = buf;
+	e = p + sz;
 
-	r += snprintf(p, sz - r, "  Function                               "
+	p += snprintf(p, e - p, "  Function                               "
 		      "Hit    Time\n"
 		      "  --------                               "
 		      "---    ----\n");
-	p += r;
 
 	for (i = 0; i < FORP_REC_SIZE; i++) {
 		struct forp_rec *rec = &recs[i];
 		if (rec->count)
-			r += snprintf(p, sz - r, 
+			p += snprintf(p, e - p, 
 				      "  %-30.30s  %10llu    %10llu\n",
 				      rec->name, rec->count, rec->time);
-		p = &buf[r];
 	}
 
-	return r;
+	return e - buf;
 }
 
 static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
@@ -213,12 +223,13 @@ static const struct file_operations forp_rec_ops = {
 static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
 				 size_t cnt, loff_t *ppos)
 {
-	int i, cpu, r;
 	/* About 256 characters per line */
 	int sz = FORP_REC_SIZE * 256;
+	struct forp_rec *recs;
+	int i, cpu, r;
 	char *buf;
 
-	struct forp_rec *recs = kzalloc(FORP_REC_SIZE * sizeof(struct forp_rec), GFP_KERNEL);
+	recs = kzalloc(FORP_REC_SIZE * sizeof(struct forp_rec), GFP_KERNEL);
 	if (recs == NULL)
 		return -ENOMEM;
 
