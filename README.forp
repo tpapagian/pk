@@ -1,0 +1,1 @@
+* You need CONFIG_TRACEPOINTS=y to support proper timing.
