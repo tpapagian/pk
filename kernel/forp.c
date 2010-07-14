@@ -28,6 +28,8 @@
 
 #include <trace/events/sched.h>
 
+static DEFINE_MUTEX(forp_mu);
+
 #define FORP_REC_SIZE 256
 
 static DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_REC_SIZE], forp_recs);
@@ -66,19 +68,42 @@ forp_probe_sched_switch(struct rq *__rq, struct task_struct *prev,
 		next->forp_stack[index].calltime += timestamp;
 }
 
-void forp_init_rec(void)
+void forp_register(struct forp_rec *recs, int n)
 {
-	int ret, cpu;
+	struct forp_rec *dst, *src;
+	int i, r, cpu;
 
-	ret = register_trace_sched_switch(forp_probe_sched_switch);
-	if (ret)
+	mutex_lock(&forp_mu);
+
+	for_each_possible_cpu(cpu) {	
+		for (i = 0; i < n; i++) {
+			dst = &per_cpu(forp_recs[i], cpu);
+			src = &recs[i];
+			
+			dst->id = i;
+			dst->time = 0;
+			dst->count = 0;
+
+			dst->depth = src->depth;
+			dst->name = src->name;
+		}
+
+		for (; i < FORP_REC_SIZE; i++) {
+			dst = &per_cpu(forp_recs[i], cpu);			
+			memset(dst, 0, sizeof(*dst));
+		}
+	}
+
+	r = register_trace_sched_switch(forp_probe_sched_switch);
+	if (r)
 		printk(KERN_ERR "Couldn't activate tracepoint"
 		       " probe to kernel_sched_switch\n");
+	mutex_unlock(&forp_mu);
+}
 
-	for_each_possible_cpu(cpu) {
-		struct forp_rec *rec = &per_cpu(forp_recs[0], cpu);		
-		rec->depth = 0;
-	}	
+void forp_unregister(void)
+{
+	unregister_trace_sched_switch(forp_probe_sched_switch);
 }
 
 void forp_start(unsigned int id)
@@ -113,41 +138,51 @@ static int forp_open_rec(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static ssize_t
-forp_read_rec(struct file *filp, char __user *ubuf,                                                                                                                                      
-	      size_t cnt, loff_t *ppos)
+static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
+			     size_t cnt, loff_t *ppos)
 {
 	unsigned long cpu = (unsigned long)filp->private_data;
 	char *buf, *p;
 	int i, r;
-
-	/* XXX should lock this */
-
-	int sz = 4096;
+	/* About 256 characters per line */
+	int sz = FORP_REC_SIZE * 256;
 
 	buf = kmalloc(sz, GFP_KERNEL);
 	if (buf == NULL)
 		return -ENOMEM;
 
+	mutex_lock(&forp_mu);
+
 	r = 0;
 	p = buf;
+
+	r += snprintf(p, sz - r, "  Function                               "
+		      "Hit    Time\n"
+		      "  --------                               "
+		      "---    ----\n");
+	p = &buf[r];
+
 	for (i = 0; i < FORP_REC_SIZE; i++) {
 		struct forp_rec *rec = &per_cpu(forp_recs[i], cpu);
 		if (rec->count)
-			r += snprintf(p, sz - r, "%u %llu %llu\n",
-				      rec->id, rec->time, rec->count);
+			r += snprintf(p, sz - r, 
+				      "  %-30.30s  %10llu    %10llu\n",
+				      rec->name, rec->count, rec->time);
 		p = &buf[r];
 	}
 
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
 	kfree(buf);
+
+	mutex_unlock(&forp_mu);
 	return r;
 }
 
-static ssize_t                                                                                                                                                                                     
-forp_write_rec(struct file *filp, const char __user *ubuf,
-	       size_t cnt, loff_t *ppos)
+static ssize_t forp_write_rec(struct file *filp, const char __user *ubuf,
+			      size_t cnt, loff_t *ppos)
 {
+	mutex_lock(&forp_mu);
+	mutex_unlock(&forp_mu);
 	return -ENOSYS;
 }
 
@@ -193,8 +228,18 @@ static __init int forp_init_debugfs(void)
 	}
 #endif
 
-	forp_init_rec();
-
 	return 0;
 }
 fs_initcall(forp_init_debugfs);
+
+static __init int forp_test(void)
+{
+	struct forp_rec recs[2] = {
+		{ .name = "sys_open", .depth = 0 },
+		{ .name = "do_sys_open", .depth = 1 },
+	};
+	
+	forp_register(recs, 2);
+	return 0;
+}
+late_initcall(forp_test);

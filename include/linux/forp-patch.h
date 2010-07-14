@@ -2,7 +2,10 @@
 #define _LINUX_FORP_PATCH_H
 
 struct forp_rec {
+	const char *name;
 	int depth;
+
+	/* private */
 	int id;
 	u64 time;
 	u64 count;
