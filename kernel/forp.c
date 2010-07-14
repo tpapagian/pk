@@ -25,6 +25,7 @@
 #include <linux/debugfs.h>
 #include <linux/forp-patch.h>
 #include <linux/sched.h>
+#include <linux/uaccess.h>
 
 #include <trace/events/sched.h>
 
@@ -33,10 +34,7 @@ static DEFINE_MUTEX(forp_mu);
 #define FORP_REC_SIZE 256
 
 static DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_REC_SIZE], forp_recs);
-
-static struct {
-	struct dentry *root;
-} forp_debugfs;
+static int forp_rec_num;
 
 void forp_init_task(struct task_struct *t)
 {
@@ -74,7 +72,7 @@ static inline void forp_reset_rec(struct forp_rec *rec)
 	rec->count = 0;
 }
 
-void forp_register(struct forp_rec *recs, int n)
+static void forp_register(struct forp_rec *recs, int n)
 {
 	struct forp_rec *dst, *src;
 	int i, r, cpu;
@@ -89,7 +87,7 @@ void forp_register(struct forp_rec *recs, int n)
 			forp_reset_rec(dst);
 			dst->id = i;
 			dst->depth = src->depth;
-			dst->name = src->name;
+			strcpy(dst->name, src->name);
 		}
 
 		for (; i < FORP_REC_SIZE; i++) {
@@ -97,6 +95,8 @@ void forp_register(struct forp_rec *recs, int n)
 			memset(dst, 0, sizeof(*dst));
 		}
 	}
+
+	forp_rec_num = n;
 
 	r = register_trace_sched_switch(forp_probe_sched_switch);
 	if (r)
@@ -111,15 +111,18 @@ void forp_unregister(void)
 	int i, cpu;
 
 	mutex_lock(&forp_mu);
-	for (i = 0; i < FORP_REC_SIZE; i++) {
+	for (i = 0; i < forp_rec_num; i++) {
 		for_each_possible_cpu(cpu) {
 			rec = &per_cpu(forp_recs[i], cpu);
 			forp_reset_rec(rec);
 			rec->id = 0;
-			rec->name = NULL;
+			memset(rec->name, 0, sizeof(rec->name));
 			rec->depth = 0;
 		}
 	}
+
+	forp_rec_num = 0;
+
 	unregister_trace_sched_switch(forp_probe_sched_switch);
 	mutex_unlock(&forp_mu);
 }
@@ -139,9 +142,15 @@ void forp_start(unsigned int id)
 
 void forp_end(void)
 {
+	struct forp_ret_stack *f;	
+	struct forp_rec *rec;
 	int i = current->forp_curr_stack;
-	struct forp_ret_stack *f = &current->forp_stack[i];
-	struct forp_rec *rec = &__get_cpu_var(forp_recs[f->id]);
+
+	if (i < 0)
+		return;
+
+	f = &current->forp_stack[i];
+	rec = &__get_cpu_var(forp_recs[f->id]);
 	
 	/* XXX time and count should be atomic */
 	rec->time += forp_time() - f->calltime;
@@ -156,7 +165,7 @@ static int forp_open_rec(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static int forp_snprintf_recs(struct forp_rec *recs, char *buf, int sz)
+static int forp_snprintf_recs(struct forp_rec *recs, int n, char *buf, int sz)
 {
 	char *p, *e;
 	int i;
@@ -169,7 +178,7 @@ static int forp_snprintf_recs(struct forp_rec *recs, char *buf, int sz)
 		      "  --------                               "
 		      "---    ----\n");
 
-	for (i = 0; i < FORP_REC_SIZE; i++) {
+	for (i = 0; i < n; i++) {
 		struct forp_rec *rec = &recs[i];
 		if (rec->count)
 			p += snprintf(p, e - p, 
@@ -194,7 +203,8 @@ static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
 		return -ENOMEM;
 
 	mutex_lock(&forp_mu);
-	r = forp_snprintf_recs(&per_cpu(forp_recs[0], cpu), buf, sz);
+	r = forp_snprintf_recs(&per_cpu(forp_recs[0], cpu), forp_rec_num,
+			       buf, sz);
 	mutex_unlock(&forp_mu);
 
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
@@ -231,7 +241,7 @@ static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
 	int i, cpu, r;
 	char *buf;
 
-	recs = kzalloc(FORP_REC_SIZE * sizeof(struct forp_rec), GFP_KERNEL);
+	recs = kzalloc(forp_rec_num * sizeof(struct forp_rec), GFP_KERNEL);
 	if (recs == NULL)
 		return -ENOMEM;
 
@@ -243,20 +253,20 @@ static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
 
 	mutex_lock(&forp_mu);
 
-	for (i = 0; i < FORP_REC_SIZE; i++) {
+	for (i = 0; i < forp_rec_num; i++) {
 		for_each_possible_cpu(cpu) {
 			struct forp_rec *r = &per_cpu(forp_recs[i], cpu);
 			recs[i].time += r->time;
 			recs[i].count += r->count;		
 			/* Need to set these only for the first cpu */
-			recs[i].name = r->name;
+			strcpy(recs[i].name, r->name);
 			recs[i].depth = r->depth;
 			recs[i].id = r->id;
 		}
 	}
 	mutex_unlock(&forp_mu);
 
-	r = forp_snprintf_recs(recs, buf, sz);
+	r = forp_snprintf_recs(recs, forp_rec_num, buf, sz);
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
 	kfree(buf);
 	kfree(recs);
@@ -270,7 +280,7 @@ static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
 
 	mutex_lock(&forp_mu);
 	for_each_possible_cpu(cpu)
-		for (i = 0; i < FORP_REC_SIZE; i++)
+		for (i = 0; i < forp_rec_num; i++)
 			forp_reset_rec(&per_cpu(forp_recs[i], cpu));
 	mutex_unlock(&forp_mu);
 	return cnt;
@@ -279,6 +289,95 @@ static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
 static const struct file_operations forp_all_rec_ops = {
 	.read 	    = forp_read_all_rec,
 	.write 	    = forp_write_all_rec,
+};
+
+static ssize_t
+forp_config_read(struct file *filp, char __user *ubuf,
+		 size_t cnt, loff_t *ppos)
+{
+	struct forp_rec *rec;
+	unsigned long sz;
+	char *buf, *p;
+	int i, r = 0;
+	
+	rec = &per_cpu(forp_recs[0], 0);
+	
+	/* Roughly (log10(MAX_ULONG) + ':' + 32) * forp_rec_num */
+	sz = (20 + sizeof(rec->name)) * forp_rec_num;
+	if ((buf = kmalloc(sz, GFP_KERNEL)) == NULL)
+		return -ENOMEM;
+	
+	p = buf;
+	mutex_lock(&forp_mu);
+	for (i = 0; i < forp_rec_num; i++) {
+		r += snprintf(p, sz - r, "%u:%s ", rec[i].depth, rec[i].name);
+		p = &buf[r];
+	}
+	mutex_unlock(&forp_mu);
+	
+	if (r)
+		buf[r - 1] = '\n';
+	
+	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+	kfree(buf);
+	return r;
+}
+
+static ssize_t
+forp_config_write(struct file *filp, const char __user *ubuf,
+                 size_t cnt, loff_t *ppos)
+{
+        struct forp_rec *recs;
+        unsigned int count, num = 0;
+        char *p, *buf;
+        int ret = -EINVAL;
+
+        if ((buf = kmalloc(cnt + 1, GFP_KERNEL)) == NULL)
+                return -ENOMEM;
+
+        recs = kzalloc(sizeof(*recs) * FORP_REC_SIZE, GFP_KERNEL);
+        if (recs == NULL) {
+                kfree(buf);
+                return -ENOMEM;
+        }
+
+        if (copy_from_user(buf, ubuf, cnt)) {
+                ret = -EFAULT;
+                goto done;
+        }
+        buf[cnt] = 0;
+
+        p = buf;
+        while (*p) {
+                if (num == FORP_REC_SIZE)
+                        goto done;
+
+                if (sscanf(p, "%u:%32s%n", &recs[num].depth, 
+			   recs[num].name, &count) != 2)
+                        goto done;
+
+                num++;
+                p += count;
+
+                if (*p != ';' && *p != ',' && *p != ' ')
+                        break;
+                p++;
+        }
+
+	forp_register(recs, num);
+
+        *ppos += cnt;
+        ret = cnt;
+
+done:
+        kfree(recs);
+        kfree(buf);
+        return ret;
+}
+
+static const struct file_operations forp_config_ops = {
+	.read           = forp_config_read,
+	.write          = forp_config_write,
 };
 
 static __init int forp_init_debugfs(void)
@@ -292,7 +391,6 @@ static __init int forp_init_debugfs(void)
 		printk(KERN_ERR "Could not create debugfs directory 'forp'\n");
 		return -ENOMEM;
 	}
-	forp_debugfs.root = d;
 
 	for_each_possible_cpu(cpu) {
 		name = kmalloc(32, GFP_KERNEL);
@@ -315,10 +413,16 @@ static __init int forp_init_debugfs(void)
 		return -ENOMEM;
 	}
 
+	if (debugfs_create_file("forp-conf", 0644, d, NULL, &forp_config_ops) == NULL) {
+		WARN(1, "Could not create config file\n");
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 fs_initcall(forp_init_debugfs);
 
+#if 0
 static __init int forp_test(void)
 {
 	struct forp_rec recs[2] = {
@@ -330,3 +434,4 @@ static __init int forp_test(void)
 	return 0;
 }
 late_initcall(forp_test);
+#endif
