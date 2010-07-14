@@ -20,6 +20,7 @@
 #include <net/inet_hashtables.h>
 #include <net/inet_timewait_sock.h>
 #include <net/ip.h>
+#include <net/tcp.h>
 #include <net/route.h>
 #include <net/tcp_states.h>
 #include <net/xfrm.h>
@@ -622,9 +623,8 @@ static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority)
 		newicsk->icsk_backoff	  = 0;
 		newicsk->icsk_probes_out  = 0;
 
-		/****************/
-
 #if 0
+		// AP: TODO: not sure if this applies
 		struct tcp_sock *oldtp = tcp_sk(sk);
 		struct tcp_cookie_values *oldcvp = oldtp->cookie_values;
 
@@ -652,10 +652,7 @@ static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority)
 			}
 		}
 
-		// AP: I do not think a timer is needed for listen sockets
-		tcp_init_xmit_timers(newsk);
 #endif
-		/****************/
 
 		skb_queue_head_init(&newtp->out_of_order_queue);
 
@@ -672,6 +669,9 @@ static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority)
 		/* Deinitialize accept_queue to trap illegal accesses. */
 		// AP: TODO not sure
 		memset(&newicsk->icsk_accept_queue, 0, sizeof(newicsk->icsk_accept_queue));
+
+		// AP: I do not think a timer is needed for listen sockets
+		tcp_init_xmit_timers(newsk);
 	}
 	return newsk;
 }
