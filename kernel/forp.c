@@ -42,6 +42,18 @@ void forp_init_task(struct task_struct *t)
 	t->forp_curr_stack = -1;
 }
 
+void forp_exit_task(struct task_struct *t)
+{
+	if (!forp_enable)                                                                                                                                                                                                    
+                return;
+
+        if (current == NULL)
+                return;
+
+        while (current->forp_curr_stack >= 0)
+		forp_end();
+}
+
 static void
 forp_probe_sched_switch(struct rq *__rq, struct task_struct *prev,
 			struct task_struct *next)
