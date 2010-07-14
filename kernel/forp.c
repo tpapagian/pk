@@ -35,6 +35,7 @@ static DEFINE_MUTEX(forp_mu);
 
 static DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_REC_SIZE], forp_recs);
 static int forp_rec_num;
+static int forp_enable;
 
 void forp_init_task(struct task_struct *t)
 {
@@ -97,6 +98,7 @@ static void forp_register(struct forp_rec *recs, int n)
 	}
 
 	forp_rec_num = n;
+	forp_enable = 1;
 
 	r = register_trace_sched_switch(forp_probe_sched_switch);
 	if (r)
@@ -105,32 +107,17 @@ static void forp_register(struct forp_rec *recs, int n)
 	mutex_unlock(&forp_mu);
 }
 
-void forp_unregister(void)
+static void forp_unregister(void)
 {
-	struct forp_rec *rec;
-	int i, cpu;
-
 	mutex_lock(&forp_mu);
-	for (i = 0; i < forp_rec_num; i++) {
-		for_each_possible_cpu(cpu) {
-			rec = &per_cpu(forp_recs[i], cpu);
-			forp_reset_rec(rec);
-			rec->id = 0;
-			memset(rec->name, 0, sizeof(rec->name));
-			rec->depth = 0;
-		}
-	}
-
-	forp_rec_num = 0;
-
+	forp_enable = 0;
 	unregister_trace_sched_switch(forp_probe_sched_switch);
 	mutex_unlock(&forp_mu);
 }
 
-void forp_start(unsigned int id)
-{
+void forp_start(unsigned int id){
 	struct forp_rec *rec = &__get_cpu_var(forp_recs[id]);
-	if (rec->depth == current->forp_curr_stack + 1) {
+	if (forp_enable && rec->depth == current->forp_curr_stack + 1) {
 		int i = ++current->forp_curr_stack;
 		struct forp_ret_stack *f = &current->forp_stack[i];
 
@@ -186,7 +173,7 @@ static int forp_snprintf_recs(struct forp_rec *recs, int n, char *buf, int sz)
 				      rec->name, rec->count, rec->time);
 	}
 
-	return e - buf;
+	return p - buf;
 }
 
 static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
@@ -198,7 +185,7 @@ static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
 	/* About 256 characters per line */
 	int sz = FORP_REC_SIZE * 256;
 
-	buf = kmalloc(sz, GFP_KERNEL);
+	buf = kzalloc(sz, GFP_KERNEL);
 	if (buf == NULL)
 		return -ENOMEM;
 
@@ -245,7 +232,7 @@ static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
 	if (recs == NULL)
 		return -ENOMEM;
 
-	buf = kmalloc(sz, GFP_KERNEL);
+	buf = kzalloc(sz, GFP_KERNEL);
 	if (buf == NULL) {
 		kfree(recs);
 		return -ENOMEM;
@@ -346,6 +333,12 @@ forp_config_write(struct file *filp, const char __user *ubuf,
                 goto done;
         }
         buf[cnt] = 0;
+
+	if (strlen(buf) <= 1) {
+		forp_unregister();
+		ret = cnt;
+		goto done;
+	}
 
         p = buf;
         while (*p) {
