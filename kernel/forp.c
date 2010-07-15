@@ -34,8 +34,8 @@ static DEFINE_MUTEX(forp_mu);
 #define FORP_REC_SIZE 256
 
 static DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_REC_SIZE], forp_recs);
-static int forp_rec_num;
-static int forp_enable;
+static int forp_rec_num __read_mostly;
+static int forp_enable __read_mostly;
 
 void forp_init_task(struct task_struct *t)
 {
@@ -44,7 +44,7 @@ void forp_init_task(struct task_struct *t)
 
 void forp_exit_task(struct task_struct *t)
 {
-	if (!forp_enable)                                                                                                                                                                                                    
+	if (!forp_enable)
                 return;
 
         if (current == NULL)
@@ -85,10 +85,37 @@ static inline void forp_reset_rec(struct forp_rec *rec)
 	rec->count = 0;
 }
 
+static int forp_init(void)
+{
+	int r, i, cpu;
+
+	r = register_trace_sched_switch(forp_probe_sched_switch);
+	if (r) {
+		printk(KERN_ERR "Couldn't activate tracepoint"
+		       " probe to kernel_sched_switch: %d\n", r);
+		return r;
+	}
+
+	for_each_possible_cpu(cpu) {	
+		for (i = 0; i < forp_rec_num; i++) {
+			forp_reset_rec(&per_cpu(forp_recs[i], cpu));
+		}
+	}
+
+	forp_enable = 1;
+	return 0;
+}
+
+static void forp_deinit(void)
+{
+	unregister_trace_sched_switch(forp_probe_sched_switch);
+	forp_enable = 0;
+}
+
 static void forp_register(struct forp_rec *recs, int n)
 {
 	struct forp_rec *dst, *src;
-	int i, r, cpu;
+	int i, cpu;
 
 	mutex_lock(&forp_mu);
 
@@ -110,20 +137,6 @@ static void forp_register(struct forp_rec *recs, int n)
 	}
 
 	forp_rec_num = n;
-	forp_enable = 1;
-
-	r = register_trace_sched_switch(forp_probe_sched_switch);
-	if (r)
-		printk(KERN_ERR "Couldn't activate tracepoint"
-		       " probe to kernel_sched_switch\n");
-	mutex_unlock(&forp_mu);
-}
-
-static void forp_unregister(void)
-{
-	mutex_lock(&forp_mu);
-	forp_enable = 0;
-	unregister_trace_sched_switch(forp_probe_sched_switch);
 	mutex_unlock(&forp_mu);
 }
 
@@ -344,12 +357,6 @@ forp_config_write(struct file *filp, const char __user *ubuf,
         }
         buf[cnt] = 0;
 
-	if (strlen(buf) <= 1) {
-		forp_unregister();
-		ret = cnt;
-		goto done;
-	}
-
         p = buf;
         while (*p) {
                 if (num == FORP_REC_SIZE)
@@ -381,6 +388,60 @@ done:
 static const struct file_operations forp_config_ops = {
 	.read           = forp_config_read,
 	.write          = forp_config_write,
+};
+
+static ssize_t
+forp_enable_read(struct file *filp, char __user *ubuf,
+           size_t cnt, loff_t *ppos)
+{
+        char buf[64];           /* big enough to hold a number */
+        int r;
+
+        r = sprintf(buf, "%u\n", forp_enable);
+        return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t
+forp_enable_write(struct file *filp, const char __user *ubuf,
+		  size_t cnt, loff_t *ppos)
+{
+	unsigned long val;
+	char buf[64];           /* big enough to hold a number */
+	int ret;
+	
+	if (cnt >= sizeof(buf))
+		return -EINVAL;
+	
+	if (copy_from_user(&buf, ubuf, cnt))
+	    return -EFAULT;
+    
+	buf[cnt] = 0;
+	
+	ret = strict_strtoul(buf, 10, &val);
+	if (ret < 0)
+		return ret;
+	
+	val = !!val;
+
+	mutex_lock(&forp_mu);
+	if (forp_enable ^ val) {
+		if (val) {
+			ret = forp_init();
+			if (ret)
+				goto out;
+		} else {
+			forp_deinit();
+		}
+	}
+out:
+	mutex_unlock(&forp_mu);
+	*ppos += cnt;
+	return cnt;
+}
+
+static const struct file_operations forp_enable_ops = {
+	.read           = forp_enable_read,
+	.write          = forp_enable_write,
 };
 
 static __init int forp_init_debugfs(void)
@@ -418,6 +479,11 @@ static __init int forp_init_debugfs(void)
 
 	if (debugfs_create_file("forp-conf", 0644, d, NULL, &forp_config_ops) == NULL) {
 		WARN(1, "Could not create config file\n");
+		return -ENOMEM;
+	}
+
+	if (debugfs_create_file("forp-enable", 0644, d, NULL, &forp_enable_ops) == NULL) {
+		WARN(1, "Could not create enable file\n");
 		return -ENOMEM;
 	}
 
