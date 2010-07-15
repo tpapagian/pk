@@ -60,7 +60,7 @@ EXPORT_SYMBOL_GPL(fs_kobj);
 
 static int per_cpu_mntcount = 64;
 static int per_cpu_max_search = 128;
-static int per_cpu_strict = 1;
+static int per_cpu_strict = 0;
 
 static atomic_t per_cpu_flushing;
 static struct mutex per_cpu_flush_mutex;
