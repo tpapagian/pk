@@ -172,10 +172,8 @@ static int forp_snprintf_recs(struct forp_rec *recs, int n, char *buf, int sz)
 	p = buf;
 	e = p + sz;
 
-	p += snprintf(p, e - p, "  Function                               "
-		      "Hit    Time\n"
-		      "  --------                               "
-		      "---    ----\n");
+	p += snprintf(p, e - p, "# Function                               "
+		      "Hit    Time\n");
 
 	for (i = 0; i < n; i++) {
 		struct forp_rec *rec = &recs[i];
