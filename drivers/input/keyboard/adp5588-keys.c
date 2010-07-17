@@ -19,6 +19,7 @@
 #include <linux/platform_device.h>
 #include <linux/input.h>
 #include <linux/i2c.h>
+#include <linux/slab.h>
 
 #include <linux/i2c/adp5588.h>
 
@@ -286,7 +287,6 @@ static int __devexit adp5588_remove(struct i2c_client *client)
 	free_irq(client->irq, kpad);
 	cancel_delayed_work_sync(&kpad->work);
 	input_unregister_device(kpad->input);
-	i2c_set_clientdata(client, NULL);
 	kfree(kpad);
 
 	return 0;

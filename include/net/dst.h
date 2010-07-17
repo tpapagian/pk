@@ -36,6 +36,12 @@
 
 struct sk_buff;
 
+struct per_cpu_dst_entry {
+	unsigned int count;
+	spinlock_t lock;
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+};
+
 struct dst_entry {
 	struct rcu_head		rcu_head;
 	struct dst_entry	*child;
@@ -77,19 +83,25 @@ struct dst_entry {
 	__u32			__pad2;
 #endif
 
+	struct per_cpu_dst_entry *per_cpu[NR_CPUS];
 
 	/*
 	 * Align __refcnt to a 64 bytes alignment
 	 * (L1_CACHE_SIZE would be too much)
 	 */
 #ifdef CONFIG_64BIT
-	long			__pad_to_align_refcnt[1];
+	/* aligned SMP_CACHE_BYTES below should handle this */
+#if 0
+	long			__pad_to_align_refcnt[6];
+#endif
 #endif
 	/*
 	 * __refcnt wants to be on a different cache line from
 	 * input/output/ops or performance tanks badly
 	 */
-	atomic_t		__refcnt;	/* client references	*/
+	atomic_t		__refcnt /* client references	*/
+	__attribute__((__aligned__(SMP_CACHE_BYTES)));	
+
 	int			__use;
 	unsigned long		lastuse;
 	union {
@@ -153,17 +165,35 @@ dst_metric_locked(struct dst_entry *dst, int metric)
 
 static inline void dst_hold(struct dst_entry * dst)
 {
+	struct per_cpu_dst_entry *p;
+
 	/*
 	 * If your kernel compilation stops here, please check
 	 * __pad_to_align_refcnt declaration in struct dst_entry
 	 */
 	BUILD_BUG_ON(offsetof(struct dst_entry, __refcnt) & 63);
+	
+	p = dst->per_cpu[smp_processor_id()];
+	if (spin_trylock(&p->lock)) {
+		if (p->count) {
+			p->count--;
+			spin_unlock(&p->lock);
+			return;
+		}
+		spin_unlock(&p->lock);		
+	} 
 	atomic_inc(&dst->__refcnt);
 }
 
 static inline void dst_use(struct dst_entry *dst, unsigned long time)
 {
 	dst_hold(dst);
+	dst->__use++;
+	dst->lastuse = time;
+}
+
+static inline void dst_use_noref(struct dst_entry *dst, unsigned long time)
+{
 	dst->__use++;
 	dst->lastuse = time;
 }
@@ -177,22 +207,78 @@ struct dst_entry * dst_clone(struct dst_entry * dst)
 }
 
 extern void dst_release(struct dst_entry *dst);
+
+static inline void refdst_drop(unsigned long refdst)
+{
+	if (!(refdst & SKB_DST_NOREF))
+		dst_release((struct dst_entry *)(refdst & SKB_DST_PTRMASK));
+}
+
+/**
+ * skb_dst_drop - drops skb dst
+ * @skb: buffer
+ *
+ * Drops dst reference count if a reference was taken.
+ */
 static inline void skb_dst_drop(struct sk_buff *skb)
 {
-	if (skb->_skb_dst)
-		dst_release(skb_dst(skb));
-	skb->_skb_dst = 0UL;
+	if (skb->_skb_refdst) {
+		refdst_drop(skb->_skb_refdst);
+		skb->_skb_refdst = 0UL;
+	}
+}
+
+static inline void skb_dst_copy(struct sk_buff *nskb, const struct sk_buff *oskb)
+{
+	nskb->_skb_refdst = oskb->_skb_refdst;
+	if (!(nskb->_skb_refdst & SKB_DST_NOREF))
+		dst_clone(skb_dst(nskb));
+}
+
+/**
+ * skb_dst_force - makes sure skb dst is refcounted
+ * @skb: buffer
+ *
+ * If dst is not yet refcounted, let's do it
+ */
+static inline void skb_dst_force(struct sk_buff *skb)
+{
+	if (skb_dst_is_noref(skb)) {
+		WARN_ON(!rcu_read_lock_held());
+		skb->_skb_refdst &= ~SKB_DST_NOREF;
+		dst_clone(skb_dst(skb));
+	}
+}
+
+
+/**
+ *	skb_tunnel_rx - prepare skb for rx reinsert
+ *	@skb: buffer
+ *	@dev: tunnel device
+ *
+ *	After decapsulation, packet is going to re-enter (netif_rx()) our stack,
+ *	so make some cleanups, and perform accounting.
+ */
+static inline void skb_tunnel_rx(struct sk_buff *skb, struct net_device *dev)
+{
+	skb->dev = dev;
+	/* TODO : stats should be SMP safe */
+	dev->stats.rx_packets++;
+	dev->stats.rx_bytes += skb->len;
+	skb->rxhash = 0;
+	skb_dst_drop(skb);
+	nf_reset(skb);
 }
 
 /* Children define the path of the packet through the
  * Linux networking.  Thus, destinations are stackable.
  */
 
-static inline struct dst_entry *dst_pop(struct dst_entry *dst)
+static inline struct dst_entry *skb_dst_pop(struct sk_buff *skb)
 {
-	struct dst_entry *child = dst_clone(dst->child);
+	struct dst_entry *child = skb_dst(skb)->child;
 
-	dst_release(dst);
+	skb_dst_drop(skb);
 	return child;
 }
 
@@ -223,21 +309,6 @@ static inline void dst_confirm(struct dst_entry *dst)
 {
 	if (dst)
 		neigh_confirm(dst->neighbour);
-}
-
-static inline void dst_negative_advice(struct dst_entry **dst_p,
-				       struct sock *sk)
-{
-	struct dst_entry * dst = *dst_p;
-	if (dst && dst->ops->negative_advice) {
-		*dst_p = dst->ops->negative_advice(dst);
-
-		if (dst != *dst_p) {
-			extern void sk_reset_txq(struct sock *sk);
-
-			sk_reset_txq(sk);
-		}
-	}
 }
 
 static inline void dst_link_failure(struct sk_buff *skb)
