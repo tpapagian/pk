@@ -334,10 +334,9 @@ again:
 
 void dst_release(struct dst_entry *dst)
 {
-	struct per_cpu_dst_entry *p;
-
 	if (dst) {
 		int newrefcnt;
+		struct per_cpu_dst_entry *p;
 
 		p = dst->per_cpu[smp_processor_id()];
 		if (spin_trylock(&p->lock)) {
