@@ -337,27 +337,27 @@ void dst_release(struct dst_entry *dst)
 	struct per_cpu_dst_entry *p;
 
 	if (dst) {
-               int newrefcnt;
+		int newrefcnt;
 
-	       p = dst->per_cpu[smp_processor_id()];
-	       if (spin_trylock(&p->lock)) {
-		       if (p->count == 0) {
-			       p->count += PER_CPU_BATCH + 1;
-			       atomic_add(PER_CPU_BATCH, &dst->__refcnt);
-		       } else if (p->count > PER_CPU_BATCH_MAX) {
-			       p->count++;
-			       p->count -= PER_CPU_BATCH;
-			       atomic_sub(PER_CPU_BATCH, &dst->__refcnt);
-		       } else {
-			       p->count++;
-		       }
-		       spin_unlock(&p->lock);
-		       return;
-	       }
-
-	       smp_mb__before_atomic_dec();
-	       newrefcnt = atomic_dec_return(&dst->__refcnt);
-	       WARN_ON(newrefcnt < 0);
+		p = dst->per_cpu[smp_processor_id()];
+		if (spin_trylock(&p->lock)) {
+			if (p->count == 0) {
+				p->count += PER_CPU_BATCH + 1;
+				atomic_add(PER_CPU_BATCH, &dst->__refcnt);
+			} else if (p->count > PER_CPU_BATCH_MAX) {
+				p->count++;
+				p->count -= PER_CPU_BATCH;
+				atomic_sub(PER_CPU_BATCH, &dst->__refcnt);
+			} else {
+				p->count++;
+			}
+			spin_unlock(&p->lock);
+			return;
+		}
+		
+		smp_mb__before_atomic_dec();
+		newrefcnt = atomic_dec_return(&dst->__refcnt);
+		WARN_ON(newrefcnt < 0);
 	}
 }
 EXPORT_SYMBOL(dst_release);
