@@ -22,6 +22,68 @@
 
 #include <net/dst.h>
 
+#define PER_CPU_BATCH		64
+#define PER_CPU_BATCH_MAX 	128
+
+static struct kmem_cache *per_cpu_cache;
+
+static void per_cpu_flush(struct dst_entry *dst)
+{
+	struct per_cpu_dst_entry *p;
+	int c;
+
+	for_each_possible_cpu(c) {
+		p = dst->per_cpu[c];
+		if (spin_trylock(&p->lock)) {
+			atomic_sub(p->count, &dst->__refcnt);
+			p->count = 0;
+			spin_unlock(&p->lock);
+		}
+	}
+}
+
+static void free_per_cpu_dst_entry(struct dst_entry *dst)
+{
+	int c;
+
+	for_each_possible_cpu(c) {
+		if (dst->per_cpu[c])
+			kmem_cache_free(per_cpu_cache, dst->per_cpu[c]);
+		dst->per_cpu[c] = NULL;
+	}
+}
+
+static int alloc_per_cpu_dst_entry(struct dst_entry *dst)
+{
+	struct per_cpu_dst_entry *p;
+	int c;
+
+	memset(dst->per_cpu, 0, sizeof(dst->per_cpu));
+
+	for_each_possible_cpu(c) { 
+		p = kmem_cache_alloc_node(per_cpu_cache, GFP_ATOMIC, 
+					  cpu_to_node(c));
+		if (p == NULL) {
+			free_per_cpu_dst_entry(dst);
+			return -ENOMEM;;
+		}
+		spin_lock_init(&p->lock);
+		p->count = 0;
+		dst->per_cpu[c] = p;
+	}
+
+	return 0;
+}
+
+int __init dst_per_cpu_init(void)
+{
+	per_cpu_cache = kmem_cache_create("per_cpu_dst_entry_cache", 
+					  sizeof(struct per_cpu_dst_entry),
+					  0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL);
+	return 0;
+}
+fs_initcall(dst_per_cpu_init);
+
 /*
  * Theory of operations:
  * 1) We use a list, protected by a spinlock, to add
@@ -82,6 +144,7 @@ loop:
 		next = dst->next;
 		prefetch(&next->next);
 		cond_resched();
+		per_cpu_flush(dst);
 		if (likely(atomic_read(&dst->__refcnt))) {
 			last->next = dst;
 			last = dst;
@@ -175,6 +238,12 @@ void *dst_alloc(struct dst_ops *ops)
 	dst = kmem_cache_zalloc(ops->kmem_cachep, GFP_ATOMIC);
 	if (!dst)
 		return NULL;
+
+	if (alloc_per_cpu_dst_entry(dst)) {
+		kmem_cache_free(ops->kmem_cachep, dst);
+		return NULL;
+	}
+
 	atomic_set(&dst->__refcnt, 0);
 	dst->ops = ops;
 	dst->lastuse = jiffies;
@@ -245,6 +314,7 @@ again:
 #if RT_CACHE_DEBUG >= 2
 	atomic_dec(&dst_total);
 #endif
+	free_per_cpu_dst_entry(dst);
 	kmem_cache_free(dst->ops->kmem_cachep, dst);
 
 	dst = child;
@@ -266,14 +336,36 @@ again:
 }
 EXPORT_SYMBOL(dst_destroy);
 
+static inline void __dst_release(struct dst_entry *dst)
+{
+	int newrefcnt;
+
+	smp_mb__before_atomic_dec();
+	newrefcnt = atomic_dec_return(&dst->__refcnt);
+	WARN_ON(newrefcnt < 0);
+}
+
 void dst_release(struct dst_entry *dst)
 {
 	if (dst) {
-		int newrefcnt;
+		struct per_cpu_dst_entry *p;
 
-		smp_mb__before_atomic_dec();
-		newrefcnt = atomic_dec_return(&dst->__refcnt);
-		WARN_ON(newrefcnt < 0);
+		p = dst->per_cpu[smp_processor_id()];
+		if (spin_trylock(&p->lock)) {
+			if (p->count == 0) {
+				p->count += PER_CPU_BATCH + 1;
+				atomic_add(PER_CPU_BATCH, &dst->__refcnt);
+			} else if (p->count > PER_CPU_BATCH_MAX) {
+				p->count++;
+				p->count -= PER_CPU_BATCH;
+				atomic_sub(PER_CPU_BATCH, &dst->__refcnt);
+			} else {
+				p->count++;
+			}
+			spin_unlock(&p->lock);
+			return;
+		}
+		__dst_release(dst);
 	}
 }
 EXPORT_SYMBOL(dst_release);
