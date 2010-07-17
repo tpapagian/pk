@@ -32,7 +32,7 @@ const struct file_operations generic_ro_fops = {
 EXPORT_SYMBOL(generic_ro_fops);
 
 /* Controlled by sysctl fs/enable_lseek_lock */
-int enable_lseek_lock;
+static int enable_lseek_lock;
 
 /**
  * generic_file_llseek_unlocked - lockless generic llseek implementation
@@ -924,3 +924,27 @@ SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, si
 
 	return do_sendfile(out_fd, in_fd, NULL, count, 0);
 }
+
+static int lseek_enable_min = 0;
+static int lseek_enable_max = 1;
+
+static struct ctl_table lseek_ctl_table[] = {
+	{
+		.procname	= "enable_lseek_lock",
+		.data		= &enable_lseek_lock,
+		.maxlen		= sizeof(enable_lseek_lock),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &lseek_enable_min,
+		.extra2		= &lseek_enable_max,
+	},
+	{ }
+};
+
+static int __init lseek_sysctl_init(void)
+{
+	struct ctl_path path[] = { { "fs" }, { NULL } };
+	register_sysctl_paths(path, lseek_ctl_table);
+	return 0;
+}
+fs_initcall(lseek_sysctl_init);
