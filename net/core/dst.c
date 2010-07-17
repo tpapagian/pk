@@ -332,10 +332,18 @@ again:
 	return NULL;
 }
 
+static inline void __dst_release(struct dst_entry *dst)
+{
+	int newrefcnt;
+
+	smp_mb__before_atomic_dec();
+	newrefcnt = atomic_dec_return(&dst->__refcnt);
+	WARN_ON(newrefcnt < 0);
+}
+
 void dst_release(struct dst_entry *dst)
 {
 	if (dst) {
-		int newrefcnt;
 		struct per_cpu_dst_entry *p;
 
 		p = dst->per_cpu[smp_processor_id()];
@@ -353,10 +361,7 @@ void dst_release(struct dst_entry *dst)
 			spin_unlock(&p->lock);
 			return;
 		}
-		
-		smp_mb__before_atomic_dec();
-		newrefcnt = atomic_dec_return(&dst->__refcnt);
-		WARN_ON(newrefcnt < 0);
+		__dst_release(dst);
 	}
 }
 EXPORT_SYMBOL(dst_release);
