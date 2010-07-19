@@ -501,7 +501,7 @@ forp_do_syscall:
 	call *sys_call_table(,%rax,8)  # XXX:	 rip relative	
 	movq %rax,RAX-ARGOFFSET(%rsp)
 forp_done:
-#else
+#else /* !CONFIG_FORP */
 	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
 	movq %rax,RAX-ARGOFFSET(%rsp)
 #endif
@@ -1121,6 +1121,24 @@ ENTRY(\sym)
 END(\sym)
 .endm
 
+#ifdef CONFIG_FORP
+ENTRY(forp_do_page_fault)
+	cmpl $0, forp_enable
+	je 1f
+
+	pushq %rsi
+	pushq %rdi
+	movq $510, %rdi
+	call forp_start_entry
+	popq %rdi
+	popq %rsi
+	call do_page_fault
+	call forp_end_entry
+	ret
+1:	call do_page_fault
+	ret
+#endif
+	
 	/* error code is on the stack already */
 .macro paranoiderrorentry sym do_sym
 ENTRY(\sym)
@@ -1364,7 +1382,11 @@ zeroentry xen_int3 do_int3
 errorentry xen_stack_segment do_stack_segment
 #endif
 errorentry general_protection do_general_protection
+#ifdef CONFIG_FORP
+errorentry page_fault forp_do_page_fault
+#else /* !CONFIG_FORP */
 errorentry page_fault do_page_fault
+#endif
 #ifdef CONFIG_X86_MCE
 paranoidzeroentry machine_check *machine_check_vector(%rip)
 #endif
