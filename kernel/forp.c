@@ -31,11 +31,48 @@
 
 static DEFINE_MUTEX(forp_mu);
 
-#define FORP_REC_SIZE 256
+#define FORP_REC_SIZE		256
+#define FORP_ENTRY_REC_SIZE 	512
 
 static DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_REC_SIZE], forp_recs);
+static DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_ENTRY_REC_SIZE], 
+			      forp_entry_recs);
+
 static int forp_rec_num __read_mostly;
-static int forp_enable __read_mostly;
+int forp_enable __read_mostly;
+
+void forp_start_entry(unsigned long entry)
+{
+	if (!forp_enable || !current)
+		return;
+
+	current->forp_entry_calltime = forp_time();
+        current->forp_entry = entry;
+        current->forp_entry_start = 1;
+}
+
+static inline void __forp_end_entry(struct task_struct *tsk)
+{
+        struct forp_rec *rec;
+        unsigned long entry;
+
+        if (!tsk)
+                return;
+
+        if (tsk->forp_entry_start) {
+		unsigned long elp = forp_time() - tsk->forp_entry_calltime;
+                entry = tsk->forp_entry;
+                rec = &get_cpu_var(forp_entry_recs[entry]);
+		rec->time += elp;
+		rec->count++;
+                put_cpu_var(rec);
+        }
+        tsk->forp_entry_start = 0;
+}
+void forp_end_entry(void)
+{
+        __forp_end_entry(current);
+}
 
 void forp_init_task(struct task_struct *t)
 {
@@ -50,6 +87,7 @@ void forp_exit_task(struct task_struct *t)
         if (current == NULL)
                 return;
 
+	__forp_end_entry(t);
         while (current->forp_curr_stack >= 0)
 		forp_end();
 }
@@ -75,6 +113,8 @@ forp_probe_sched_switch(struct rq *__rq, struct task_struct *prev,
 	 */
 	timestamp -= next->forp_timestamp;
 
+	if (next->forp_entry_start)
+		next->forp_entry_calltime += timestamp; 
 	for (index = next->forp_curr_stack; index >= 0; index--)
 		next->forp_stack[index].calltime += timestamp;
 }
@@ -444,6 +484,63 @@ static const struct file_operations forp_enable_ops = {
 	.write          = forp_enable_write,
 };
 
+static ssize_t forp_read_entry_rec(struct file *filp, char __user *ubuf,
+				   size_t cnt, loff_t *ppos)
+{
+	/* About 256 characters per line */
+	int sz = FORP_ENTRY_REC_SIZE * 256;
+	struct forp_rec *recs;
+	int r, i, cpu;
+	char *buf;
+	
+	recs = kzalloc(FORP_ENTRY_REC_SIZE * sizeof(struct forp_rec), GFP_KERNEL);
+	if (recs == NULL)
+		return -ENOMEM;
+
+	buf = kzalloc(sz, GFP_KERNEL);
+	if (buf == NULL) {
+		kfree(recs);
+		return -ENOMEM;
+	}	
+
+	mutex_lock(&forp_mu);
+
+	for (i = 0; i < FORP_ENTRY_REC_SIZE; i++) {
+		for_each_possible_cpu(cpu) {
+			struct forp_rec *r = &per_cpu(forp_entry_recs[i], cpu);
+			recs[i].time += r->time;
+			recs[i].count += r->count;		
+			/* Need to set these only for the first cpu */
+			strcpy(recs[i].name, "foo");
+		}
+	}
+	mutex_unlock(&forp_mu);
+
+	r = forp_snprintf_recs(recs, FORP_ENTRY_REC_SIZE, buf, sz);
+	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+	kfree(buf);
+	kfree(recs);
+	return r;
+}
+
+static ssize_t forp_write_entry_rec(struct file *filp, const char __user *ubuf,
+				  size_t cnt, loff_t *ppos)
+{
+	int cpu, i;
+
+	mutex_lock(&forp_mu);
+	for_each_possible_cpu(cpu)
+		for (i = 0; i < FORP_ENTRY_REC_SIZE; i++)
+			forp_reset_rec(&per_cpu(forp_entry_recs[i], cpu));
+	mutex_unlock(&forp_mu);
+	return cnt;
+}
+
+static const struct file_operations forp_entry_rec_ops = {
+	.read           = forp_read_entry_rec,
+	.write          = forp_write_entry_rec,
+};
+
 static __init int forp_init_debugfs(void)
 {
 	unsigned long cpu;
@@ -484,6 +581,11 @@ static __init int forp_init_debugfs(void)
 
 	if (debugfs_create_file("forp-enable", 0644, d, NULL, &forp_enable_ops) == NULL) {
 		WARN(1, "Could not create enable file\n");
+		return -ENOMEM;
+	}
+
+	if (debugfs_create_file("forp-entry", 0644, d, NULL, &forp_entry_rec_ops) == NULL) {
+		WARN(1, "Could not create entry summary file\n");
 		return -ENOMEM;
 	}
 

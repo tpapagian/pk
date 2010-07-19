@@ -484,8 +484,27 @@ system_call_fastpath:
 	cmpq $__NR_syscall_max,%rax
 	ja badsys
 	movq %r10,%rcx
+
+#ifdef CONFIG_FORP
+	cmpl $0, forp_enable
+	je forp_do_syscall
+
+	movq %rax, %rdi
+	call forp_start_entry
+	RESTORE_ARGS 0, -ARG_SKIP, 1
+	movq %r10, %rcx
+	call *sys_call_table(,%rax,8)  # XXX:    rip relative
+	movq %rax,RAX-ARGOFFSET(%rsp)
+	call forp_end_entry
+	jmp forp_done
+forp_do_syscall:
+	call *sys_call_table(,%rax,8)  # XXX:	 rip relative	
+	movq %rax,RAX-ARGOFFSET(%rsp)
+forp_done:
+#else
 	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
 	movq %rax,RAX-ARGOFFSET(%rsp)
+#endif
 /*
  * Syscall return path ending with SYSRET (fast path)
  * Has incomplete stack frame and undefined top of stack.
