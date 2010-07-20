@@ -1,3 +1,8 @@
+config FORP
+       bool "Enable forp backend"
+       depends on DEBUG_FS
+       help
+	 See README.forp.
 
 config PRINTK_TIME
 	bool "Show timing information on printks"

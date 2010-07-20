@@ -65,6 +65,7 @@
 #include <linux/perf_event.h>
 #include <linux/posix-timers.h>
 #include <linux/user-return-notifier.h>
+#include <linux/forp.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1008,6 +1009,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	ftrace_graph_init_task(p);
+	forp_init_task(p);
 
 	rt_mutex_init_task(p);
 

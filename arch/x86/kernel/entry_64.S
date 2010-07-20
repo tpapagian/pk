@@ -54,6 +54,8 @@
 #include <asm/ftrace.h>
 #include <asm/percpu.h>
 
+#include <linux/forp-patch.h>
+
 /* Avoid __ASSEMBLER__'ifying <linux/audit.h> just for this.  */
 #include <linux/elf-em.h>
 #define AUDIT_ARCH_X86_64	(EM_X86_64|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
@@ -484,8 +486,27 @@ system_call_fastpath:
 	cmpq $__NR_syscall_max,%rax
 	ja badsys
 	movq %r10,%rcx
+
+#ifdef CONFIG_FORP
+	cmpl $0, forp_enable
+	je forp_do_syscall
+
+	movq %rax, %rdi
+	call forp_start_entry
+	RESTORE_ARGS 0, -ARG_SKIP, 1
+	movq %r10, %rcx
+	call *sys_call_table(,%rax,8)  # XXX:    rip relative
+	movq %rax,RAX-ARGOFFSET(%rsp)
+	call forp_end_entry
+	jmp forp_done
+forp_do_syscall:
+	call *sys_call_table(,%rax,8)  # XXX:	 rip relative	
+	movq %rax,RAX-ARGOFFSET(%rsp)
+forp_done:
+#else /* !CONFIG_FORP */
 	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
 	movq %rax,RAX-ARGOFFSET(%rsp)
+#endif
 /*
  * Syscall return path ending with SYSRET (fast path)
  * Has incomplete stack frame and undefined top of stack.
@@ -1102,6 +1123,24 @@ ENTRY(\sym)
 END(\sym)
 .endm
 
+#ifdef CONFIG_FORP
+ENTRY(forp_do_page_fault)
+	cmpl $0, forp_enable
+	je 1f
+
+	pushq %rsi
+	pushq %rdi
+	movq $FORP_ENTRY_PGFAULT, %rdi
+	call forp_start_entry
+	popq %rdi
+	popq %rsi
+	call do_page_fault
+	call forp_end_entry
+	ret
+1:	call do_page_fault
+	ret
+#endif
+	
 	/* error code is on the stack already */
 .macro paranoiderrorentry sym do_sym
 ENTRY(\sym)
@@ -1345,7 +1384,11 @@ zeroentry xen_int3 do_int3
 errorentry xen_stack_segment do_stack_segment
 #endif
 errorentry general_protection do_general_protection
+#ifdef CONFIG_FORP
+errorentry page_fault forp_do_page_fault
+#else /* !CONFIG_FORP */
 errorentry page_fault do_page_fault
+#endif
 #ifdef CONFIG_X86_MCE
 paranoidzeroentry machine_check *machine_check_vector(%rip)
 #endif

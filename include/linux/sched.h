@@ -91,6 +91,7 @@ struct sched_param {
 #include <linux/kobject.h>
 #include <linux/latencytop.h>
 #include <linux/cred.h>
+#include <linux/forp.h>
 
 #include <asm/processor.h>
 
@@ -1474,6 +1475,16 @@ struct task_struct {
 	unsigned long default_timer_slack_ns;
 
 	struct list_head	*scm_work_list;
+#ifdef CONFIG_FORP
+	/* For dynamic/ksplice forp */
+	int forp_curr_stack;
+	struct forp_ret_stack forp_stack[FORP_RETSTACK_DEPTH];
+	u64 forp_timestamp;
+	/* For kernel entry points */
+	int forp_entry;
+	int forp_entry_start;
+	unsigned long forp_entry_calltime;
+#endif
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	/* Index of current stored address in ret_stack */
 	int curr_ret_stack;
