@@ -16,6 +16,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
+#include <linux/slab.h>
 
 #include <pcmcia/ss.h>
 
@@ -116,7 +117,7 @@ static int omap_cf_get_status(struct pcmcia_socket *s, u_int *sp)
 
 		*sp = SS_READY | SS_DETECT | SS_POWERON | SS_3VCARD;
 		cf = container_of(s, struct omap_cf_socket, socket);
-		s->irq.AssignedIRQ = 0;
+		s->pcmcia_irq = 0;
 		s->pci_irq = cf->irq;
 	} else
 		*sp = 0;
