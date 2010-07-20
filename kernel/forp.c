@@ -33,6 +33,7 @@
 DEFINE_MUTEX(forp_mu);
 DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_REC_SIZE], forp_recs);
 DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_ENTRY_REC_SIZE], forp_entry_recs);
+struct forp_label *forp_labels __read_mostly;
 
 int forp_rec_num __read_mostly;
 int forp_enable __read_mostly;
@@ -127,9 +128,10 @@ int forp_init(void)
 	}
 
 	for_each_possible_cpu(cpu) {	
-		for (i = 0; i < forp_rec_num; i++) {
+		for (i = 0; i < forp_rec_num; i++)
 			forp_reset_rec(&per_cpu(forp_recs[i], cpu));
-		}
+		for (i = 0; i < FORP_ENTRY_REC_SIZE; i++)
+			forp_reset_rec(&per_cpu(forp_entry_recs[i], cpu));
 	}
 
 	forp_enable = 1;
@@ -142,37 +144,20 @@ void forp_deinit(void)
 	forp_enable = 0;
 }
 
-void forp_register(struct forp_rec *recs, int n)
+void forp_register(struct forp_label *labels, int n)
 {
-	struct forp_rec *dst, *src;
-	int i, cpu;
 
 	mutex_lock(&forp_mu);
-
-	for_each_possible_cpu(cpu) {	
-		for (i = 0; i < n; i++) {
-			dst = &per_cpu(forp_recs[i], cpu);
-			src = &recs[i];
-
-			forp_reset_rec(dst);
-			dst->id = i;
-			dst->depth = src->depth;
-			strcpy(dst->name, src->name);
-		}
-
-		for (; i < FORP_REC_SIZE; i++) {
-			dst = &per_cpu(forp_recs[i], cpu);			
-			memset(dst, 0, sizeof(*dst));
-		}
-	}
-
+	if (forp_labels)
+		kfree(forp_labels);
+	forp_labels = labels;
 	forp_rec_num = n;
 	mutex_unlock(&forp_mu);
 }
 
 void forp_start(unsigned int id){
-	struct forp_rec *rec = &__get_cpu_var(forp_recs[id]);
-	if (forp_enable && rec->depth == current->forp_curr_stack + 1) {
+	int depth = current->forp_curr_stack + 1;
+	if (forp_enable && forp_labels[id].depth == depth) {
 		int i = ++current->forp_curr_stack;
 		struct forp_ret_stack *f = &current->forp_stack[i];
 
@@ -200,17 +185,3 @@ void forp_end(void)
 
 	current->forp_curr_stack--;
 }
-
-#if 0
-static __init int forp_test(void)
-{
-	struct forp_rec recs[2] = {
-		{ .name = "sys_open", .depth = 0 },
-		{ .name = "do_sys_open", .depth = 1 },
-	};
-	
-	forp_register(recs, 2);
-	return 0;
-}
-late_initcall(forp_test);
-#endif

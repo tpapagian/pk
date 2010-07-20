@@ -54,6 +54,8 @@
 #include <asm/ftrace.h>
 #include <asm/percpu.h>
 
+#include <linux/forp-patch.h>
+
 /* Avoid __ASSEMBLER__'ifying <linux/audit.h> just for this.  */
 #include <linux/elf-em.h>
 #define AUDIT_ARCH_X86_64	(EM_X86_64|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
@@ -1128,7 +1130,7 @@ ENTRY(forp_do_page_fault)
 
 	pushq %rsi
 	pushq %rdi
-	movq $510, %rdi
+	movq $FORP_ENTRY_PGFAULT, %rdi
 	call forp_start_entry
 	popq %rdi
 	popq %rsi

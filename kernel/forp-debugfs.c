@@ -1,8 +1,32 @@
+/*
+ * Copyright (C) 2010 Silas Boyd-Wickizer
+ *
+ * All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE, GOOD TITLE or
+ * NON INFRINGEMENT.  See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ * Send feedback to <sbw@mit.edu>
+ */
+
 #include <linux/debugfs.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 
 #include "forp.h"
+#include "forp-entry-label.h"
 
 static int forp_open_rec(struct inode *inode, struct file *filp)
 {
@@ -10,7 +34,8 @@ static int forp_open_rec(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static int forp_snprintf_recs(struct forp_rec *recs, int n, char *buf, int sz)
+static int forp_snprintf_recs(struct forp_rec *recs, struct forp_label *labels, 
+			      int n, char *buf, int sz)
 {
 	char *p, *e;
 	int i;
@@ -23,10 +48,11 @@ static int forp_snprintf_recs(struct forp_rec *recs, int n, char *buf, int sz)
 
 	for (i = 0; i < n; i++) {
 		struct forp_rec *rec = &recs[i];
+		struct forp_label *label = &labels[i];
 		if (rec->count)
 			p += snprintf(p, e - p, 
 				      "  %-30.30s  %10llu    %10llu\n",
-				      rec->name, rec->count, rec->time);
+				      label->name, rec->count, rec->time);
 	}
 
 	return p - buf;
@@ -46,8 +72,8 @@ static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
 		return -ENOMEM;
 
 	mutex_lock(&forp_mu);
-	r = forp_snprintf_recs(&per_cpu(forp_recs[0], cpu), forp_rec_num,
-			       buf, sz);
+	r = forp_snprintf_recs(&per_cpu(forp_recs[0], cpu), forp_labels, 
+			       forp_rec_num, buf, sz); 
 	mutex_unlock(&forp_mu);
 
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
@@ -75,16 +101,16 @@ static const struct file_operations forp_rec_ops = {
 	.write 	    = forp_write_rec,
 };
 
-static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
-				 size_t cnt, loff_t *ppos)
+static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt, loff_t *ppos, unsigned long n, 
+				   struct forp_rec __percpu *rec, struct forp_label *labels)
 {
 	/* About 256 characters per line */
-	int sz = FORP_REC_SIZE * 256;
+	int sz = n * 256;
 	struct forp_rec *recs;
 	int i, cpu, r;
 	char *buf;
 
-	recs = kzalloc(forp_rec_num * sizeof(struct forp_rec), GFP_KERNEL);
+	recs = kzalloc(n * sizeof(struct forp_rec), GFP_KERNEL);
 	if (recs == NULL)
 		return -ENOMEM;
 
@@ -96,36 +122,44 @@ static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
 
 	mutex_lock(&forp_mu);
 
-	for (i = 0; i < forp_rec_num; i++) {
+	for (i = 0; i < n; i++) {
 		for_each_possible_cpu(cpu) {
-			struct forp_rec *r = &per_cpu(forp_recs[i], cpu);
+			struct forp_rec *r = &per_cpu(rec[i], cpu);
 			recs[i].time += r->time;
 			recs[i].count += r->count;		
-			/* Need to set these only for the first cpu */
-			strcpy(recs[i].name, r->name);
-			recs[i].depth = r->depth;
-			recs[i].id = r->id;
 		}
 	}
 	mutex_unlock(&forp_mu);
 
-	r = forp_snprintf_recs(recs, forp_rec_num, buf, sz);
+	r = forp_snprintf_recs(recs, labels, n, buf, sz);
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
 	kfree(buf);
 	kfree(recs);
 	return r;
 }
 
-static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
-				  size_t cnt, loff_t *ppos)
+static void forp_write_aggregate(int n, struct forp_rec __percpu *rec)
 {
 	int cpu, i;
 
 	mutex_lock(&forp_mu);
 	for_each_possible_cpu(cpu)
-		for (i = 0; i < forp_rec_num; i++)
-			forp_reset_rec(&per_cpu(forp_recs[i], cpu));
+		for (i = 0; i < n; i++)
+			forp_reset_rec(&per_cpu(rec[i], cpu));
 	mutex_unlock(&forp_mu);
+}
+
+static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
+				 size_t cnt, loff_t *ppos)
+{
+	return forp_read_aggregate(ubuf, cnt, ppos, forp_rec_num, 
+				   forp_recs, forp_labels);
+}
+
+static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
+				  size_t cnt, loff_t *ppos)
+{
+	forp_write_aggregate(forp_rec_num, forp_recs);
 	return cnt;
 }
 
@@ -138,22 +172,21 @@ static ssize_t
 forp_config_read(struct file *filp, char __user *ubuf,
 		 size_t cnt, loff_t *ppos)
 {
-	struct forp_rec *rec;
 	unsigned long sz;
 	char *buf, *p;
 	int i, r = 0;
 	
-	rec = &per_cpu(forp_recs[0], 0);
-	
 	/* Roughly (log10(MAX_ULONG) + ':' + 32) * forp_rec_num */
-	sz = (20 + sizeof(rec->name)) * forp_rec_num;
+	sz = (20 + sizeof(forp_labels[0].name)) * forp_rec_num;
 	if ((buf = kmalloc(sz, GFP_KERNEL)) == NULL)
 		return -ENOMEM;
 	
 	p = buf;
 	mutex_lock(&forp_mu);
 	for (i = 0; i < forp_rec_num; i++) {
-		r += snprintf(p, sz - r, "%u:%s ", rec[i].depth, rec[i].name);
+		r += snprintf(p, sz - r, "%u:%s ", 
+			      forp_labels[i].depth, 
+			      forp_labels[i].name);
 		p = &buf[r];
 	}
 	mutex_unlock(&forp_mu);
@@ -170,7 +203,7 @@ static ssize_t
 forp_config_write(struct file *filp, const char __user *ubuf,
                  size_t cnt, loff_t *ppos)
 {
-        struct forp_rec *recs;
+        struct forp_label *labels;
         unsigned int count, num = 0;
         char *p, *buf;
         int ret = -EINVAL;
@@ -178,8 +211,8 @@ forp_config_write(struct file *filp, const char __user *ubuf,
         if ((buf = kmalloc(cnt + 1, GFP_KERNEL)) == NULL)
                 return -ENOMEM;
 
-        recs = kzalloc(sizeof(*recs) * FORP_REC_SIZE, GFP_KERNEL);
-        if (recs == NULL) {
+        labels = kzalloc(sizeof(*labels) * FORP_REC_SIZE, GFP_KERNEL);
+        if (labels == NULL) {
                 kfree(buf);
                 return -ENOMEM;
         }
@@ -195,8 +228,8 @@ forp_config_write(struct file *filp, const char __user *ubuf,
                 if (num == FORP_REC_SIZE)
                         goto done;
 
-                if (sscanf(p, "%u:%32s%n", &recs[num].depth, 
-			   recs[num].name, &count) != 2)
+                if (sscanf(p, "%u:%32s%n", &labels[num].depth, 
+			   labels[num].name, &count) != 2)
                         goto done;
 
                 num++;
@@ -207,13 +240,13 @@ forp_config_write(struct file *filp, const char __user *ubuf,
                 p++;
         }
 
-	forp_register(recs, num);
+	forp_register(labels, num);
 
         *ppos += cnt;
         ret = cnt;
 
 done:
-        kfree(recs);
+	/* forp.c will eventually free labels */
         kfree(buf);
         return ret;
 }
@@ -280,52 +313,14 @@ static const struct file_operations forp_enable_ops = {
 static ssize_t forp_read_entry_rec(struct file *filp, char __user *ubuf,
 				   size_t cnt, loff_t *ppos)
 {
-	/* About 256 characters per line */
-	int sz = FORP_ENTRY_REC_SIZE * 256;
-	struct forp_rec *recs;
-	int r, i, cpu;
-	char *buf;
-	
-	recs = kzalloc(FORP_ENTRY_REC_SIZE * sizeof(struct forp_rec), GFP_KERNEL);
-	if (recs == NULL)
-		return -ENOMEM;
-
-	buf = kzalloc(sz, GFP_KERNEL);
-	if (buf == NULL) {
-		kfree(recs);
-		return -ENOMEM;
-	}	
-
-	mutex_lock(&forp_mu);
-
-	for (i = 0; i < FORP_ENTRY_REC_SIZE; i++) {
-		for_each_possible_cpu(cpu) {
-			struct forp_rec *r = &per_cpu(forp_entry_recs[i], cpu);
-			recs[i].time += r->time;
-			recs[i].count += r->count;		
-			/* Need to set these only for the first cpu */
-			strcpy(recs[i].name, "foo");
-		}
-	}
-	mutex_unlock(&forp_mu);
-
-	r = forp_snprintf_recs(recs, FORP_ENTRY_REC_SIZE, buf, sz);
-	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
-	kfree(buf);
-	kfree(recs);
-	return r;
+	return forp_read_aggregate(ubuf, cnt, ppos, FORP_ENTRY_REC_SIZE, 
+				   forp_entry_recs, forp_entry_label);
 }
 
 static ssize_t forp_write_entry_rec(struct file *filp, const char __user *ubuf,
-				  size_t cnt, loff_t *ppos)
+				    size_t cnt, loff_t *ppos)
 {
-	int cpu, i;
-
-	mutex_lock(&forp_mu);
-	for_each_possible_cpu(cpu)
-		for (i = 0; i < FORP_ENTRY_REC_SIZE; i++)
-			forp_reset_rec(&per_cpu(forp_entry_recs[i], cpu));
-	mutex_unlock(&forp_mu);
+	forp_write_aggregate(FORP_ENTRY_REC_SIZE, forp_entry_recs);
 	return cnt;
 }
 
