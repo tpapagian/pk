@@ -25,6 +25,7 @@
 #include <linux/forp-patch.h>
 #include <linux/sched.h>
 #include <linux/uaccess.h>
+#include <linux/slab.h>
 
 #include <trace/events/sched.h>
 
@@ -90,7 +91,7 @@ void forp_exit_task(struct task_struct *t)
 }
 
 static void
-forp_probe_sched_switch(struct rq *__rq, struct task_struct *prev,
+forp_probe_sched_switch(void *ignore, struct task_struct *prev, 
 			struct task_struct *next)
 {
 	u64 timestamp;
@@ -120,7 +121,7 @@ int forp_init(void)
 {
 	int r, i, cpu;
 
-	r = register_trace_sched_switch(forp_probe_sched_switch);
+	r = register_trace_sched_switch(forp_probe_sched_switch, NULL);
 	if (r) {
 		printk(KERN_ERR "Couldn't activate tracepoint"
 		       " probe to kernel_sched_switch: %d\n", r);
@@ -140,7 +141,7 @@ int forp_init(void)
 
 void forp_deinit(void)
 {
-	unregister_trace_sched_switch(forp_probe_sched_switch);
+	unregister_trace_sched_switch(forp_probe_sched_switch, NULL);
 	forp_enable = 0;
 }
 
