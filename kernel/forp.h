@@ -18,5 +18,5 @@ static inline void forp_reset_rec(struct forp_rec *rec)
 }
 
 extern void forp_register(struct forp_label *labels, int n);
-extern int forp_init(void);
+extern int forp_init(int enable);
 extern void forp_deinit(void);

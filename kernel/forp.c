@@ -40,7 +40,7 @@ int forp_enable __read_mostly;
 
 void forp_start_entry(unsigned long entry)
 {
-	if (!forp_enable || !current)
+	if (!(forp_enable & FORP_ENABLE_ENTRY) || !current)
 		return;
 
 	current->forp_entry_calltime = forp_time();
@@ -116,7 +116,7 @@ forp_probe_sched_switch(struct rq *__rq, struct task_struct *prev,
 		next->forp_stack[index].calltime += timestamp;
 }
 
-int forp_init(void)
+int forp_init(int enable)
 {
 	int r, i, cpu;
 
@@ -134,7 +134,7 @@ int forp_init(void)
 			forp_reset_rec(&per_cpu(forp_entry_recs[i], cpu));
 	}
 
-	forp_enable = 1;
+	forp_enable = enable;
 	return 0;
 }
 
@@ -157,7 +157,7 @@ void forp_register(struct forp_label *labels, int n)
 
 void forp_start(unsigned int id){
 	int depth = current->forp_curr_stack + 1;
-	if (forp_enable && forp_labels[id].depth == depth) {
+	if ((forp_enable & FORP_ENABLE_INST) && forp_labels[id].depth == depth) {
 		int i = ++current->forp_curr_stack;
 		struct forp_ret_stack *f = &current->forp_stack[i];
 
