@@ -23,6 +23,56 @@
 #include <net/inet_hashtables.h>
 #include <net/ip.h>
 
+/* Chain lock must be held when calling. */
+void __inet_bind_bucket_per_cpu_flush(struct inet_bind_bucket *tb, int lock)
+{
+	int c;
+	for_each_possible_cpu(c) {
+		struct sock *sk;
+		struct hlist_node *node, *tmp;
+		struct per_cpu_inet_bind_bucket *p = &tb->per_cpu[c];
+		int o, oo = 0, ooo;
+
+		if (lock) spin_lock(&p->lock);
+
+		BUG_ON(!spin_is_locked(&p->lock));
+
+		o = p->num_owners;
+		tb->num_owners += p->num_owners;
+		p->num_owners = 0;
+
+		ooo = 0;
+		sk_for_each_bound(sk, node, &tb->owners)
+			ooo++;
+#ifdef AP_DBG
+		printk("__inet_bind_bucket_per_cpu_flush: owners before %d\n", ooo);
+#endif
+
+		sk_for_each_bound_safe(sk, node, tmp, &p->owners) {
+			oo++;
+			sk->sk_bind_node_cpu = -1;
+			sk_add_bind_node(sk, &tb->owners);
+#ifdef AP_DBG
+			printk("__inet_bind_bucket_per_cpu_flush: moving sk:%p from p:%p to tb:%p\n", sk, p, tb);
+#endif
+		}
+		INIT_HLIST_HEAD(&p->owners);
+
+		ooo = 0;
+		sk_for_each_bound(sk, node, &tb->owners)
+			ooo++;
+#ifdef AP_DBG
+		printk("__inet_bind_bucket_per_cpu_flush: owners after %d\n", ooo);
+#endif
+
+		if (lock) spin_unlock(&p->lock);
+
+#ifdef AP_DBG
+		printk("__inet_bind_bucket_per_cpu_flush: flushing cpu %d o:%d c:%d\n", c, o, oo);
+#endif
+	}
+}
+
 /*
  * Allocate and initialize a new local port bind bucket.
  * The bindhash mutex for snum's hash chain must be held here.
@@ -34,13 +84,27 @@ struct inet_bind_bucket *inet_bind_bucket_create(struct kmem_cache *cachep,
 {
 	struct inet_bind_bucket *tb = kmem_cache_alloc(cachep, GFP_ATOMIC);
 
+
 	if (tb != NULL) {
+		int c;
+
 		write_pnet(&tb->ib_net, hold_net(net));
-		tb->port      = snum;
-		tb->fastreuse = 0;
-		tb->num_owners = 0;
+		tb->port        = snum;
+		tb->fastreuse   = 0;
+		tb->num_owners  = 0;
 		INIT_HLIST_HEAD(&tb->owners);
 		hlist_add_head(&tb->node, &head->chain);
+		
+		for_each_possible_cpu(c) {
+			struct per_cpu_inet_bind_bucket *p = &tb->per_cpu[c];
+			spin_lock_init(&p->lock);
+			p->num_owners = 0;
+			INIT_HLIST_HEAD(&p->owners);
+		}
+
+#ifdef AP_DBG
+		printk("inet_bind_bucket_create: port %d\n", tb->port);
+#endif
 	}
 	return tb;
 }
@@ -50,10 +114,49 @@ struct inet_bind_bucket *inet_bind_bucket_create(struct kmem_cache *cachep,
  */
 void inet_bind_bucket_destroy(struct kmem_cache *cachep, struct inet_bind_bucket *tb)
 {
+	int oo = 0;
+	struct sock *sk;
+	struct hlist_node *node;
+
+	sk_for_each_bound(sk, node, &tb->owners)
+		oo++;
+
+#ifdef AP_DBG
+	printk("inet_bind_bucket_destroy: [%d] trying to delete port %d c:%d\n", smp_processor_id(), tb->port, oo);
+#endif
+
 	if (hlist_empty(&tb->owners)) {
-		__hlist_del(&tb->node);
-		release_net(ib_net(tb));
-		kmem_cache_free(cachep, tb);
+		int c;
+		
+		for_each_possible_cpu(c)
+			spin_lock_nested(&tb->per_cpu[c].lock, c);
+
+		__inet_bind_bucket_per_cpu_flush(tb, 0);
+
+		if (hlist_empty(&tb->owners)) {
+#ifdef AP_DBG
+			printk("inet_bind_bucket_destroy: [%d] killed bind bucket on port %d\n", smp_processor_id(), tb->port);
+#endif
+			__hlist_del(&tb->node);
+
+			for_each_possible_cpu(c)
+				spin_unlock(&tb->per_cpu[c].lock);
+
+			release_net(ib_net(tb));
+			kmem_cache_free(cachep, tb);
+			return;
+		}
+
+#ifdef AP_DBG
+		printk("inet_bind_bucket_destroy: [%d] migrated, and still owners\n", smp_processor_id());
+#endif
+
+		for_each_possible_cpu(c)
+			spin_unlock(&tb->per_cpu[c].lock);
+	} else {
+#ifdef AP_DBG
+		printk("inet_bind_bucket_destroy: [%d] still owners\n", smp_processor_id());
+#endif
 	}
 }
 
@@ -62,17 +165,23 @@ void inet_bind_hash(struct sock *sk, struct inet_bind_bucket *tb,
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
 
-	atomic_inc(&hashinfo->bsockets);
+#ifdef AP_DBG
+	printk("inet_bind_hash: port %d o:%d\n", tb->port, tb->num_owners);
+#endif
 
+	atomic_inc(&hashinfo->bsockets);
+ 
 	inet_sk(sk)->inet_num = snum;
 	sk_add_bind_node(sk, &tb->owners);
 	tb->num_owners++;
+	sk->sk_bind_node_cpu = -1;
 	inet_csk(sk)->icsk_bind_hash = tb;
+
+#ifdef AP_DBG
+	printk("inet_bind_hash: done, owners:%d\n", tb->num_owners);
+#endif
 }
 
-/*
- * Get rid of any references to a local port held by the given sock.
- */
 static void __inet_put_port(struct sock *sk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
@@ -85,18 +194,63 @@ static void __inet_put_port(struct sock *sk)
 
 	spin_lock(&head->lock);
 	tb = inet_csk(sk)->icsk_bind_hash;
+#ifdef AP_DBG
+	printk("__inet_put_port: port %d o:%d\n", tb->port, tb->num_owners);
+#endif
 	__sk_del_bind_node(sk);
 	tb->num_owners--;
 	inet_csk(sk)->icsk_bind_hash = NULL;
 	inet_sk(sk)->inet_num = 0;
 	inet_bind_bucket_destroy(hashinfo->bind_bucket_cachep, tb);
 	spin_unlock(&head->lock);
+#ifdef AP_DBG
+	printk("__inet_put_port: done owners:%d\n", tb->num_owners);
+#endif
+}
+
+static void __inet_put_port_per_cpu(struct sock *sk)
+{
+	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
+	const int bhash = inet_bhashfn(sock_net(sk), inet_sk(sk)->inet_num,
+			hashinfo->bhash_size);
+	struct inet_bind_hashbucket *head = &hashinfo->bhash[bhash];
+	// AP: TODO This access used to be under the chain lock, does it really
+	// need to be locked?
+	struct inet_bind_bucket *tb = inet_csk(sk)->icsk_bind_hash;
+	struct per_cpu_inet_bind_bucket *p = &tb->per_cpu[sk->sk_bind_node_cpu];
+
+#ifdef AP_DBG
+	printk("__inet_put_port_per_cpu: port %d\n", tb->port);
+#endif
+
+	//WARN_ON(sk->sk_bind_node_cpu != smp_processor_id());
+
+	atomic_dec(&hashinfo->bsockets); // TODO: I want to get rid of this!
+
+	spin_lock(&p->lock);
+	__sk_del_bind_node(sk);
+	p->num_owners--;
+	inet_csk(sk)->icsk_bind_hash = NULL;
+	inet_sk(sk)->inet_num = 0;
+	if (hlist_empty(&p->owners)) {
+		spin_unlock(&p->lock);
+		spin_lock(&head->lock);
+		inet_bind_bucket_destroy(hashinfo->bind_bucket_cachep, tb);
+		spin_unlock(&head->lock);
+		return;
+	}
+	spin_unlock(&p->lock);
 }
 
 void inet_put_port(struct sock *sk)
 {
 	local_bh_disable();
-	__inet_put_port(sk);
+
+	if (sk->sk_bind_node_cpu == -1)
+		__inet_put_port(sk);
+	else
+		__inet_put_port_per_cpu(sk);
+
 	local_bh_enable();
 }
 
@@ -104,17 +258,21 @@ EXPORT_SYMBOL(inet_put_port);
 
 void __inet_inherit_port(struct sock *sk, struct sock *child)
 {
-	struct inet_hashinfo *table = sk->sk_prot->h.hashinfo;
-	const int bhash = inet_bhashfn(sock_net(sk), inet_sk(child)->inet_num,
-			table->bhash_size);
-	struct inet_bind_hashbucket *head = &table->bhash[bhash];
-	struct inet_bind_bucket *tb;
+	// AP: TODO This access used to be under the chain lock, does it really
+	// need to be locked?
+	struct inet_bind_bucket *tb = inet_csk(sk)->icsk_bind_hash;
+	struct per_cpu_inet_bind_bucket *p = &tb->per_cpu[smp_processor_id()];
 
-	spin_lock(&head->lock);
-	tb = inet_csk(sk)->icsk_bind_hash;
-	sk_add_bind_node(child, &tb->owners);
+#ifdef AP_DBG
+	printk("__inet_inherit_port: port %d\n", tb->port);
+#endif
+
+	spin_lock(&p->lock);
+	// TODO: why is num_owners not bumped here originaly?
+	sk_add_bind_node(child, &p->owners);
+	child->sk_bind_node_cpu	= smp_processor_id();
 	inet_csk(child)->icsk_bind_hash = tb;
-	spin_unlock(&head->lock);
+	spin_unlock(&p->lock);
 }
 
 EXPORT_SYMBOL_GPL(__inet_inherit_port);

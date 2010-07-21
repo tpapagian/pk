@@ -141,8 +141,12 @@ struct sock_common {
 	volatile unsigned char	skc_state;
 	unsigned char		skc_reuse;
 	int			skc_bound_dev_if;
+
 	union {
-		struct hlist_node	skc_bind_node;
+		struct {
+			struct hlist_node skc_bind_node;
+			int skc_bind_node_cpu;
+		};
 		struct hlist_nulls_node skc_portaddr_node;
 	};
 	struct proto		*skc_prot;
@@ -234,6 +238,7 @@ struct sock {
 #define sk_reuse		__sk_common.skc_reuse
 #define sk_bound_dev_if		__sk_common.skc_bound_dev_if
 #define sk_bind_node		__sk_common.skc_bind_node
+#define sk_bind_node_cpu	__sk_common.skc_bind_node_cpu
 #define sk_prot			__sk_common.skc_prot
 #define sk_net			__sk_common.skc_net
 	kmemcheck_bitfield_begin(flags);
@@ -507,6 +512,8 @@ static __inline__ void sk_add_bind_node(struct sock *sk,
 	hlist_for_each_entry_safe(__sk, node, tmp, list, sk_node)
 #define sk_for_each_bound(__sk, node, list) \
 	hlist_for_each_entry(__sk, node, list, sk_bind_node)
+#define sk_for_each_bound_safe(__sk, node, tmp, list) \
+	hlist_for_each_entry_safe(__sk, node, tmp, list, sk_bind_node)
 
 /* Sock flags */
 enum sock_flags {

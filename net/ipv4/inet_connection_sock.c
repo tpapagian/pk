@@ -50,12 +50,13 @@ void inet_get_local_port_range(int *low, int *high)
 EXPORT_SYMBOL(inet_get_local_port_range);
 
 int inet_csk_bind_conflict(const struct sock *sk,
-			   const struct inet_bind_bucket *tb)
+			   struct inet_bind_bucket *tb)
 {
 	const __be32 sk_rcv_saddr = inet_rcv_saddr(sk);
 	struct sock *sk2;
 	struct hlist_node *node;
 	int reuse = sk->sk_reuse;
+	int c;
 
 	/*
 	 * Unlike other sk lookup places we do not check
@@ -63,6 +64,12 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	 * in tb->owners list belong to the same net - the
 	 * one this bucket belongs to.
 	 */
+
+	// AP: TODO this is code here is ugly, would be best to hide such details
+	for_each_possible_cpu(c)
+		spin_lock_nested(&tb->per_cpu[c].lock, c);
+
+	__inet_bind_bucket_per_cpu_flush(tb, 0);
 
 	sk_for_each_bound(sk2, node, &tb->owners) {
 		if (sk != sk2 &&
@@ -79,6 +86,10 @@ int inet_csk_bind_conflict(const struct sock *sk,
 			}
 		}
 	}
+
+	for_each_possible_cpu(c)
+		spin_unlock(&tb->per_cpu[c].lock);
+
 	return node != NULL;
 }
 
@@ -113,6 +124,7 @@ again:
 			spin_lock(&head->lock);
 			inet_bind_bucket_for_each(tb, node, &head->chain)
 				if (net_eq(ib_net(tb), net) && tb->port == rover) {
+					inet_bind_bucket_per_cpu_flush(tb);
 					if (tb->fastreuse > 0 &&
 					    sk->sk_reuse &&
 					    sk->sk_state != TCP_LISTEN &&
@@ -164,6 +176,7 @@ have_snum:
 	tb = NULL;
 	goto tb_not_found;
 tb_found:
+	inet_bind_bucket_per_cpu_flush(tb);
 	if (!hlist_empty(&tb->owners)) {
 		if (tb->fastreuse > 0 &&
 		    sk->sk_reuse && sk->sk_state != TCP_LISTEN &&
@@ -186,6 +199,7 @@ tb_not_found:
 	if (!tb && (tb = inet_bind_bucket_create(hashinfo->bind_bucket_cachep,
 					net, head, snum)) == NULL)
 		goto fail_unlock;
+	inet_bind_bucket_per_cpu_flush(tb);
 	if (hlist_empty(&tb->owners)) {
 		if (sk->sk_reuse && sk->sk_state != TCP_LISTEN)
 			tb->fastreuse = 1;
