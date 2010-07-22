@@ -43,16 +43,17 @@ static int forp_snprintf_recs(struct forp_rec *recs, struct forp_label *labels,
 	p = buf;
 	e = p + sz;
 
-	p += snprintf(p, e - p, "# Function                               "
-		      "Hit    Time\n");
+	p += snprintf(p, e - p, "# Function                          "
+		      "Depth         Hit    Time\n");
 
 	for (i = 0; i < n; i++) {
 		struct forp_rec *rec = &recs[i];
 		struct forp_label *label = &labels[i];
 		if (rec->count)
 			p += snprintf(p, e - p, 
-				      "  %-30.30s  %10llu    %10llu\n",
-				      label->name, rec->count, rec->time);
+				      "  %-30.30s      %3u  %10llu    %-10llu\n",
+				      label->name, label->depth, rec->count, 
+				      rec->time);
 	}
 
 	return p - buf;
