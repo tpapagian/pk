@@ -535,7 +535,7 @@ void sock_release(struct socket *sock)
 
 	percpu_sub(sockets_in_use, 1);
 	if (!sock->file) {
-		iput(SOCK_INODE(sock));
+		iput_single(SOCK_INODE(sock));
 		return;
 	}
 	sock->file = NULL;
