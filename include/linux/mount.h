@@ -14,7 +14,6 @@
 #include <linux/nodemask.h>
 #include <linux/spinlock.h>
 #include <asm/atomic.h>
-#include <asm/syscount.h>
 
 struct super_block;
 struct vfsmount;
@@ -113,28 +112,9 @@ extern int __mnt_is_readonly(struct vfsmount *mnt);
 
 static inline void mntput(struct vfsmount *mnt)
 {
-	struct timespec start, mid, stop;
-	int f;
-
 	if (mnt) {
-		struct super_block *sb;
-
-		getnstimeofday(&start);
-		sb = mnt->mnt_sb;
-		getnstimeofday(&mid);
-		f = (sb->s_flags & MS_NOREFCOUNT);
-		getnstimeofday(&stop);
-		syscount_add(SYSCOUNT_MNT_PUT1, start, mid);
-		syscount_add(SYSCOUNT_MNT_PUT2, mid, stop);
-
-		if (!f) {
-#if 1
-			per_cpu_set_mnt_expiry_mark(mnt);
-#else
-			mnt->mnt_expiry_mark = 0;
-#endif
-			mntput_no_expire(mnt);
-		}
+		mnt->mnt_expiry_mark = 0;
+		mntput_no_expire(mnt);
 	}
 }
 
