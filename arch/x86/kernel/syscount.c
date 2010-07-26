@@ -3,7 +3,6 @@
 #include <linux/sched.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <linux/module.h>
 
 #include <asm/syscount.h>
 
@@ -67,7 +66,6 @@ void syscount_add(unsigned long call, struct timespec start, struct timespec sto
 	cnt[call].tot++;
 	put_cpu_var(cnt);	
 }
-EXPORT_SYMBOL(syscount_add);
 
 static int syscount_proc_show(struct seq_file *m, void *v)
 {
