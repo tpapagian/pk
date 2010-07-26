@@ -406,6 +406,7 @@ extern struct files_stat_struct files_stat;
 extern int get_max_files(void);
 extern int sysctl_nr_open;
 extern struct inodes_stat_t inodes_stat;
+extern int get_nr_inodes(void);
 extern int leases_enable, lease_break_time;
 #ifdef CONFIG_DNOTIFY
 extern int dir_notify_enable;
@@ -2185,9 +2186,20 @@ extern void iget_failed(struct inode *);
 extern void clear_inode(struct inode *);
 extern void destroy_inode(struct inode *);
 extern void __destroy_inode(struct inode *);
-extern struct inode *new_inode(struct super_block *);
 extern int should_remove_suid(struct dentry *);
 extern int file_remove_suid(struct file *);
+
+extern struct inode *__new_inode(struct super_block *, int);
+static inline struct inode *new_inode(struct super_block *sb)
+{
+	return __new_inode(sb, 0);
+}
+static inline struct inode *new_inode_single(struct super_block *sb)
+{
+	return __new_inode(sb, 1);
+}
+extern void iput_single(struct inode *);
+#define KERNEL_HAS_IPUT_SINGLE
 
 extern void __insert_inode_hash(struct inode *, unsigned long hashval);
 extern void remove_inode_hash(struct inode *);
@@ -2509,6 +2521,9 @@ ssize_t simple_attr_write(struct file *file, const char __user *buf,
 struct ctl_table;
 int proc_nr_files(struct ctl_table *table, int write,
 		  void __user *buffer, size_t *lenp, loff_t *ppos);
+
+int proc_nr_inodes(struct ctl_table *table, int write,
+		   void __user *buffer, size_t *lenp, loff_t *ppos);
 
 int __init get_filesystem_list(char *buf);
 

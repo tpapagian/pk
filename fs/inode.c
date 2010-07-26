@@ -103,8 +103,32 @@ static DECLARE_RWSEM(iprune_sem);
  * Statistics gathering..
  */
 struct inodes_stat_t inodes_stat;
+static struct percpu_counter nr_inodes;
 
 static struct kmem_cache *inode_cachep __read_mostly;
+
+int get_nr_inodes(void)
+{
+	return percpu_counter_sum_positive(&nr_inodes);
+}
+
+/*
+ * Handle nr_dentry sysctl
+ */
+#if defined(CONFIG_SYSCTL) && defined(CONFIG_PROC_FS)
+int proc_nr_inodes(ctl_table *table, int write,
+		   void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	inodes_stat.nr_inodes = get_nr_inodes();
+	return proc_dointvec(table, write, buffer, lenp, ppos);
+}
+#else
+int proc_nr_inodes(ctl_table *table, int write,
+		   void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return -ENOSYS;
+}
+#endif
 
 static void wake_up_inode(struct inode *inode)
 {
@@ -245,6 +269,14 @@ void destroy_inode(struct inode *inode)
 		kmem_cache_free(inode_cachep, (inode));
 }
 
+void iput_single(struct inode *inode)
+{
+	if (atomic_dec_and_test(&inode->i_count)) {
+		destroy_inode(inode);
+		percpu_counter_dec(&nr_inodes);
+	}
+}
+
 /*
  * These are initializations that only need to be done
  * once, because the fields are idempotent across use
@@ -351,9 +383,7 @@ static void dispose_list(struct list_head *head)
 		destroy_inode(inode);
 		nr_disposed++;
 	}
-	spin_lock(&inode_lock);
-	inodes_stat.nr_inodes -= nr_disposed;
-	spin_unlock(&inode_lock);
+	percpu_counter_sub(&nr_inodes, nr_disposed);
 }
 
 /*
@@ -601,7 +631,7 @@ static inline void
 __inode_add_to_lists(struct super_block *sb, struct hlist_head *head,
 			struct inode *inode)
 {
-	inodes_stat.nr_inodes++;
+	percpu_counter_inc(&nr_inodes);
 	list_add(&inode->i_list, &inode_in_use);
 	list_add(&inode->i_sb_list, &sb->s_inodes);
 	if (head)
@@ -630,9 +660,40 @@ void inode_add_to_lists(struct super_block *sb, struct inode *inode)
 }
 EXPORT_SYMBOL_GPL(inode_add_to_lists);
 
+#ifdef CONFIG_SMP
+/*
+ * Each cpu owns a range of 1024 numbers.
+ * 'shared_last_ino' is dirtied only once out of 1024 allocations,
+ * to renew the exhausted range.
+ */
+static DEFINE_PER_CPU(int, last_ino);
+
+static int last_ino_get(void)
+{
+	static atomic_t shared_last_ino;
+	int *p = &get_cpu_var(last_ino);
+	int res = *p;
+	
+	if (unlikely((res & 1023) == 0))
+		res = atomic_add_return(1024, &shared_last_ino) - 1024;
+	
+	*p = ++res;
+	put_cpu_var(last_ino);
+	return res;
+}
+#else
+static int last_ino_get(void)
+{
+	static int last_ino;
+	
+	return ++last_ino;
+}
+#endif
+
 /**
- *	new_inode 	- obtain an inode
+ *	__new_inode 	- obtain an inode
  *	@sb: superblock
+ *	@single: if true, dont link new inode in a list	
  *
  *	Allocates a new inode for given superblock. The default gfp_mask
  *	for allocations related to inode->i_mapping is GFP_HIGHUSER_MOVABLE.
@@ -642,29 +703,32 @@ EXPORT_SYMBOL_GPL(inode_add_to_lists);
  *	newly created inode's mapping
  *
  */
-struct inode *new_inode(struct super_block *sb)
+struct inode *__new_inode(struct super_block *sb, int single)
 {
 	/*
 	 * On a 32bit, non LFS stat() call, glibc will generate an EOVERFLOW
 	 * error if st_ino won't fit in target struct field. Use 32bit counter
 	 * here to attempt to avoid that.
 	 */
-	static unsigned int last_ino;
 	struct inode *inode;
-
-	spin_lock_prefetch(&inode_lock);
 
 	inode = alloc_inode(sb);
 	if (inode) {
-		spin_lock(&inode_lock);
-		__inode_add_to_lists(sb, NULL, inode);
-		inode->i_ino = ++last_ino;
 		inode->i_state = 0;
-		spin_unlock(&inode_lock);
+		inode->i_ino = last_ino_get();
+		if (single) {
+			percpu_counter_inc(&nr_inodes);
+  			INIT_LIST_HEAD(&inode->i_list);
+  			INIT_LIST_HEAD(&inode->i_sb_list);
+ 		} else {
+			spin_lock(&inode_lock);
+			__inode_add_to_lists(sb, NULL, inode);
+			spin_unlock(&inode_lock);
+		}
 	}
 	return inode;
 }
-EXPORT_SYMBOL(new_inode);
+EXPORT_SYMBOL(__new_inode);
 
 void unlock_new_inode(struct inode *inode)
 {
@@ -1200,8 +1264,8 @@ void generic_delete_inode(struct inode *inode)
 	list_del_init(&inode->i_sb_list);
 	WARN_ON(inode->i_state & I_NEW);
 	inode->i_state |= I_FREEING;
-	inodes_stat.nr_inodes--;
 	spin_unlock(&inode_lock);
+	percpu_counter_dec(&nr_inodes);
 
 	if (op->delete_inode) {
 		void (*delete)(struct inode *) = op->delete_inode;
@@ -1258,8 +1322,8 @@ int generic_detach_inode(struct inode *inode)
 	list_del_init(&inode->i_sb_list);
 	WARN_ON(inode->i_state & I_NEW);
 	inode->i_state |= I_FREEING;
-	inodes_stat.nr_inodes--;
 	spin_unlock(&inode_lock);
+	percpu_counter_dec(&nr_inodes);
 	return 1;
 }
 EXPORT_SYMBOL_GPL(generic_detach_inode);
@@ -1560,6 +1624,7 @@ void __init inode_init(void)
 {
 	int loop;
 
+	percpu_counter_init(&nr_inodes, 0);
 	/* inode slab cache */
 	inode_cachep = kmem_cache_create("inode_cache",
 					 sizeof(struct inode),
