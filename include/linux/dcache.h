@@ -81,13 +81,23 @@ full_name_hash(const unsigned char *name, unsigned int len)
  * large memory footprint increase).
  */
 #ifdef CONFIG_64BIT
-#define DNAME_INLINE_LEN_MIN 32 /* 192 bytes */
+#define DNAME_INLINE_LEN_MIN 16 /* 192 bytes */
 #else
-#define DNAME_INLINE_LEN_MIN 40 /* 128 bytes */
+#define DNAME_INLINE_LEN_MIN 24 /* 128 bytes */
 #endif
+
+struct per_cpu_dentry {
+	unsigned int count;
+	struct list_head list;
+	struct dentry *dentry;
+	struct per_cpu_dentry __percpu *base;
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+};
 
 struct dentry {
 	atomic_t d_count;
+	atomic_t d_gen;
+
 	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
 	int d_mounted;
@@ -115,6 +125,8 @@ struct dentry {
 	const struct dentry_operations *d_op;
 	struct super_block *d_sb;	/* The root of the dentry tree */
 	void *d_fsdata;			/* fs-specific data */
+	
+	struct per_cpu_dentry __percpu *d_per_cpu;
 
 	unsigned char d_iname[DNAME_INLINE_LEN_MIN];	/* small names */
 };
@@ -185,6 +197,16 @@ d_iput:		no		no		no       yes
 #define DCACHE_COOKIE		0x0040	/* For use by dcookie subsystem */
 
 #define DCACHE_FSNOTIFY_PARENT_WATCHED	0x0080 /* Parent inode is watched by some fsnotify listener */
+#define DCACHE_SINGLE          0x0040
+	/*
+	 * socket, pipe or anonymous fd dentry
+	 * - SINGLE dentries have themselves as a parent.
+	 * - SINGLE dentries are not hashed into global hash table
+	 * - Their d_alias list is empty
+	 * - They dont need dcache_lock synchronization
+	 */
+
+#define DCACHE_CANT_MOUNT	0x0100
 
 extern spinlock_t dcache_lock;
 extern seqlock_t rename_lock;
@@ -244,6 +266,7 @@ extern void shrink_dcache_sb(struct super_block *);
 extern void shrink_dcache_parent(struct dentry *);
 extern void shrink_dcache_for_umount(struct super_block *);
 extern int d_invalidate(struct dentry *);
+extern struct dentry *d_alloc_single(const struct qstr *, struct inode *);
 
 /* only used at mount-time */
 extern struct dentry * d_alloc_root(struct inode *);
@@ -329,10 +352,15 @@ extern char *dentry_path(struct dentry *, char *, int);
  *	needs and they take necessary precautions) you should hold dcache_lock
  *	and call dget_locked() instead of dget().
  */
+
+extern struct dentry *per_cpu_dget(struct dentry *dentry);
  
 static inline struct dentry *dget(struct dentry *dentry)
 {
 	if (dentry) {
+		if (per_cpu_dget(dentry))
+			return dentry;
+
 		BUG_ON(!atomic_read(&dentry->d_count));
 		atomic_inc(&dentry->d_count);
 	}
@@ -356,6 +384,18 @@ static inline int d_unhashed(struct dentry *dentry)
 static inline int d_unlinked(struct dentry *dentry)
 {
 	return d_unhashed(dentry) && !IS_ROOT(dentry);
+}
+
+static inline int cant_mount(struct dentry *dentry)
+{
+	return (dentry->d_flags & DCACHE_CANT_MOUNT);
+}
+
+static inline void dont_mount(struct dentry *dentry)
+{
+	spin_lock(&dentry->d_lock);
+	dentry->d_flags |= DCACHE_CANT_MOUNT;
+	spin_unlock(&dentry->d_lock);
 }
 
 static inline struct dentry *dget_parent(struct dentry *dentry)

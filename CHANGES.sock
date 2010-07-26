@@ -1,0 +1,5 @@
+* Using batching for protocol resource tracking.
+* The prof files:
+    /proc/sys/net/sk_percpu_batch
+    /proc/sys/net/sk_percpu_max
+  control the batch size of the maximum size of per-core pools.

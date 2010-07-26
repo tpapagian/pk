@@ -1,0 +1,4 @@
+* Use batch reference counts for each vfsmount.  This avoids
+  contention on vfsmount->mnt_count.
+* Use per-core lists for lookup_mnt.  This avoid contention on the
+  global vfsmount_lock.
