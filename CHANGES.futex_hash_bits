@@ -1,3 +1,0 @@
-This increases the performance of Apache.  Apache creates many queues
-that are guarded by futexes.  The default small hash table causes
-contention.
