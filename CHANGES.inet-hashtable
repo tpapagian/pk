@@ -1,0 +1,9 @@
+Split up the hash bucket lock on the used ports hash table.
+    
+There is a per core data structure that stores owners and the owner count. A
+core updates it's own local version. Updates on the hot paths access the local
+copy. Cold path code that needs to aggregate the information from all cores
+grabs all the per-cpu locks and consolidates the data in to one data structure.
+    
+Each socket on the owner list also keeps track of which list it is on.  This is
+needed because a socket need to know which list to remove itself from.
