@@ -488,8 +488,8 @@ system_call_fastpath:
 	movq %r10,%rcx
 
 #ifdef CONFIG_FORP
-	cmpl $0, forp_enable
-	je forp_do_syscall
+	testl $FORP_ENABLE_ENTRY, forp_enable
+	jz forp_do_syscall
 
 	movq %rax, %rdi
 	call forp_start_entry
@@ -1125,8 +1125,8 @@ END(\sym)
 
 #ifdef CONFIG_FORP
 ENTRY(forp_do_page_fault)
-	cmpl $0, forp_enable
-	je 1f
+	testl $FORP_ENABLE_ENTRY, forp_enable
+	jz 1f
 
 	pushq %rsi
 	pushq %rdi

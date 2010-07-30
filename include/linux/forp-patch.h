@@ -25,4 +25,7 @@ static inline u64 forp_time(void)
 
 #define FORP_ENTRY_PGFAULT NR_syscalls
 
+#define FORP_ENABLE_INST   0x01
+#define FORP_ENABLE_ENTRY  0x02
+
 #endif

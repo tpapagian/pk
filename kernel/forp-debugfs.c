@@ -43,16 +43,17 @@ static int forp_snprintf_recs(struct forp_rec *recs, struct forp_label *labels,
 	p = buf;
 	e = p + sz;
 
-	p += snprintf(p, e - p, "# Function                               "
-		      "Hit    Time\n");
+	p += snprintf(p, e - p, "# Function                          "
+		      "Depth         Hit    Time\n");
 
 	for (i = 0; i < n; i++) {
 		struct forp_rec *rec = &recs[i];
 		struct forp_label *label = &labels[i];
 		if (rec->count)
 			p += snprintf(p, e - p, 
-				      "  %-30.30s  %10llu    %10llu\n",
-				      label->name, rec->count, rec->time);
+				      "  %-30.30s      %3u  %10llu    %-10llu\n",
+				      label->name, label->depth, rec->count, 
+				      rec->time);
 	}
 
 	return p - buf;
@@ -286,23 +287,29 @@ forp_enable_write(struct file *filp, const char __user *ubuf,
 	ret = strict_strtoul(buf, 10, &val);
 	if (ret < 0)
 		return ret;
-	
-	val = !!val;
 
+	if (val > (FORP_ENABLE_INST|FORP_ENABLE_ENTRY))
+		return -EINVAL;
+	
 	mutex_lock(&forp_mu);
 	if (forp_enable ^ val) {
 		if (val) {
-			ret = forp_init();
+			if (forp_enable)
+				forp_deinit();
+
+			ret = forp_init(val);
 			if (ret)
 				goto out;
 		} else {
 			forp_deinit();
 		}
 	}
+
+	*ppos += cnt;
+	ret = cnt;
 out:
 	mutex_unlock(&forp_mu);
-	*ppos += cnt;
-	return cnt;
+	return ret;
 }
 
 static const struct file_operations forp_enable_ops = {
