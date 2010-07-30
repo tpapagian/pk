@@ -20,6 +20,7 @@
 #include <linux/delay.h>
 #include <linux/idr.h>
 #include <linux/sched.h>
+#include <linux/slab.h>
 
 #include <linux/c2port.h>
 
@@ -706,7 +707,7 @@ static ssize_t __c2port_read_flash_data(struct c2port_device *dev,
 	return nread;
 }
 
-static ssize_t c2port_read_flash_data(struct kobject *kobj,
+static ssize_t c2port_read_flash_data(struct file *filp, struct kobject *kobj,
 				struct bin_attribute *attr,
 				char *buffer, loff_t offset, size_t count)
 {
@@ -823,7 +824,7 @@ static ssize_t __c2port_write_flash_data(struct c2port_device *dev,
 	return nwrite;
 }
 
-static ssize_t c2port_write_flash_data(struct kobject *kobj,
+static ssize_t c2port_write_flash_data(struct file *filp, struct kobject *kobj,
 				struct bin_attribute *attr,
 				char *buffer, loff_t offset, size_t count)
 {

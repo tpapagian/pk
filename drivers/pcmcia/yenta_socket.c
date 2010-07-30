@@ -17,6 +17,7 @@
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/io.h>
+#include <linux/slab.h>
 
 #include <pcmcia/cs_types.h>
 #include <pcmcia/ss.h>
@@ -879,6 +880,12 @@ static struct cardbus_type cardbus_type[] = {
 		.restore_state	= ti_restore_state,
 		.sock_init	= ti_init,
 	},
+	[CARDBUS_TYPE_ENE]	= {
+		.override	= ene_override,
+		.save_state	= ti_save_state,
+		.restore_state	= ti_restore_state,
+		.sock_init	= ti_init,
+	},
 #endif
 #ifdef CONFIG_YENTA_RICOH
 	[CARDBUS_TYPE_RICOH]	= {
@@ -899,14 +906,6 @@ static struct cardbus_type cardbus_type[] = {
 	[CARDBUS_TYPE_O2MICRO]	= {
 		.override	= o2micro_override,
 		.restore_state	= o2micro_restore_state,
-	},
-#endif
-#ifdef CONFIG_YENTA_TI
-	[CARDBUS_TYPE_ENE]	= {
-		.override	= ene_override,
-		.save_state	= ti_save_state,
-		.restore_state	= ti_restore_state,
-		.sock_init	= ti_init,
 	},
 #endif
 };
@@ -974,7 +973,7 @@ static irqreturn_t yenta_probe_handler(int irq, void *dev_id)
 /* probes the PCI interrupt, use only on override functions */
 static int yenta_probe_cb_irq(struct yenta_socket *socket)
 {
-	u8 reg;
+	u8 reg = 0;
 
 	if (!socket->cb_irq)
 		return -1;
@@ -988,7 +987,8 @@ static int yenta_probe_cb_irq(struct yenta_socket *socket)
 	}
 
 	/* generate interrupt, wait */
-	reg = exca_readb(socket, I365_CSCINT);
+	if (!socket->dev->irq)
+		reg = exca_readb(socket, I365_CSCINT);
 	exca_writeb(socket, I365_CSCINT, reg | I365_CSC_STSCHG);
 	cb_writel(socket, CB_SOCKET_EVENT, -1);
 	cb_writel(socket, CB_SOCKET_MASK, CB_CSTSMASK);
@@ -1301,13 +1301,6 @@ static int yenta_dev_suspend_noirq(struct device *dev)
 	pci_read_config_dword(pdev, 16*4, &socket->saved_state[0]);
 	pci_read_config_dword(pdev, 17*4, &socket->saved_state[1]);
 	pci_disable_device(pdev);
-
-	/*
-	 * Some laptops (IBM T22) do not like us putting the Cardbus
-	 * bridge into D3.  At a guess, some other laptop will
-	 * probably require this, so leave it commented out for now.
-	 */
-	/* pci_set_power_state(dev, 3); */
 
 	return 0;
 }

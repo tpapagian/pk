@@ -1,0 +1,5 @@
+Place a bunch of read only member of the net_device structure on their own
+cacheline. Including:
+ * real_num_tx_queues
+ * dev_addr
+ * tx_queue_len

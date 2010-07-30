@@ -31,6 +31,9 @@ const struct file_operations generic_ro_fops = {
 
 EXPORT_SYMBOL(generic_ro_fops);
 
+/* Controlled by sysctl fs/enable_lseek_lock */
+static int enable_lseek_lock;
+
 /**
  * generic_file_llseek_unlocked - lockless generic llseek implementation
  * @file:	file structure to seek on
@@ -47,7 +50,7 @@ generic_file_llseek_unlocked(struct file *file, loff_t offset, int origin)
 
 	switch (origin) {
 	case SEEK_END:
-		offset += inode->i_size;
+		offset += i_size_read(inode);
 		break;
 	case SEEK_CUR:
 		/*
@@ -88,14 +91,40 @@ EXPORT_SYMBOL(generic_file_llseek_unlocked);
 loff_t generic_file_llseek(struct file *file, loff_t offset, int origin)
 {
 	loff_t rval;
+	int lock = enable_lseek_lock;
 
-	mutex_lock(&file->f_dentry->d_inode->i_mutex);
+	/* XXX(Austin): Patches that remove this lock have been
+	 * summarily rejected because they make access to f_pos by
+	 * holders of the i_mutex lock non-atomic.  It's hard to say
+	 * if this actually matters.  f_pos atomicity is a complete
+	 * mess in general.
+	 */
+	if (lock)
+		mutex_lock(&file->f_dentry->d_inode->i_mutex);
 	rval = generic_file_llseek_unlocked(file, offset, origin);
-	mutex_unlock(&file->f_dentry->d_inode->i_mutex);
+	if (lock)
+		mutex_unlock(&file->f_dentry->d_inode->i_mutex);
 
 	return rval;
 }
 EXPORT_SYMBOL(generic_file_llseek);
+
+/**
+ * noop_llseek - No Operation Performed llseek implementation
+ * @file:	file structure to seek on
+ * @offset:	file offset to seek to
+ * @origin:	type of seek
+ *
+ * This is an implementation of ->llseek useable for the rare special case when
+ * userspace expects the seek to succeed but the (device) file is actually not
+ * able to perform the seek. In this case you use noop_llseek() instead of
+ * falling back to the default implementation of ->llseek.
+ */
+loff_t noop_llseek(struct file *file, loff_t offset, int origin)
+{
+	return file->f_pos;
+}
+EXPORT_SYMBOL(noop_llseek);
 
 loff_t no_llseek(struct file *file, loff_t offset, int origin)
 {
@@ -912,3 +941,27 @@ SYSCALL_DEFINE4(sendfile64, int, out_fd, int, in_fd, loff_t __user *, offset, si
 
 	return do_sendfile(out_fd, in_fd, NULL, count, 0);
 }
+
+static int lseek_enable_min = 0;
+static int lseek_enable_max = 1;
+
+static struct ctl_table lseek_ctl_table[] = {
+	{
+		.procname	= "enable_lseek_lock",
+		.data		= &enable_lseek_lock,
+		.maxlen		= sizeof(enable_lseek_lock),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &lseek_enable_min,
+		.extra2		= &lseek_enable_max,
+	},
+	{ }
+};
+
+static int __init lseek_sysctl_init(void)
+{
+	struct ctl_path path[] = { { "fs" }, { NULL } };
+	register_sysctl_paths(path, lseek_ctl_table);
+	return 0;
+}
+fs_initcall(lseek_sysctl_init);
