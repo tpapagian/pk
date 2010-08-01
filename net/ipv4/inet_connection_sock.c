@@ -704,6 +704,15 @@ static inline void __inet_csk_destroy_sock_one(struct sock *sk)
 #endif
 }
 
+// AP: this is a giant hack. This function is from net/socket.c.
+// had to add this because of some new feature in 2.6.35
+static void wq_free_rcu(struct rcu_head *head)
+{
+	struct socket_wq *wq = container_of(head, struct socket_wq, rcu);
+
+	kfree(wq);
+}
+
 /*
  * At this point, there should be no process reference to this
  * socket, and thus no user references at all.  Therefore we
@@ -724,7 +733,7 @@ void inet_csk_destroy_sock(struct sock *sk)
 	WARN_ON(inet_sk(sk)->inet_num && !inet_csk(sk)->icsk_bind_hash);
 
 #ifdef DEBUG_AP
-	printk("inet_num=%d icsk_bind_hash=%p\n", inet_sk(sk)->inet_num, inet_csk(sk)->icsk_bind_hash);
+	printk("inet_num=%d icsk_bind_hash=%p icsk_ma_sks=%p\n", inet_sk(sk)->inet_num, inet_csk(sk)->icsk_bind_hash, icsk->icsk_ma_sks);
 #endif
 
 	if (icsk->icsk_multi_accept) {
@@ -744,6 +753,7 @@ void inet_csk_destroy_sock(struct sock *sk)
 			sock_set_flag(tsk, SOCK_DEAD);
 			//inet_sk(tsk)->inet_num = 0;
 			inet_csk(tsk)->icsk_bind_hash = NULL;
+			call_rcu(&tsk->sk_wq->rcu, wq_free_rcu);
 			__inet_csk_destroy_sock_one(tsk);
 		}
 
@@ -843,15 +853,23 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 		newsock->state = sk->sk_socket->state;
 		newsock->type = sk->sk_socket->type;
 		newsock->flags = sk->sk_socket->flags;
-		newsock->fasync_list = NULL;
-		init_waitqueue_head(&newsock->wait);
+
+		// AP: TODO must check when this memory is deallocated
+		newsock->wq = kmalloc(sizeof(struct socket_wq), GFP_KERNEL);
+		if (!newsock->wq) {
+			err = -ENOMEM;
+			goto clone_error;
+		}
+		init_waitqueue_head(&newsock->wq->wait);
+		newsock->wq->fasync_list = NULL;
+
 		newsock->file = NULL;
 		newsock->sk = newsk;
 		newsock->ops = sk->sk_socket->ops;
 
 		sk_set_socket(newsk, newsock);
 
-		newsk->sk_sleep = &newsock->wait;
+		newsk->sk_wq = newsock->wq;
 
 		bh_unlock_sock(newsk);
 		sock_put(newsk);
