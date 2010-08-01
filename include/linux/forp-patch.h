@@ -23,7 +23,8 @@ static inline u64 forp_time(void)
 
 #endif /* __ASSEMBLY__ */
 
-#define FORP_ENTRY_PGFAULT NR_syscalls
+#define FORP_ENTRY_PGFAULT	NR_syscalls
+#define FORP_ENTRY_SOFTIRQD	(NR_syscalls + 1)
 
 #define FORP_ENABLE_INST   0x01
 #define FORP_ENABLE_ENTRY  0x02

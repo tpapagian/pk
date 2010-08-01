@@ -311,4 +311,5 @@ static struct forp_label forp_entry_label[FORP_ENTRY_REC_SIZE] = {
 	FORP_SYSS(perf_event_open),
 	FORP_SYSS(recvmmsg),
 	[FORP_ENTRY_PGFAULT] = { "do_page_fault", 0 },
+	[FORP_ENTRY_SOFTIRQD] = { "run_ksoftirqd", 0 },
 };
