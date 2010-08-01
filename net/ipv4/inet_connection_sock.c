@@ -736,7 +736,7 @@ void inet_csk_destroy_sock(struct sock *sk)
 	printk("inet_num=%d icsk_bind_hash=%p icsk_ma_sks=%p\n", inet_sk(sk)->inet_num, inet_csk(sk)->icsk_bind_hash, icsk->icsk_ma_sks);
 #endif
 
-	if (icsk->icsk_multi_accept) {
+	if (icsk->icsk_multi_accept && icsk->icsk_ma_sks != NULL) {
 		int i;
 #ifdef DEBUG_AP
 		printk("starting to destroy slave socket\n");
