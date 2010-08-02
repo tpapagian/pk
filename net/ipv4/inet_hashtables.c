@@ -31,45 +31,21 @@ void __inet_bind_bucket_per_cpu_flush(struct inet_bind_bucket *tb, int lock)
 		struct sock *sk;
 		struct hlist_node *node, *tmp;
 		struct per_cpu_inet_bind_bucket *p = &tb->per_cpu[c];
-		int o, oo = 0, ooo;
 
 		if (lock) spin_lock(&p->lock);
 
 		BUG_ON(!spin_is_locked(&p->lock));
 
-		o = p->num_owners;
 		tb->num_owners += p->num_owners;
 		p->num_owners = 0;
 
-		ooo = 0;
-		sk_for_each_bound(sk, node, &tb->owners)
-			ooo++;
-#ifdef AP_DBG
-		printk("__inet_bind_bucket_per_cpu_flush: owners before %d\n", ooo);
-#endif
-
 		sk_for_each_bound_safe(sk, node, tmp, &p->owners) {
-			oo++;
 			sk->sk_bind_node_cpu = -1;
 			sk_add_bind_node(sk, &tb->owners);
-#ifdef AP_DBG
-			printk("__inet_bind_bucket_per_cpu_flush: moving sk:%p from p:%p to tb:%p\n", sk, p, tb);
-#endif
 		}
 		INIT_HLIST_HEAD(&p->owners);
 
-		ooo = 0;
-		sk_for_each_bound(sk, node, &tb->owners)
-			ooo++;
-#ifdef AP_DBG
-		printk("__inet_bind_bucket_per_cpu_flush: owners after %d\n", ooo);
-#endif
-
 		if (lock) spin_unlock(&p->lock);
-
-#ifdef AP_DBG
-		printk("__inet_bind_bucket_per_cpu_flush: flushing cpu %d o:%d c:%d\n", c, o, oo);
-#endif
 	}
 }
 
@@ -114,16 +90,8 @@ struct inet_bind_bucket *inet_bind_bucket_create(struct kmem_cache *cachep,
  */
 void inet_bind_bucket_destroy(struct kmem_cache *cachep, struct inet_bind_bucket *tb)
 {
-	int oo = 0;
 	struct sock *sk;
 	struct hlist_node *node;
-
-	sk_for_each_bound(sk, node, &tb->owners)
-		oo++;
-
-#ifdef AP_DBG
-	printk("inet_bind_bucket_destroy: [%d] trying to delete port %d c:%d\n", smp_processor_id(), tb->port, oo);
-#endif
 
 	if (hlist_empty(&tb->owners)) {
 		int c;
@@ -134,9 +102,6 @@ void inet_bind_bucket_destroy(struct kmem_cache *cachep, struct inet_bind_bucket
 		__inet_bind_bucket_per_cpu_flush(tb, 0);
 
 		if (hlist_empty(&tb->owners)) {
-#ifdef AP_DBG
-			printk("inet_bind_bucket_destroy: [%d] killed bind bucket on port %d\n", smp_processor_id(), tb->port);
-#endif
 			__hlist_del(&tb->node);
 
 			for_each_possible_cpu(c)
@@ -147,16 +112,8 @@ void inet_bind_bucket_destroy(struct kmem_cache *cachep, struct inet_bind_bucket
 			return;
 		}
 
-#ifdef AP_DBG
-		printk("inet_bind_bucket_destroy: [%d] migrated, and still owners\n", smp_processor_id());
-#endif
-
 		for_each_possible_cpu(c)
 			spin_unlock(&tb->per_cpu[c].lock);
-	} else {
-#ifdef AP_DBG
-		printk("inet_bind_bucket_destroy: [%d] still owners\n", smp_processor_id());
-#endif
 	}
 }
 
