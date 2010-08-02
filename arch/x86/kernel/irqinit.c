@@ -5,7 +5,6 @@
 #include <linux/ioport.h>
 #include <linux/interrupt.h>
 #include <linux/timex.h>
-#include <linux/slab.h>
 #include <linux/random.h>
 #include <linux/kprobes.h>
 #include <linux/init.h>
@@ -61,7 +60,7 @@ static irqreturn_t math_error_irq(int cpl, void *dev_id)
 	outb(0, 0xF0);
 	if (ignore_fpu_irq || !boot_cpu_data.hard_math)
 		return IRQ_NONE;
-	math_error((void __user *)get_irq_regs()->ip);
+	math_error(get_irq_regs(), 0, 16);
 	return IRQ_HANDLED;
 }
 
