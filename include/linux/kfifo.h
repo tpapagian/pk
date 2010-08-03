@@ -86,7 +86,8 @@ union { \
  */
 #define INIT_KFIFO(name) \
 	name = __kfifo_initializer(sizeof(name##kfifo_buffer) - \
-				sizeof(struct kfifo), name##kfifo_buffer)
+				sizeof(struct kfifo), \
+				name##kfifo_buffer + sizeof(struct kfifo))
 
 /**
  * DEFINE_KFIFO - macro to define and initialize a kfifo
@@ -200,7 +201,7 @@ static inline __must_check unsigned int kfifo_avail(struct kfifo *fifo)
  * @n: the length of the data to be added.
  * @lock: pointer to the spinlock to use for locking.
  *
- * This function copies at most @len bytes from the @from buffer into
+ * This function copies at most @n bytes from the @from buffer into
  * the FIFO depending on the free space, and returns the number of
  * bytes copied.
  */
@@ -226,7 +227,7 @@ static inline unsigned int kfifo_in_locked(struct kfifo *fifo,
  * @n: the size of the destination buffer.
  * @lock: pointer to the spinlock to use for locking.
  *
- * This function copies at most @len bytes from the FIFO into the
+ * This function copies at most @n bytes from the FIFO into the
  * @to buffer and returns the number of copied bytes.
  */
 static inline __must_check unsigned int kfifo_out_locked(struct kfifo *fifo,

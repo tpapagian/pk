@@ -31,6 +31,7 @@
 #include <linux/platform_device.h>
 #include <linux/errno.h>
 #include <linux/init.h>
+#include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -112,7 +113,7 @@ static int bfin_cf_get_status(struct pcmcia_socket *s, u_int *sp)
 
 	if (bfin_cf_present(cf->cd_pfx)) {
 		*sp = SS_READY | SS_DETECT | SS_POWERON | SS_3VCARD;
-		s->irq.AssignedIRQ = 0;
+		s->pcmcia_irq = 0;
 		s->pci_irq = cf->irq;
 
 	} else
