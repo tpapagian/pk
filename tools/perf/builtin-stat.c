@@ -174,7 +174,7 @@ static int create_perf_stat_counter(int counter)
 				    PERF_FORMAT_TOTAL_TIME_RUNNING;
 
 	if (system_wide) {
-		if (!strlist__empty(cpu_list)) {
+		if (cpu_list && !strlist__empty(cpu_list)) {
 			struct str_node *ent;
 			strlist__for_each(ent, cpu_list) {
 				unsigned int cpu = atoi(ent->s);
@@ -259,7 +259,7 @@ static void read_counter(int counter)
 
 	count[0] = count[1] = count[2] = 0;
 
-	if (!strlist__empty(cpu_list)) {
+	if (cpu_list && !strlist__empty(cpu_list)) {
 		struct str_node *ent;
 		strlist__for_each(ent, cpu_list) {
 			unsigned int cpu = atoi(ent->s);
@@ -614,7 +614,7 @@ int cmd_stat(int argc, const char **argv, const char *prefix __used)
 	if (setup_list(&cpu_list, cpu_list_str, "cpus") < 0)
 		usage_with_options(stat_usage, options);
 
-	if (!strlist__empty(cpu_list)) {
+	if (cpu_list && !strlist__empty(cpu_list)) {
 		struct str_node *ent;
 		nr_cpus = read_cpu_map();
 		strlist__for_each(ent, cpu_list) {
