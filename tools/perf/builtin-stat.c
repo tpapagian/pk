@@ -47,6 +47,7 @@
 #include "util/header.h"
 #include "util/cpumap.h"
 #include "util/thread.h"
+#include "util/strlist.h"
 
 #include <sys/prctl.h>
 #include <math.h>
@@ -69,6 +70,8 @@ static struct perf_event_attr default_attrs[] = {
 };
 
 static bool			system_wide			=  false;
+static const char		*cpu_list_str			=  NULL;
+struct strlist			*cpu_list			=  NULL;
 static unsigned int		nr_cpus				=  0;
 static int			run_idx				=  0;
 
@@ -147,6 +150,19 @@ struct stats			runtime_branches_stats;
 #define ERR_PERF_OPEN \
 "Error: counter %d, sys_perf_event_open() syscall returned with %d (%s)\n"
 
+static int create_perf_stat_counter_cpu(int counter,
+		struct perf_event_attr *attr, int cpu)
+{
+	fd[cpu][counter][0] = sys_perf_event_open(attr,
+			-1, cpumap[cpu], -1, 0);
+	if (fd[cpu][counter][0] < 0) {
+		pr_debug(ERR_PERF_OPEN, counter,
+			 fd[cpu][counter][0], strerror(errno));
+		return 0;
+	} else
+		return 1;
+}
+
 static int create_perf_stat_counter(int counter)
 {
 	struct perf_event_attr *attr = attrs + counter;
@@ -158,16 +174,18 @@ static int create_perf_stat_counter(int counter)
 				    PERF_FORMAT_TOTAL_TIME_RUNNING;
 
 	if (system_wide) {
-		unsigned int cpu;
-
-		for (cpu = 0; cpu < nr_cpus; cpu++) {
-			fd[cpu][counter][0] = sys_perf_event_open(attr,
-					-1, cpumap[cpu], -1, 0);
-			if (fd[cpu][counter][0] < 0)
-				pr_debug(ERR_PERF_OPEN, counter,
-					 fd[cpu][counter][0], strerror(errno));
-			else
-				++ncreated;
+		if (!strlist__empty(cpu_list)) {
+			struct str_node *ent;
+			strlist__for_each(ent, cpu_list) {
+				unsigned int cpu = atoi(ent->s);
+				if (create_perf_stat_counter_cpu(counter, attr, cpu))
+					++ncreated;
+			}
+		} else {
+			unsigned int cpu;
+			for (cpu = 0; cpu < nr_cpus; cpu++)
+				if (create_perf_stat_counter_cpu(counter, attr, cpu))
+					++ncreated;
 		}
 	} else {
 		attr->inherit = !no_inherit;
@@ -202,37 +220,55 @@ static inline int nsec_counter(int counter)
 	return 0;
 }
 
+static void __read_counter_cpu(int counter, unsigned int cpu, u64 *count)
+{
+	u64 single_count[3];
+	size_t res, nv;
+	int thread;
+
+	nv = scale ? 3 : 1;
+
+	for (thread = 0; thread < thread_num; thread++) {
+
+		if (fd[cpu][counter][thread] < 0)
+			continue;
+
+		res = read(fd[cpu][counter][thread],
+				single_count, nv * sizeof(u64));
+		assert(res == nv * sizeof(u64));
+
+		close(fd[cpu][counter][thread]);
+		fd[cpu][counter][thread] = -1;
+
+		count[0] += single_count[0];
+		if (scale) {
+			count[1] += single_count[1];
+			count[2] += single_count[2];
+		}
+	}
+}
+
 /*
  * Read out the results of a single counter:
  */
 static void read_counter(int counter)
 {
-	u64 count[3], single_count[3];
-	unsigned int cpu;
-	size_t res, nv;
+	u64 count[3];
 	int scaled;
-	int i, thread;
+	int i;
 
 	count[0] = count[1] = count[2] = 0;
 
-	nv = scale ? 3 : 1;
-	for (cpu = 0; cpu < nr_cpus; cpu++) {
-		for (thread = 0; thread < thread_num; thread++) {
-			if (fd[cpu][counter][thread] < 0)
-				continue;
-
-			res = read(fd[cpu][counter][thread],
-					single_count, nv * sizeof(u64));
-			assert(res == nv * sizeof(u64));
-
-			close(fd[cpu][counter][thread]);
-			fd[cpu][counter][thread] = -1;
-
-			count[0] += single_count[0];
-			if (scale) {
-				count[1] += single_count[1];
-				count[2] += single_count[2];
-			}
+	if (!strlist__empty(cpu_list)) {
+		struct str_node *ent;
+		strlist__for_each(ent, cpu_list) {
+			unsigned int cpu = atoi(ent->s);
+			__read_counter_cpu(counter, cpu, count);
+		}
+	} else {
+		unsigned int cpu;
+		for (cpu = 0; cpu < nr_cpus; cpu++) {
+			__read_counter_cpu(counter, cpu, count);
 		}
 	}
 
@@ -515,6 +551,20 @@ static void sig_atexit(void)
 	kill(getpid(), signr);
 }
 
+static int setup_list(struct strlist **list, const char *list_str,
+		      const char *list_name)
+{
+	if (list_str == NULL)
+		return 0;
+
+	*list = strlist__new(true, list_str);
+	if (!*list) {
+		pr_err("problems parsing %s list\n", list_name);
+		return -1;
+	}
+	return 0;
+}
+
 static const char * const stat_usage[] = {
 	"perf stat [<options>] [<command>]",
 	NULL
@@ -532,6 +582,8 @@ static const struct option options[] = {
 		    "stat events on existing thread id"),
 	OPT_BOOLEAN('a', "all-cpus", &system_wide,
 		    "system-wide collection from all CPUs"),
+	OPT_STRING('C', "cpus", &cpu_list_str, "cpu[,cpu...]",
+		   "only record on these cpus"),
 	OPT_BOOLEAN('c', "scale", &scale,
 		    "scale/normalize counters"),
 	OPT_INCR('v', "verbose", &verbose,
@@ -558,6 +610,22 @@ int cmd_stat(int argc, const char **argv, const char *prefix __used)
 		usage_with_options(stat_usage, options);
 	if (run_count <= 0)
 		usage_with_options(stat_usage, options);
+
+	if (setup_list(&cpu_list, cpu_list_str, "cpus") < 0)
+		usage_with_options(stat_usage, options);
+
+	if (!strlist__empty(cpu_list)) {
+		struct str_node *ent;
+		nr_cpus = read_cpu_map();
+		strlist__for_each(ent, cpu_list) {
+			unsigned int cpu = atoi(ent->s);
+			if (cpu >= nr_cpus) {
+				fprintf(stderr, "cpu out of bound %u\n", cpu);
+				usage_with_options(stat_usage, options);
+			}
+		}
+		system_wide = true;
+	}
 
 	/* Set attrs and nr_counters if no event is selected and !null_run */
 	if (!null_run && !nr_counters) {
