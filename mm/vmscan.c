@@ -924,7 +924,7 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		int zone_id;
 
 		page = lru_to_page(src);
-		prefetchw_prev_lru_page(page, src, flags);
+		prefetchw_prev_lru_page(page, src, flags_);
 
 		VM_BUG_ON(!PageLRU(page));
 
@@ -2843,7 +2843,7 @@ static void scan_zone_unevictable_pages(struct zone *zone)
 			if (!trylock_page(page))
 				continue;
 
-			prefetchw_prev_lru_page(page, l_unevictable, flags);
+			prefetchw_prev_lru_page(page, l_unevictable, flags_);
 
 			if (likely(PageLRU(page) && PageUnevictable(page)))
 				check_move_unevictable_page(page, zone);

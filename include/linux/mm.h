@@ -517,7 +517,7 @@ static inline void set_compound_order(struct page *page, unsigned long order)
 
 static inline enum zone_type page_zonenum(struct page *page)
 {
-	return (page->flags >> ZONES_PGSHIFT) & ZONES_MASK;
+	return (page->flags_ >> ZONES_PGSHIFT) & ZONES_MASK;
 }
 
 /*
@@ -530,7 +530,7 @@ static inline enum zone_type page_zonenum(struct page *page)
  */
 static inline int page_zone_id(struct page *page)
 {
-	return (page->flags >> ZONEID_PGSHIFT) & ZONEID_MASK;
+	return (page->flags_ >> ZONEID_PGSHIFT) & ZONEID_MASK;
 }
 
 static inline int zone_to_nid(struct zone *zone)
@@ -547,7 +547,7 @@ extern int page_to_nid(struct page *page);
 #else
 static inline int page_to_nid(struct page *page)
 {
-	return (page->flags >> NODES_PGSHIFT) & NODES_MASK;
+	return (page->flags_ >> NODES_PGSHIFT) & NODES_MASK;
 }
 #endif
 
@@ -565,20 +565,20 @@ static inline unsigned long page_to_section(struct page *page)
 
 static inline void set_page_zone(struct page *page, enum zone_type zone)
 {
-	page->flags &= ~(ZONES_MASK << ZONES_PGSHIFT);
-	page->flags |= (zone & ZONES_MASK) << ZONES_PGSHIFT;
+	page->flags_ &= ~(ZONES_MASK << ZONES_PGSHIFT);
+	page->flags_ |= (zone & ZONES_MASK) << ZONES_PGSHIFT;
 }
 
 static inline void set_page_node(struct page *page, unsigned long node)
 {
-	page->flags &= ~(NODES_MASK << NODES_PGSHIFT);
-	page->flags |= (node & NODES_MASK) << NODES_PGSHIFT;
+	page->flags_ &= ~(NODES_MASK << NODES_PGSHIFT);
+	page->flags_ |= (node & NODES_MASK) << NODES_PGSHIFT;
 }
 
 static inline void set_page_section(struct page *page, unsigned long section)
 {
-	page->flags &= ~(SECTIONS_MASK << SECTIONS_PGSHIFT);
-	page->flags |= (section & SECTIONS_MASK) << SECTIONS_PGSHIFT;
+	page->flags_ &= ~(SECTIONS_MASK << SECTIONS_PGSHIFT);
+	page->flags_ |= (section & SECTIONS_MASK) << SECTIONS_PGSHIFT;
 }
 
 static inline void set_page_links(struct page *page, enum zone_type zone,

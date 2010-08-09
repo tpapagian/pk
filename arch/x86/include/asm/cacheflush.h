@@ -63,7 +63,7 @@ static inline void copy_from_user_page(struct vm_area_struct *vma,
 
 static inline unsigned long get_page_memtype(struct page *pg)
 {
-	unsigned long pg_flags = pg->flags & _PGMT_MASK;
+	unsigned long pg_flags = pg->flags_ & _PGMT_MASK;
 
 	if (pg_flags == _PGMT_DEFAULT)
 		return -1;
@@ -94,9 +94,9 @@ static inline void set_page_memtype(struct page *pg, unsigned long memtype)
 	}
 
 	do {
-		old_flags = pg->flags;
+		old_flags = pg->flags_;
 		new_flags = (old_flags & _PGMT_CLEAR_MASK) | memtype_flags;
-	} while (cmpxchg(&pg->flags, old_flags, new_flags) != old_flags);
+	} while (cmpxchg(&pg->flags_, old_flags, new_flags) != old_flags);
 }
 #else
 static inline unsigned long get_page_memtype(struct page *pg) { return -1; }

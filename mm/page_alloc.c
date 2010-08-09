@@ -561,14 +561,15 @@ static inline void free_page_mlock(struct page *page)
 static inline int free_pages_check(struct page *page)
 {
 	if (unlikely(page_mapcount(page) |
-		(page->mapping != NULL)  |
-		(atomic_read(&page->_count) != 0) |
-		(page->flags & PAGE_FLAGS_CHECK_AT_FREE))) {
+		     (page->mapping != NULL)  |
+		     (atomic_read(&page->_count) != 0) |
+		     (page->flags_ & PAGE_FLAGS_CHECK_AT_FREE) |
+		     (page->flags_wo & PAGE_WO_FLAGS_CHECK_AT_FREE))) {
 		bad_page(page);
 		return 1;
 	}
-	if (page->flags & PAGE_FLAGS_CHECK_AT_PREP)
-		page->flags &= ~PAGE_FLAGS_CHECK_AT_PREP;
+	if (page->flags_ & PAGE_FLAGS_CHECK_AT_PREP)
+		page->flags_ &= ~PAGE_FLAGS_CHECK_AT_PREP;
 	return 0;
 }
 
@@ -750,7 +751,7 @@ static inline int check_new_page(struct page *page)
 	if (unlikely(page_mapcount(page) |
 		(page->mapping != NULL)  |
 		(atomic_read(&page->_count) != 0)  |
-		(page->flags & PAGE_FLAGS_CHECK_AT_PREP))) {
+		(page->flags_ & PAGE_FLAGS_CHECK_AT_PREP))) {
 		bad_page(page);
 		return 1;
 	}
@@ -5402,7 +5403,7 @@ bool is_free_buddy_page(struct page *page)
 #endif
 
 static struct trace_print_flags pageflag_names[] = {
-	{1UL << PG_locked,		"locked"	},
+	{1UL << PG_locked_,		"locked"	},
 	{1UL << PG_error,		"error"		},
 	{1UL << PG_referenced,		"referenced"	},
 	{1UL << PG_uptodate,		"uptodate"	},
@@ -5475,5 +5476,6 @@ void dump_page(struct page *page)
 	       "page:%p count:%d mapcount:%d mapping:%p index:%#lx\n",
 		page, page_count(page), page_mapcount(page),
 		page->mapping, page->index);
-	dump_page_flags(page->flags);
+	dump_page_flags(page->flags_);
+	dump_page_flags(page->flags_wo);
 }

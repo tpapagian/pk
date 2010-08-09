@@ -32,7 +32,8 @@ struct address_space;
  * who is mapping it.
  */
 struct page {
-	unsigned long flags;		/* Atomic flags, some possibly
+	unsigned long flags_wo;
+	unsigned long flags_;		/* Atomic flags, some possibly
 					 * updated asynchronously */
 	atomic_t _count;		/* Usage count, see below. */
 	union {
