@@ -32,9 +32,7 @@ struct address_space;
  * who is mapping it.
  */
 struct page {
-	unsigned long flags_wo;
-	unsigned long flags_;		/* Atomic flags, some possibly
-					 * updated asynchronously */
+	unsigned long flags_wo ____cacheline_aligned_in_smp;
 	atomic_t _count;		/* Usage count, see below. */
 	union {
 		atomic_t _mapcount;	/* Count of ptes mapped in mms,
@@ -46,6 +44,9 @@ struct page {
 			u16 objects;
 		};
 	};
+	unsigned long flags_ ____cacheline_aligned_in_smp;		
+                                        /* Atomic flags, some possibly
+					 * updated asynchronously */
 	union {
 	    struct {
 		unsigned long private;		/* Mapping-private opaque data:
