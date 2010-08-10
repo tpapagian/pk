@@ -517,9 +517,9 @@ static void update_and_free_page(struct hstate *h, struct page *page)
 	h->nr_huge_pages--;
 	h->nr_huge_pages_node[page_to_nid(page)]--;
 	for (i = 0; i < pages_per_huge_page(h); i++) {
-		page[i].flags &= ~(1 << PG_error | 1 << PG_referenced |
-				1 << PG_dirty | 1 << PG_active | 1 << PG_reserved |
-				1 << PG_private | 1<< PG_writeback);
+		page[i].flags_ &= ~(1 << PG_error | 1 << PG_referenced |
+				    1 << PG_dirty | 1 << PG_active | 1 << PG_reserved |
+				    1 << PG_private | 1<< PG_writeback);
 		page[i].flags_wo &= ~(1 << PG_locked_);
 	}
 	set_compound_page_dtor(page, NULL);
