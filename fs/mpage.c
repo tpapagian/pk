@@ -16,6 +16,7 @@
 #include <linux/module.h>
 #include <linux/mm.h>
 #include <linux/kdev_t.h>
+#include <linux/gfp.h>
 #include <linux/bio.h>
 #include <linux/fs.h>
 #include <linux/buffer_head.h>
@@ -48,7 +49,7 @@ static void mpage_end_io_read(struct bio *bio, int err)
 		struct page *page = bvec->bv_page;
 
 		if (--bvec >= bio->bi_io_vec)
-			prefetchw(&bvec->bv_page->flags);
+			prefetchw(&bvec->bv_page->flags_);
 
 		if (uptodate) {
 			SetPageUptodate(page);
@@ -70,7 +71,7 @@ static void mpage_end_io_write(struct bio *bio, int err)
 		struct page *page = bvec->bv_page;
 
 		if (--bvec >= bio->bi_io_vec)
-			prefetchw(&bvec->bv_page->flags);
+			prefetchw(&bvec->bv_page->flags_);
 
 		if (!uptodate){
 			SetPageError(page);
@@ -384,7 +385,7 @@ mpage_readpages(struct address_space *mapping, struct list_head *pages,
 	for (page_idx = 0; page_idx < nr_pages; page_idx++) {
 		struct page *page = list_entry(pages->prev, struct page, lru);
 
-		prefetchw(&page->flags);
+		prefetchw(&page->flags_);
 		list_del(&page->lru);
 		if (!add_to_page_cache_lru(page, mapping,
 					page->index, GFP_KERNEL)) {

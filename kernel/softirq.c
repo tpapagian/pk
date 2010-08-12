@@ -25,6 +25,9 @@
 #include <linux/smp.h>
 #include <linux/tick.h>
 
+#include <linux/forp.h>
+#include <linux/forp-patch.h>
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/irq.h>
 
@@ -706,6 +709,7 @@ static int run_ksoftirqd(void * __bind_cpu)
 
 		__set_current_state(TASK_RUNNING);
 
+		forp_start_entry(FORP_ENTRY_SOFTIRQD);
 		while (local_softirq_pending()) {
 			/* Preempt disable stops cpu going offline.
 			   If already offline, we'll be on wrong CPU:
@@ -716,8 +720,9 @@ static int run_ksoftirqd(void * __bind_cpu)
 			preempt_enable_no_resched();
 			cond_resched();
 			preempt_disable();
-			rcu_sched_qs((long)__bind_cpu);
+			rcu_note_context_switch((long)__bind_cpu);
 		}
+		forp_end_entry();
 		preempt_enable();
 		set_current_state(TASK_INTERRUPTIBLE);
 	}
@@ -725,6 +730,7 @@ static int run_ksoftirqd(void * __bind_cpu)
 	return 0;
 
 wait_to_die:
+	forp_end_entry();
 	preempt_enable();
 	/* Wait for kthread_stop */
 	set_current_state(TASK_INTERRUPTIBLE);
@@ -808,7 +814,7 @@ static int __cpuinit cpu_callback(struct notifier_block *nfb,
 		p = kthread_create(run_ksoftirqd, hcpu, "ksoftirqd/%d", hotcpu);
 		if (IS_ERR(p)) {
 			printk("ksoftirqd for %i failed\n", hotcpu);
-			return NOTIFY_BAD;
+			return notifier_from_errno(PTR_ERR(p));
 		}
 		kthread_bind(p, hotcpu);
   		per_cpu(ksoftirqd, hotcpu) = p;
@@ -850,7 +856,7 @@ static __init int spawn_ksoftirqd(void)
 	void *cpu = (void *)(long)smp_processor_id();
 	int err = cpu_callback(&cpu_nfb, CPU_UP_PREPARE, cpu);
 
-	BUG_ON(err == NOTIFY_BAD);
+	BUG_ON(err != NOTIFY_OK);
 	cpu_callback(&cpu_nfb, CPU_ONLINE, cpu);
 	register_cpu_notifier(&cpu_nfb);
 	return 0;

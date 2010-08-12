@@ -113,6 +113,7 @@ struct inet_timewait_sock {
 #define tw_bound_dev_if		__tw_common.skc_bound_dev_if
 #define tw_node			__tw_common.skc_nulls_node
 #define tw_bind_node		__tw_common.skc_bind_node
+#define tw_bind_node_cpu	__tw_common.skc_bind_node_cpu
 #define tw_refcnt		__tw_common.skc_refcnt
 #define tw_hash			__tw_common.skc_hash
 #define tw_prot			__tw_common.skc_prot
@@ -149,6 +150,7 @@ static inline void inet_twsk_add_node_rcu(struct inet_timewait_sock *tw,
 static inline void inet_twsk_add_bind_node(struct inet_timewait_sock *tw,
 					   struct hlist_head *list)
 {
+	tw->tw_bind_node_cpu = -1;
 	hlist_add_head(&tw->tw_bind_node, list);
 }
 
@@ -224,7 +226,9 @@ static inline
 struct net *twsk_net(const struct inet_timewait_sock *twsk)
 {
 #ifdef CONFIG_NET_NS
-	return rcu_dereference(twsk->tw_net);
+	return rcu_dereference_raw(twsk->tw_net); /* protected by locking, */
+						  /* reference counting, */
+						  /* initialization, or RCU. */
 #else
 	return &init_net;
 #endif

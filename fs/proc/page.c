@@ -79,7 +79,7 @@ static inline u64 kpf_copy_bit(u64 kflags, int ubit, int kbit)
 
 u64 stable_page_flags(struct page *page)
 {
-	u64 k;
+	u64 k, k_wo;
 	u64 u;
 
 	/*
@@ -89,7 +89,8 @@ u64 stable_page_flags(struct page *page)
 	if (!page)
 		return 1 << KPF_NOPAGE;
 
-	k = page->flags;
+	k = page->flags_;
+	k_wo = page->flags_wo;
 	u = 0;
 
 	/*
@@ -116,7 +117,7 @@ u64 stable_page_flags(struct page *page)
 	if (PageHuge(page))
 		u |= 1 << KPF_HUGE;
 
-	u |= kpf_copy_bit(k, KPF_LOCKED,	PG_locked);
+	u |= kpf_copy_bit(k_wo, KPF_LOCKED,	PG_locked_);
 
 	/*
 	 * Caveats on high order pages:

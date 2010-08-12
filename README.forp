@@ -1,0 +1,89 @@
+forp debugfs
+------------
+
+The forp interface is located at DEBUGFS/forp:
+
+  forp-enable	      a bit-mask for enabling forp
+  forp-conf	      depth:name pairs for path profiling
+  forp-entry	      aggregate kernel entry point profiles
+  forp-all	      aggregate path profiles
+  forpN		      per-core path profiles
+
+profile kernel entry points
+---------------------------
+
+* Enable profiling kernel entry points:
+
+  # echo 2 > DEBUGFS/forp/forp-enable
+
+* Check the results:
+
+  $ cat DEBUGFS/forp/forp-entry
+
+profile paths with ksplice
+--------------------------
+
+* Copy the source tree of your running kernel to SRC
+
+* Copy .config and System.map of the running kernel in SRC/ksplice and
+  to SRC/
+
+* Build SRC in the top-level directory (i.e. don't set O)
+
+* Copy to file you want to modify to FILENAME.forp
+  (e.g. filemap.c.forp).
+  
+* Add forp instrumentation:
+
+  #include <linux/forp-patch.h>
+  ...
+  void foo(void) {
+          forp_start(0);
+	  do_stuff();
+	  forp_end();
+  }
+  ...
+  void do_stuff(void) {
+          forp_start(1);
+	  do_more_stuff();
+          forp_end();
+  }
+  ...
+
+  The integer argument of forp_start is an ID for the record.  You
+  probably want each call forp_start to take a different ID.  As
+  described laster, it is important to make IDs continuous.
+  forp_start pushes some sample data, which includes call time and ID,
+  onto a forp call stack.
+
+  forp_end pops the first sample datum off the forp call stack,
+  subtracts the current time from the call time, and updates the
+  record for ID.
+
+* Run ksplice-create:
+
+  $ ksplice-create --diffext=.forp --id=forp SRC
+
+  If your using git you should delete SRC/.git/refs/ksplice/pre before
+  each call to ksplice-create.
+
+* Specify the call depth and name for each forp instrumentation:
+
+  echo "0:foo 1:do_stuff" > DEBUGFS/forp/forp-conf
+
+  The first depth:name pair is associated with ID 0, the second
+  depth:name pair is associated with ID 1, etc.  This is why it is
+  important to make IDs continuous.
+
+* Run ksplice-apply (undoing first):
+
+  # ksplice-undo forp
+  # ksplice-apply --debug ksplice-forp.tar.gz
+
+* Enable path profiling:
+
+  # echo 1 > DEBUGFS/forp/forp-enable
+
+* Check the results:
+
+  $ cat DEBUGFS/forp/forp-all

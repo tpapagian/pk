@@ -14,6 +14,7 @@
 #include <linux/page-debug-flags.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
+#include <linux/mutex.h>
 
 #ifndef AT_VECTOR_SIZE_ARCH
 #define AT_VECTOR_SIZE_ARCH 0
@@ -32,8 +33,7 @@ struct address_space;
  * who is mapping it.
  */
 struct page {
-	unsigned long flags;		/* Atomic flags, some possibly
-					 * updated asynchronously */
+	unsigned long flags_wo ____cacheline_aligned_in_smp;
 	atomic_t _count;		/* Usage count, see below. */
 	union {
 		atomic_t _mapcount;	/* Count of ptes mapped in mms,
@@ -45,6 +45,9 @@ struct page {
 			u16 objects;
 		};
 	};
+	unsigned long flags_ ____cacheline_aligned_in_smp;		
+                                        /* Atomic flags, some possibly
+					 * updated asynchronously */
 	union {
 	    struct {
 		unsigned long private;		/* Mapping-private opaque data:
@@ -183,6 +186,7 @@ struct vm_area_struct {
 #ifdef CONFIG_NUMA
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
 #endif
+	struct mutex hugetlb_instantiation_mutex;
 };
 
 struct core_thread {
