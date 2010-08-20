@@ -26,6 +26,7 @@
 #include <linux/sched.h>
 #include <linux/uaccess.h>
 #include <linux/slab.h>
+#include <asm/idle.h>
 
 #include <trace/events/sched.h>
 
@@ -39,14 +40,22 @@ struct forp_label *forp_labels __read_mostly;
 int forp_rec_num __read_mostly;
 int forp_enable __read_mostly;
 
+static inline void __forp_start_entry(unsigned long entry, 
+				      struct task_struct *t)
+{
+	if (forp_enable & FORP_ENABLE_ENTRY) {
+		t->forp_entry_callstamp = forp_time();
+		t->forp_entry = entry;
+		t->forp_entry_start = 1;
+	}
+}
+
 void forp_start_entry(unsigned long entry)
 {
-	if (!(forp_enable & FORP_ENABLE_ENTRY) || !current)
+	if (!current)
 		return;
 
-	current->forp_entry_callstamp = forp_time();
-        current->forp_entry = entry;
-        current->forp_entry_start = 1;
+	__forp_start_entry(entry, current);
 }
 
 static inline void __forp_end_entry(struct task_struct *tsk)
@@ -117,6 +126,30 @@ forp_probe_sched_switch(void *ignore, struct task_struct *prev,
 		next->forp_stack[index].calltime += timestamp;
 }
 
+static int idle_notifier(struct notifier_block *this, 
+			 unsigned long event, void *ptr)
+{
+	/* We are executing in an atomic context (an atomic notifier) */
+	switch(event) {
+	case IDLE_START:
+		__forp_start_entry(FORP_ENTRY_IDLE, 
+				   idle_task(smp_processor_id()));
+		break;
+	case IDLE_END:
+		__forp_end_entry(idle_task(smp_processor_id()));
+		break;
+	default:
+		printk_once(KERN_WARNING "forp: idle_notifier event %u\n", 
+			    event);
+		break;
+	}
+	return NOTIFY_DONE;
+}
+
+struct notifier_block idle_block = {
+	.notifier_call = idle_notifier,
+};
+
 int forp_init(int enable)
 {
 	int r, i, cpu;
@@ -127,6 +160,8 @@ int forp_init(int enable)
 		       " probe to kernel_sched_switch: %d\n", r);
 		return r;
 	}
+
+	idle_notifier_register(&idle_block);
 
 	for_each_possible_cpu(cpu) {	
 		for (i = 0; i < forp_rec_num; i++)
@@ -142,6 +177,7 @@ int forp_init(int enable)
 void forp_deinit(void)
 {
 	unregister_trace_sched_switch(forp_probe_sched_switch, NULL);
+	idle_notifier_unregister(&idle_block);
 	forp_enable = 0;
 }
 

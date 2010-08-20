@@ -20,6 +20,12 @@ profile kernel entry points
 
   $ cat DEBUGFS/forp/forp-entry
 
+* To add a new entry point:
+
+  Add a FORP_ENTRY_XXX to include/linux/forp-patch.h
+  Add an entry to the forp_entry_label array in kernel/forp-entry-label.h
+  Instrument the code of interest with forp_{start, end}_entry
+  
 profile paths with ksplice
 --------------------------
 
