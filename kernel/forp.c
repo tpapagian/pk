@@ -39,6 +39,7 @@ struct forp_label *forp_labels __read_mostly;
 
 int forp_rec_num __read_mostly;
 int forp_enable __read_mostly;
+unsigned long forp_flags __read_mostly;
 
 static inline void __forp_start_entry(unsigned long entry, 
 				      struct task_struct *t)
@@ -104,6 +105,9 @@ static void forp_probe_sched_switch(void *ignore, struct task_struct *prev,
 {
 	u64 timestamp;
 	int index;
+
+	if (forp_flags & FORP_FLAG_SLEEP_TIME)
+		return;
 
 	timestamp = forp_time();
 

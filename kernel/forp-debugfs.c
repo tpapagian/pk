@@ -278,7 +278,7 @@ forp_enable_write(struct file *filp, const char __user *ubuf,
 	if (ret < 0)
 		return ret;
 
-	if (val > (FORP_ENABLE_INST|FORP_ENABLE_ENTRY))
+	if (val > FORP_ENABLE_ALL)
 		return -EINVAL;
 	
 	mutex_lock(&forp_mu);
@@ -316,6 +316,46 @@ static ssize_t forp_write_entry_rec(struct file *filp, const char __user *ubuf,
 	return cnt;
 }
 
+static ssize_t
+forp_flags_read(struct file *filp, char __user *ubuf,
+		 size_t cnt, loff_t *ppos)
+{
+        char buf[64];           /* big enough to hold a number */
+        int r;
+
+        r = sprintf(buf, "%lx\n", forp_flags);
+        return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t
+forp_flags_write(struct file *filp, const char __user *ubuf,
+                 size_t cnt, loff_t *ppos)
+{
+	unsigned long val;
+	char buf[64];           /* big enough to hold a number */
+	int ret;
+	
+	if (cnt >= sizeof(buf))
+		return -EINVAL;
+	
+	if (copy_from_user(&buf, ubuf, cnt))
+	    return -EFAULT;
+    
+	buf[cnt] = 0;
+	
+	ret = strict_strtoul(buf, 16, &val);
+	if (ret < 0)
+		return ret;
+
+	if (val > FORP_FLAG_ALL)
+		return -EINVAL;
+	
+	mutex_lock(&forp_mu);
+	forp_flags = val;
+	mutex_unlock(&forp_mu);
+	return cnt;
+}
+
 #define F_OPS(readop, writeop) \
 {		      	       \
 	.read = readop,        \
@@ -330,6 +370,7 @@ static struct {
 	{ "forp-labels",  F_OPS(forp_labels_read, forp_labels_write) },
 	/* XXX forp-conf is deprecated, use forp-labels */
 	{ "forp-conf",	  F_OPS(forp_labels_read, forp_labels_write) },
+	{ "forp-flags",	  F_OPS(forp_flags_read, forp_flags_write) },
 	{ "forp-enable",  F_OPS(forp_enable_read, forp_enable_write) },
 	{ "forp-entry",   F_OPS(forp_read_entry_rec, forp_write_entry_rec) },
 	{ NULL }

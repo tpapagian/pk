@@ -30,7 +30,8 @@ static inline u64 forp_time(void)
 #define FORP_ENTRY_SOFTIRQD	(FORP_ENTRY_BASE + 1)
 #define FORP_ENTRY_IDLE		(FORP_ENTRY_BASE + 2)
 
-#define FORP_ENABLE_INST   0x01
-#define FORP_ENABLE_ENTRY  0x02
+#define FORP_ENABLE_INST   	0x01
+#define FORP_ENABLE_ENTRY  	0x02
+#define FORP_ENABLE_ALL		(FORP_ENABLE_INST|FORP_ENABLE_ENTRY)
 
 #endif
