@@ -165,7 +165,7 @@ static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
 }
 
 static ssize_t
-forp_config_read(struct file *filp, char __user *ubuf,
+forp_labels_read(struct file *filp, char __user *ubuf,
 		 size_t cnt, loff_t *ppos)
 {
 	unsigned long sz;
@@ -196,7 +196,7 @@ forp_config_read(struct file *filp, char __user *ubuf,
 }
 
 static ssize_t
-forp_config_write(struct file *filp, const char __user *ubuf,
+forp_labels_write(struct file *filp, const char __user *ubuf,
                  size_t cnt, loff_t *ppos)
 {
         struct forp_label *labels;
@@ -327,7 +327,9 @@ static struct {
 	const struct file_operations ops;
 } forp_debugfs[] = {
 	{ "forp-all",	  F_OPS(forp_read_all_rec, forp_write_all_rec) },
-	{ "forp-conf",	  F_OPS(forp_config_read, forp_config_write) },
+	{ "forp-labels",  F_OPS(forp_labels_read, forp_labels_write) },
+	/* XXX forp-conf is deprecated, use forp-labels */
+	{ "forp-conf",	  F_OPS(forp_labels_read, forp_labels_write) },
 	{ "forp-enable",  F_OPS(forp_enable_read, forp_enable_write) },
 	{ "forp-entry",   F_OPS(forp_read_entry_rec, forp_write_entry_rec) },
 	{ NULL }
