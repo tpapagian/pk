@@ -164,11 +164,6 @@ static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
 	return cnt;
 }
 
-static const struct file_operations forp_all_rec_ops = {
-	.read 	    = forp_read_all_rec,
-	.write 	    = forp_write_all_rec,
-};
-
 static ssize_t
 forp_config_read(struct file *filp, char __user *ubuf,
 		 size_t cnt, loff_t *ppos)
@@ -252,11 +247,6 @@ done:
         return ret;
 }
 
-static const struct file_operations forp_config_ops = {
-	.read           = forp_config_read,
-	.write          = forp_config_write,
-};
-
 static ssize_t
 forp_enable_read(struct file *filp, char __user *ubuf,
            size_t cnt, loff_t *ppos)
@@ -312,11 +302,6 @@ out:
 	return ret;
 }
 
-static const struct file_operations forp_enable_ops = {
-	.read           = forp_enable_read,
-	.write          = forp_enable_write,
-};
-
 static ssize_t forp_read_entry_rec(struct file *filp, char __user *ubuf,
 				   size_t cnt, loff_t *ppos)
 {
@@ -331,14 +316,26 @@ static ssize_t forp_write_entry_rec(struct file *filp, const char __user *ubuf,
 	return cnt;
 }
 
-static const struct file_operations forp_entry_rec_ops = {
-	.read           = forp_read_entry_rec,
-	.write          = forp_write_entry_rec,
+#define F_OPS(readop, writeop) \
+{		      	       \
+	.read = readop,        \
+	.write = writeop       \
+}	       	 	       
+
+static struct {
+	const char *name;
+	const struct file_operations ops;
+} forp_debugfs[] = {
+	{ "forp-all",	  F_OPS(forp_read_all_rec, forp_write_all_rec) },
+	{ "forp-conf",	  F_OPS(forp_config_read, forp_config_write) },
+	{ "forp-enable",  F_OPS(forp_enable_read, forp_enable_write) },
+	{ "forp-entry",   F_OPS(forp_read_entry_rec, forp_write_entry_rec) },
+	{ NULL }
 };
 
 static __init int forp_init_debugfs(void)
 {
-	unsigned long cpu;
+	unsigned long cpu, i;
 	struct dentry *d;
 	char *name;
 
@@ -364,24 +361,13 @@ static __init int forp_init_debugfs(void)
 		}
 	}
 
-	if (debugfs_create_file("forp-all", 0644, d, NULL, &forp_all_rec_ops) == NULL) {
-		WARN(1, "Could not create summary file\n");
-		return -ENOMEM;
-	}
-
-	if (debugfs_create_file("forp-conf", 0644, d, NULL, &forp_config_ops) == NULL) {
-		WARN(1, "Could not create config file\n");
-		return -ENOMEM;
-	}
-
-	if (debugfs_create_file("forp-enable", 0644, d, NULL, &forp_enable_ops) == NULL) {
-		WARN(1, "Could not create enable file\n");
-		return -ENOMEM;
-	}
-
-	if (debugfs_create_file("forp-entry", 0644, d, NULL, &forp_entry_rec_ops) == NULL) {
-		WARN(1, "Could not create entry summary file\n");
-		return -ENOMEM;
+	for (i = 0; forp_debugfs[i].name != NULL; i++) {
+		if (debugfs_create_file(forp_debugfs[i].name, 0644, d, NULL, 
+					&forp_debugfs[i].ops) == NULL)
+		{
+			WARN(1, "Could not create %s file\n", forp_debugfs[i].name);
+			return -ENOMEM;
+		}
 	}
 
 	return 0;

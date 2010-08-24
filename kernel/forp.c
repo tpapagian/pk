@@ -99,9 +99,8 @@ void forp_exit_task(struct task_struct *t)
 		forp_end();
 }
 
-static void
-forp_probe_sched_switch(void *ignore, struct task_struct *prev, 
-			struct task_struct *next)
+static void forp_probe_sched_switch(void *ignore, struct task_struct *prev, 
+				    struct task_struct *next)
 {
 	u64 timestamp;
 	int index;
@@ -139,7 +138,7 @@ static int idle_notifier(struct notifier_block *this,
 		__forp_end_entry(idle_task(smp_processor_id()));
 		break;
 	default:
-		printk_once(KERN_WARNING "forp: idle_notifier event %u\n", 
+		printk_once(KERN_WARNING "forp: idle_notifier event %lu\n", 
 			    event);
 		break;
 	}
