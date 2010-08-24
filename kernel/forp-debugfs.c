@@ -106,7 +106,7 @@ static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt, loff_t *ppos, 
 				   struct forp_rec __percpu *rec, struct forp_label *labels)
 {
 	/* About 256 characters per line */
-	int sz = n * 256;
+	int sz = 256 + (n * 256);
 	struct forp_rec *recs;
 	int i, cpu, r;
 	char *buf;
