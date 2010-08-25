@@ -1482,9 +1482,8 @@ struct task_struct {
 	u64 forp_switchstamp;
 
 	/* For kernel entry points */
-	int forp_entry;
 	int forp_entry_start;
-	unsigned long forp_entry_callstamp;
+	struct forp_ret_stack forp_entry;
 #endif
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	/* Index of current stored address in ret_stack */

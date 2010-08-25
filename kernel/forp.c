@@ -45,8 +45,8 @@ static inline void __forp_start_entry(unsigned long entry,
 				      struct task_struct *t)
 {
 	if (forp_enable & FORP_ENABLE_ENTRY) {
-		t->forp_entry_callstamp = forp_time();
-		t->forp_entry = entry;
+		t->forp_entry.calltime = forp_time();
+		t->forp_entry.id = entry;
 		t->forp_entry_start = 1;
 	}
 }
@@ -68,8 +68,8 @@ static inline void __forp_end_entry(struct task_struct *tsk)
                 return;
 
         if (tsk->forp_entry_start) {
-		unsigned long elp = forp_time() - tsk->forp_entry_callstamp;
-                entry = tsk->forp_entry;
+		unsigned long elp = forp_time() - tsk->forp_entry.calltime;
+                entry = tsk->forp_entry.id;
                 rec = &get_cpu_var(forp_entry_recs[entry]);
 		rec->time += elp;
 		rec->count++;
@@ -124,7 +124,7 @@ static void forp_probe_sched_switch(void *ignore, struct task_struct *prev,
 	timestamp -= next->forp_switchstamp;
 
 	if (next->forp_entry_start)
-		next->forp_entry_callstamp += timestamp; 
+		next->forp_entry.calltime += timestamp; 
 	for (index = next->forp_curr_stack; index >= 0; index--)
 		next->forp_stack[index].calltime += timestamp;
 }
