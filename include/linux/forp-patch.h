@@ -6,6 +6,7 @@
 struct forp_rec {
 	u64 time;
 	u64 count;
+	u64 sched;
 };
 
 struct forp_label {
