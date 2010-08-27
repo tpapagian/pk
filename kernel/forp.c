@@ -46,6 +46,7 @@ static inline void __forp_start_entry(unsigned long entry,
 {
 	if (forp_enable & FORP_ENABLE_ENTRY) {
 		t->forp_entry.calltime = forp_time();
+		t->forp_entry.sched = 0;
 		t->forp_entry.id = entry;
 		t->forp_entry_start = 1;
 	}

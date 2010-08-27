@@ -19,6 +19,7 @@ static inline void forp_reset_rec(struct forp_rec *rec)
 {
 	rec->time = 0;
 	rec->count = 0;
+	rec->sched = 0;
 }
 
 extern void forp_register(struct forp_label *labels, int n);

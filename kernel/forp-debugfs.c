@@ -102,8 +102,10 @@ static const struct file_operations forp_rec_ops = {
 	.write 	    = forp_write_rec,
 };
 
-static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt, loff_t *ppos, unsigned long n, 
-				   struct forp_rec __percpu *rec, struct forp_label *labels)
+static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt, 
+				   loff_t *ppos, unsigned long n, 
+				   struct forp_rec __percpu *rec, 
+				   struct forp_label *labels)
 {
 	/* About 256 characters per line */
 	int sz = 256 + (n * 256);
@@ -128,6 +130,7 @@ static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt, loff_t *ppos, 
 			struct forp_rec *r = &per_cpu(rec[i], cpu);
 			recs[i].time += r->time;
 			recs[i].count += r->count;		
+			recs[i].sched += r->sched;
 		}
 	}
 	mutex_unlock(&forp_mu);
