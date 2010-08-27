@@ -73,6 +73,7 @@ static inline void __forp_end_entry(struct task_struct *tsk)
                 rec = &get_cpu_var(forp_entry_recs[entry]);
 		rec->time += elp;
 		rec->count++;
+		rec->sched += tsk->forp_entry.sched;
                 put_cpu_var(rec);
         }
         tsk->forp_entry_start = 0;
@@ -106,11 +107,15 @@ static void forp_probe_sched_switch(void *ignore, struct task_struct *prev,
 	u64 timestamp;
 	int index;
 
+	if (prev->forp_entry_start)
+		prev->forp_entry.sched++;
+	for (index = prev->forp_curr_stack; index >= 0; index--)
+		prev->forp_stack[index].sched++;
+
 	if (forp_flags & FORP_FLAG_SLEEP_TIME)
 		return;
 
 	timestamp = forp_time();
-
 	prev->forp_switchstamp = timestamp;
 
 	/* only process tasks that we timestamped */
@@ -201,8 +206,8 @@ void forp_start(unsigned int id){
 		int i = ++current->forp_curr_stack;
 		struct forp_ret_stack *f = &current->forp_stack[i];
 
-		f->subtime = 0;
 		f->calltime = forp_time();
+		f->sched = 0;
 		f->id = id;
 	}
 }
@@ -222,6 +227,7 @@ void forp_end(void)
 	/* XXX time and count should be atomic */
 	rec->time += forp_time() - f->calltime;
 	rec->count++;
+	rec->sched += f->sched;
 
 	current->forp_curr_stack--;
 }
