@@ -41,6 +41,54 @@ int forp_rec_num __read_mostly;
 int forp_enable __read_mostly;
 unsigned long forp_flags __read_mostly;
 
+static unsigned long static_enable;
+static unsigned long static_to_id[sizeof(static_enable)];
+
+void forp_start_static(unsigned long static_id)
+{
+	if ((forp_enable & FORP_ENABLE_INST) && 
+	    (static_enable & (1 << static_id))) 
+	{
+		forp_start(static_to_id[static_id]);
+	}
+}
+
+static inline void forp_stamp(struct forp_ret_stack *f, unsigned long id)
+{
+	f->calltime = forp_time();
+	f->sched = 0;
+	f->id = id;
+}
+
+static inline void __forp_add_stamp(struct forp_ret_stack *f)
+{
+        struct forp_rec *rec;
+
+	rec = &__get_cpu_var(forp_recs[f->id]);
+	
+	/* XXX time and count should be atomic */
+	rec->time += forp_time() - f->calltime;
+	rec->count++;
+	rec->sched += f->sched;
+}
+
+void forp_stamp_static(unsigned long static_id, struct forp_ret_stack *f)
+{
+	if ((forp_enable & FORP_ENABLE_INST) && 
+	    (static_enable & (1 << static_id))) 
+	{
+		forp_stamp(f, static_to_id[static_id]);
+	} else {
+		f->id = ~0;
+	}
+}
+
+void forp_add_stamp(struct forp_ret_stack *f)
+{
+	if (f->id < forp_rec_num)
+		__forp_add_stamp(f);
+}
+
 static inline void __forp_start_entry(unsigned long entry, 
 				      struct task_struct *t)
 {
@@ -190,45 +238,54 @@ void forp_deinit(void)
 	forp_enable = 0;
 }
 
+static int forp_label_static_id(const char *name)
+{
+	if (!strcmp(name, "forp_schedule"))
+		return FORP_STATIC_SCHEDULE;
+	return -1;
+}
+
 void forp_register(struct forp_label *labels, int n)
 {
+	int i;
 
 	mutex_lock(&forp_mu);
 	if (forp_labels)
 		kfree(forp_labels);
 	forp_labels = labels;
+
+	/* Check for labels that refer to static instrumentation */
+	static_enable = 0;
+	for (i = 0; i < n; i++) {
+		int r = forp_label_static_id(labels[i].name);
+		if (r >= 0) {
+			static_enable |= (1 << r);
+			static_to_id[r] = i;
+		}
+	}
+
 	forp_rec_num = n;
 	mutex_unlock(&forp_mu);
 }
 
-void forp_start(unsigned int id){
+void forp_start(unsigned int id)
+{
 	int depth = current->forp_curr_stack + 1;
 	if ((forp_enable & FORP_ENABLE_INST) && forp_labels[id].depth == depth) {
 		int i = ++current->forp_curr_stack;
-		struct forp_ret_stack *f = &current->forp_stack[i];
-
-		f->calltime = forp_time();
-		f->sched = 0;
-		f->id = id;
+		forp_stamp(&current->forp_stack[i], id);
 	}
 }
 
 void forp_end(void)
 {
 	struct forp_ret_stack *f;	
-	struct forp_rec *rec;
 	int i = current->forp_curr_stack;
 
 	if (i < 0)
 		return;
 
 	f = &current->forp_stack[i];
-	rec = &__get_cpu_var(forp_recs[f->id]);
-	
-	/* XXX time and count should be atomic */
-	rec->time += forp_time() - f->calltime;
-	rec->count++;
-	rec->sched += f->sched;
-
+	__forp_add_stamp(f);
 	current->forp_curr_stack--;
 }

@@ -22,6 +22,10 @@ static inline u64 forp_time(void)
 	return __native_read_tsc();
 }
 
+enum {
+	FORP_STATIC_SCHEDULE = 0,
+};
+
 #endif /* __ASSEMBLY__ */
 
 #include <asm/unistd.h>

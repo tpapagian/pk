@@ -73,6 +73,7 @@
 #include <linux/ftrace.h>
 #include <linux/slab.h>
 #include <linux/forp.h>
+#include <linux/forp-patch.h>
 
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
@@ -3586,7 +3587,7 @@ pick_next_task(struct rq *rq)
 /*
  * schedule() is the main scheduler function.
  */
-asmlinkage void __sched schedule(void)
+static inline void __sched __schedule(void)
 {
 	struct task_struct *prev, *next;
 	unsigned long *switch_count;
@@ -3659,6 +3660,24 @@ need_resched_nonpreemptible:
 		goto need_resched;
 }
 EXPORT_SYMBOL(schedule);
+
+asmlinkage void __sched schedule(void)
+{
+	static DEFINE_PER_CPU_ALIGNED(struct forp_ret_stack, stamp);
+	struct forp_ret_stack *f;
+
+	preempt_disable();
+	f = &__get_cpu_var(stamp);
+	forp_stamp_static(FORP_STATIC_SCHEDULE, f);
+	__schedule();
+	/*
+	 * we might call schedule on one CPU and return on another
+	 * CPU, hence refresh the per-CPU f
+	 */
+	f = &__get_cpu_var(stamp);
+	forp_add_stamp(f);
+	preempt_enable();
+}
 
 #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
 /*
