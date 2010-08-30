@@ -4,7 +4,7 @@ forp debugfs
 The forp interface is located at DEBUGFS/forp:
 
   forp-enable	      a bit-mask for enabling forp
-  forp-conf	      depth:name pairs for path profiling
+  forp-labels	      depth:name pairs for path profiling
   forp-entry	      aggregate kernel entry point profiles
   forp-all	      aggregate path profiles
   forpN		      per-core path profiles
@@ -75,7 +75,7 @@ profile paths with ksplice
 
 * Specify the call depth and name for each forp instrumentation:
 
-  echo "0:foo 1:do_stuff" > DEBUGFS/forp/forp-conf
+  echo "0:foo 1:do_stuff" > DEBUGFS/forp/forp-labels
 
   The first depth:name pair is associated with ID 0, the second
   depth:name pair is associated with ID 1, etc.  This is why it is
