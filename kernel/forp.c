@@ -113,7 +113,7 @@ static inline void __forp_end_entry(struct task_struct *tsk)
         struct forp_rec *rec;
         unsigned long entry;
 
-        if (!tsk)
+        if (!tsk || !(forp_enable & FORP_ENABLE_ENTRY))
                 return;
 
         if (tsk->forp_entry_start) {
@@ -209,6 +209,8 @@ struct notifier_block idle_block = {
 
 int forp_init(int enable)
 {
+	struct task_struct *g, *t;
+	unsigned long flags;
 	int r, i, cpu;
 
 	r = register_trace_sched_switch(forp_probe_sched_switch, NULL);
@@ -225,6 +227,19 @@ int forp_init(int enable)
 			forp_reset_rec(&per_cpu(forp_recs[i], cpu));
 		for (i = 0; i < FORP_ENTRY_REC_SIZE; i++)
 			forp_reset_rec(&per_cpu(forp_entry_recs[i], cpu));
+	}
+
+	/* reset per-task state */
+	read_lock_irqsave(&tasklist_lock, flags);
+	do_each_thread(g, t) {
+		t->forp_curr_stack = -1;
+		t->forp_entry_start = 0;
+	} while_each_thread(g, t);
+	read_unlock_irqrestore(&tasklist_lock, flags);
+
+	for_each_online_cpu(cpu) {
+		idle_task(cpu)->forp_entry_start = 0;
+		idle_task(cpu)->forp_curr_stack = -1;
 	}
 
 	forp_enable = enable;
@@ -280,12 +295,15 @@ void forp_start(unsigned int id)
 void forp_end(void)
 {
 	struct forp_call_stamp *f;	
-	int i = current->forp_curr_stack;
+	int i;
 
-	if (i < 0)
-		return;
+	if (forp_enable & FORP_ENABLE_INST) {
+		i = current->forp_curr_stack;
+		if (i < 0)
+			return;
 
-	f = &current->forp_stack[i];
-	__forp_add_stamp(f);
-	current->forp_curr_stack--;
+		f = &current->forp_stack[i];
+		__forp_add_stamp(f);
+		current->forp_curr_stack--;
+	}
 }
