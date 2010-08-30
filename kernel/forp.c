@@ -53,14 +53,14 @@ void forp_start_static(unsigned long static_id)
 	}
 }
 
-static inline void forp_stamp(struct forp_ret_stack *f, unsigned long id)
+static inline void forp_stamp(struct forp_call_stamp *f, unsigned long id)
 {
 	f->calltime = forp_time();
 	f->sched = 0;
 	f->id = id;
 }
 
-static inline void __forp_add_stamp(struct forp_ret_stack *f)
+static inline void __forp_add_stamp(struct forp_call_stamp *f)
 {
         struct forp_rec *rec;
 
@@ -72,7 +72,7 @@ static inline void __forp_add_stamp(struct forp_ret_stack *f)
 	rec->sched += f->sched;
 }
 
-void forp_stamp_static(unsigned long static_id, struct forp_ret_stack *f)
+void forp_stamp_static(unsigned long static_id, struct forp_call_stamp *f)
 {
 	if ((forp_enable & FORP_ENABLE_INST) && 
 	    (static_enable & (1 << static_id))) 
@@ -83,7 +83,7 @@ void forp_stamp_static(unsigned long static_id, struct forp_ret_stack *f)
 	}
 }
 
-void forp_add_stamp(struct forp_ret_stack *f)
+void forp_add_stamp(struct forp_call_stamp *f)
 {
 	if (f->id < forp_rec_num)
 		__forp_add_stamp(f);
@@ -279,7 +279,7 @@ void forp_start(unsigned int id)
 
 void forp_end(void)
 {
-	struct forp_ret_stack *f;	
+	struct forp_call_stamp *f;	
 	int i = current->forp_curr_stack;
 
 	if (i < 0)

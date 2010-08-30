@@ -3663,8 +3663,8 @@ EXPORT_SYMBOL(schedule);
 
 asmlinkage void __sched schedule(void)
 {
-	static DEFINE_PER_CPU_ALIGNED(struct forp_ret_stack, stamp);
-	struct forp_ret_stack *f;
+	static DEFINE_PER_CPU_ALIGNED(struct forp_call_stamp, stamp);
+	struct forp_call_stamp *f;
 
 	preempt_disable();
 	f = &__get_cpu_var(stamp);

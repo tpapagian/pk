@@ -1478,12 +1478,12 @@ struct task_struct {
 #ifdef CONFIG_FORP
 	/* For dynamic/ksplice forp */
 	int forp_curr_stack;
-	struct forp_ret_stack forp_stack[FORP_RETSTACK_DEPTH];
+	struct forp_call_stamp forp_stack[FORP_RETSTACK_DEPTH];
 	u64 forp_switchstamp;
 
 	/* For kernel entry points */
 	int forp_entry_start;
-	struct forp_ret_stack forp_entry;
+	struct forp_call_stamp forp_entry;
 #endif
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	/* Index of current stored address in ret_stack */
