@@ -888,6 +888,11 @@ struct fown_struct {
 /*
  * Track a single file's readahead state
  */
+struct percpu_file_ra_state {
+	unsigned int mmap_miss;
+	char __pad[0] __attribute__((aligned(64)));
+};
+
 struct file_ra_state {
 	pgoff_t start;			/* where readahead started */
 	unsigned int size;		/* # of readahead pages */
@@ -895,7 +900,9 @@ struct file_ra_state {
 					   there are only # of pages ahead */
 
 	unsigned int ra_pages;		/* Maximum readahead window */
-	unsigned int mmap_miss;		/* Cache miss stat for mmap accesses */
+	struct percpu_file_ra_state percpu[NR_CPUS];
+#define percpu_mmap_miss percpu[smp_processor_id()].mmap_miss
+	//unsigned int mmap_miss;		/* Cache miss stat for mmap accesses */
 	loff_t prev_pos;		/* Cache last read() position */
 };
 

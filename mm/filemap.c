@@ -1457,14 +1457,14 @@ static void do_sync_mmap_readahead(struct vm_area_struct *vma,
 		return;
 	}
 
-	if (ra->mmap_miss < INT_MAX)
-		ra->mmap_miss++;
+	if (ra->percpu_mmap_miss < INT_MAX)
+		ra->percpu_mmap_miss++;
 
 	/*
 	 * Do we miss much more than hit in this file? If so,
 	 * stop bothering with read-ahead. It will only hurt.
 	 */
-	if (ra->mmap_miss > MMAP_LOTSAMISS)
+	if (ra->percpu_mmap_miss > MMAP_LOTSAMISS)
 		return;
 
 	/*
@@ -1494,8 +1494,8 @@ static void do_async_mmap_readahead(struct vm_area_struct *vma,
 	/* If we don't want any read-ahead, don't bother */
 	if (VM_RandomReadHint(vma))
 		return;
-	if (ra->mmap_miss > 0)
-		ra->mmap_miss--;
+	if (ra->percpu_mmap_miss > 0)
+		ra->percpu_mmap_miss--;
 	if (PageReadahead(page))
 		page_cache_async_readahead(mapping, ra, file,
 					   page, offset, ra->ra_pages);
