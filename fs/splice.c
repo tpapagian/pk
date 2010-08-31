@@ -498,7 +498,7 @@ fill_it:
 	 */
 	while (page_nr < nr_pages)
 		page_cache_release(spd.pages[page_nr++]);
-	in->f_ra.prev_pos = (loff_t)index << PAGE_CACHE_SHIFT;
+	in->f_ra.percpu_prev_pos = (loff_t)index << PAGE_CACHE_SHIFT;
 
 	if (spd.nr_pages)
 		error = splice_to_pipe(pipe, &spd);

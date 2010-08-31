@@ -25,8 +25,12 @@
 void
 file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping)
 {
+	int c;
 	ra->ra_pages = mapping->backing_dev_info->ra_pages;
-	ra->prev_pos = -1;
+	
+	for_each_possible_cpu(c) {
+		ra->percpu[c].prev_pos = -1;
+	}
 }
 EXPORT_SYMBOL_GPL(file_ra_state_init);
 
@@ -445,7 +449,7 @@ ondemand_readahead(struct address_space *mapping,
 	/*
 	 * sequential cache miss
 	 */
-	if (offset - (ra->prev_pos >> PAGE_CACHE_SHIFT) <= 1UL)
+	if (offset - (ra->percpu_prev_pos >> PAGE_CACHE_SHIFT) <= 1UL)
 		goto initial_readahead;
 
 	/*

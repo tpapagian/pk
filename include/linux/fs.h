@@ -890,6 +890,7 @@ struct fown_struct {
  */
 struct percpu_file_ra_state {
 	unsigned int mmap_miss;
+	loff_t prev_pos;
 	char __pad[0] __attribute__((aligned(64)));
 };
 
@@ -902,8 +903,9 @@ struct file_ra_state {
 	unsigned int ra_pages;		/* Maximum readahead window */
 	struct percpu_file_ra_state percpu[NR_CPUS];
 #define percpu_mmap_miss percpu[smp_processor_id()].mmap_miss
+#define percpu_prev_pos	 percpu[smp_processor_id()].prev_pos
 	//unsigned int mmap_miss;		/* Cache miss stat for mmap accesses */
-	loff_t prev_pos;		/* Cache last read() position */
+	//loff_t prev_pos;		/* Cache last read() position */
 };
 
 /*
