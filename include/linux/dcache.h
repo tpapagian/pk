@@ -206,6 +206,9 @@ d_iput:		no		no		no       yes
 	 * - They dont need dcache_lock synchronization
 	 */
 
+#define DCACHE_CANT_MOUNT	0x0100
+#define DCACHE_NO_PER_CPU	0x0200
+
 extern spinlock_t dcache_lock;
 extern seqlock_t rename_lock;
 
@@ -256,7 +259,8 @@ extern struct dentry * d_materialise_unique(struct dentry *, struct inode *);
 extern void d_delete(struct dentry *);
 
 /* allocate/de-allocate */
-extern struct dentry * d_alloc(struct dentry *, const struct qstr *);
+extern struct dentry * __d_alloc(struct dentry *, const struct qstr *, int);
+#define d_alloc(parent, name) __d_alloc(parent, name, 1);
 extern struct dentry * d_splice_alias(struct inode *, struct dentry *);
 extern struct dentry * d_add_ci(struct dentry *, struct inode *, struct qstr *);
 extern struct dentry * d_obtain_alias(struct inode *);
@@ -265,6 +269,7 @@ extern void shrink_dcache_parent(struct dentry *);
 extern void shrink_dcache_for_umount(struct super_block *);
 extern int d_invalidate(struct dentry *);
 extern struct dentry *d_alloc_single(const struct qstr *, struct inode *);
+extern struct dentry *d_alloc_single_local(const struct qstr *, struct inode *);
 
 /* only used at mount-time */
 extern struct dentry * d_alloc_root(struct inode *);

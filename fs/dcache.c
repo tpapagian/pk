@@ -160,7 +160,7 @@ struct dentry *per_cpu_dget(struct dentry *dentry)
 	struct dentry *found;
 	unsigned int c;
 
-	if (dentry_per_cpu_enable == 0)
+	if ((dentry->d_flags & DCACHE_NO_PER_CPU) || dentry_per_cpu_enable == 0)
 		return NULL;
 
 	found = NULL;
@@ -202,7 +202,7 @@ static inline int per_cpu_dentry_grab(struct dentry *dentry, struct dentry * par
 	struct per_cpu_dentry *p;
 	unsigned int gen, c;
 
-	if (dentry_per_cpu_enable == 0)
+	if ((dentry->d_flags & DCACHE_NO_PER_CPU) || dentry_per_cpu_enable == 0)
 		return 0;
 
 	c = smp_processor_id();
@@ -342,7 +342,7 @@ static inline int per_cpu_dentry_insert(struct dentry *dentry)
 	struct dentry_table *t;
 	unsigned int c;
 
-	if (dentry_per_cpu_enable == 0)
+	if ((dentry->d_flags & DCACHE_NO_PER_CPU) || dentry_per_cpu_enable == 0)
 		return 0;
 
 	c = smp_processor_id();
@@ -499,7 +499,8 @@ static void __d_free(struct dentry *dentry)
 	WARN_ON(!list_empty(&dentry->d_alias));
 	if (dname_external(dentry))
 		kfree(dentry->d_name.name);
-	dentry_free_percpu(dentry->d_per_cpu);
+	if (!(dentry->d_flags & DCACHE_NO_PER_CPU))
+		dentry_free_percpu(dentry->d_per_cpu);
 	kmem_cache_free(dentry_cache, dentry); 
 }
 
@@ -1383,7 +1384,7 @@ static struct shrinker dcache_shrinker = {
  * copied and the copy passed in may be reused after this call.
  */
  
-struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
+struct dentry *__d_alloc(struct dentry * parent, const struct qstr *name, int per_cpu)
 {
 	struct dentry *dentry;
 	char *dname;
@@ -1403,23 +1404,26 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 		dname = dentry->d_iname;
 	}	
 	dentry->d_name.name = dname;
-	
-	dentry->d_per_cpu = dentry_alloc_percpu();
-	if (!dentry->d_per_cpu) {
-		if (name->len > DNAME_INLINE_LEN-1)
-			kfree(dname);
-		kmem_cache_free(dentry_cache, dentry); 		
-		return NULL;
-	}
 
-	for_each_possible_cpu(c) {
-		struct per_cpu_dentry *p;
-		p = per_cpu_ptr(dentry->d_per_cpu, c);
-		p->count = 0;
-		p->dentry = dentry;
-		INIT_LIST_HEAD(&p->list);
-		p->base = dentry->d_per_cpu;
-	}
+
+	if (per_cpu) {
+		dentry->d_per_cpu = dentry_alloc_percpu();
+		if (!dentry->d_per_cpu) {
+			if (name->len > DNAME_INLINE_LEN-1)
+				kfree(dname);
+			kmem_cache_free(dentry_cache, dentry); 		
+			return NULL;
+		}
+
+		for_each_possible_cpu(c) {
+			struct per_cpu_dentry *p;
+			p = per_cpu_ptr(dentry->d_per_cpu, c);
+			p->count = 0;
+			p->dentry = dentry;
+			INIT_LIST_HEAD(&p->list);
+			p->base = dentry->d_per_cpu;
+		}
+	}	
 
 	dentry->d_name.len = name->len;
 	dentry->d_name.hash = name->hash;
@@ -1429,6 +1433,8 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	atomic_set(&dentry->d_count, 1);
 	atomic_set(&dentry->d_gen, 1);
 	dentry->d_flags = DCACHE_UNHASHED;
+	if (!per_cpu)
+		dentry->d_flags |= DCACHE_NO_PER_CPU;
 	spin_lock_init(&dentry->d_lock);
 	dentry->d_inode = NULL;
 	dentry->d_op = NULL;
@@ -1453,7 +1459,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	percpu_counter_inc(&nr_dentry);
 	return dentry;
 }
-EXPORT_SYMBOL(d_alloc);
+EXPORT_SYMBOL(__d_alloc);
 
 struct dentry *d_alloc_name(struct dentry *parent, const char *name)
 {
@@ -1621,11 +1627,11 @@ static void fsnotify_d_instantiate_helper(struct dentry *dentry,
  * - SINGLE dentries are not hashed into global hash table
  * - their d_alias list is empty
  */
-struct dentry *d_alloc_single(const struct qstr *name, struct inode *inode)
+static struct dentry *__d_alloc_single(const struct qstr *name, struct inode *inode, int per_cpu)
 {
 	struct dentry *entry;
 
-	entry = d_alloc(NULL, name);
+	entry = __d_alloc(NULL, name, per_cpu);
 	if (entry) {
 		entry->d_sb = inode->i_sb;
 		entry->d_parent = entry;
@@ -1636,6 +1642,14 @@ struct dentry *d_alloc_single(const struct qstr *name, struct inode *inode)
 		security_d_instantiate(entry, inode);
 	}
 	return entry;
+}
+
+struct dentry *d_alloc_single(const struct qstr *name, struct inode *inode) {
+	return __d_alloc_single(name, inode, 1);
+}
+
+struct dentry *d_alloc_single_local(const struct qstr *name, struct inode *inode) {
+	return __d_alloc_single(name, inode, 0);
 }
 
 static inline struct hlist_head *d_hash(struct dentry *parent,

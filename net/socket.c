@@ -353,7 +353,7 @@ static int sock_alloc_file(struct socket *sock, struct file **f, int flags)
 	if (unlikely(fd < 0))
 		return fd;
 
-	path.dentry = d_alloc_single(&name, SOCK_INODE(sock));
+	path.dentry = d_alloc_single_local(&name, SOCK_INODE(sock));
 	if (unlikely(!path.dentry)) {
 		put_unused_fd(fd);
 		return -ENOMEM;
