@@ -44,15 +44,6 @@ unsigned long forp_flags __read_mostly;
 static unsigned long static_enable;
 static unsigned long static_to_id[sizeof(static_enable)];
 
-void forp_start_static(unsigned long static_id)
-{
-	if ((forp_enable & FORP_ENABLE_INST) && 
-	    (static_enable & (1 << static_id))) 
-	{
-		forp_start(static_to_id[static_id]);
-	}
-}
-
 static inline void forp_stamp(struct forp_call_stamp *f, unsigned long id)
 {
 	f->calltime = forp_time();
@@ -147,7 +138,7 @@ void forp_exit_task(struct task_struct *t)
 
 	__forp_end_entry(t);
         while (current->forp_curr_stack >= 0)
-		forp_end();
+		__forp_pop();
 }
 
 static void forp_probe_sched_switch(void *ignore, struct task_struct *prev, 
@@ -283,16 +274,18 @@ void forp_register(struct forp_label *labels, int n)
 	mutex_unlock(&forp_mu);
 }
 
-void forp_start(unsigned int id)
+unsigned long __forp_push(unsigned int id)
 {
 	int depth = current->forp_curr_stack + 1;
 	if ((forp_enable & FORP_ENABLE_INST) && forp_labels[id].depth == depth) {
 		int i = ++current->forp_curr_stack;
 		forp_stamp(&current->forp_stack[i], id);
+		return 1;
 	}
+	return 0;
 }
 
-void forp_end(void)
+void __forp_pop(void)
 {
 	struct forp_call_stamp *f;	
 	int i;

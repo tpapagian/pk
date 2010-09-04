@@ -14,8 +14,21 @@ struct forp_label {
 	int depth;
 };
 
-extern void forp_start(unsigned int id);
-extern void forp_end(void);
+extern unsigned long __forp_push(unsigned int id);
+extern void __forp_pop(void);
+
+#define forp_push(id, flags)				\
+	do {					       	\
+		typecheck(unsigned long, flags);	\
+		flags = __forp_push(id); 		\
+	} while (0)
+
+#define forp_pop(flags)					\
+      do {					        \
+		typecheck(unsigned long, flags);	\
+		if (flags)	   	 		\
+			__forp_pop();			\
+      } while(0)
 
 static inline u64 forp_time(void)
 {
