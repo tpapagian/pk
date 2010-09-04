@@ -34,10 +34,9 @@
 
 DEFINE_MUTEX(forp_mu);
 DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_REC_SIZE], forp_recs);
-DEFINE_PER_CPU_ALIGNED(struct forp_rec[FORP_ENTRY_REC_SIZE], forp_entry_recs);
-struct forp_label *forp_labels __read_mostly;
+struct forp_label *forp_dyn_labels __read_mostly;
 
-int forp_rec_num __read_mostly;
+int forp_dyn_label_num __read_mostly;
 int forp_enable __read_mostly;
 unsigned long forp_flags __read_mostly;
 
@@ -65,7 +64,7 @@ static inline void __forp_add_stamp(struct forp_call_stamp *f)
 
 void forp_stamp_static(unsigned long static_id, struct forp_call_stamp *f)
 {
-	if ((forp_enable & FORP_ENABLE_INST) && 
+	if ((forp_enable & FORP_ENABLE_DYN) && 
 	    (static_enable & (1 << static_id))) 
 	{
 		forp_stamp(f, static_to_id[static_id]);
@@ -76,7 +75,7 @@ void forp_stamp_static(unsigned long static_id, struct forp_call_stamp *f)
 
 void forp_add_stamp(struct forp_call_stamp *f)
 {
-	if (f->id < forp_rec_num)
+	if (f->id < forp_dyn_label_num)
 		__forp_add_stamp(f);
 }
 
@@ -109,8 +108,9 @@ static inline void __forp_end_entry(struct task_struct *tsk)
 
         if (tsk->forp_entry_start) {
 		unsigned long elp = forp_time() - tsk->forp_entry.calltime;
-                entry = tsk->forp_entry.id;
-                rec = &get_cpu_var(forp_entry_recs[entry]);
+		/* Entry recs start after Dynamic recs */
+                entry = tsk->forp_entry.id + FORP_DYN_REC_SIZE;
+                rec = &get_cpu_var(forp_recs[entry]);
 		rec->time += elp;
 		rec->count++;
 		rec->sched += tsk->forp_entry.sched;
@@ -214,10 +214,8 @@ int forp_init(int enable)
 	idle_notifier_register(&idle_block);
 
 	for_each_possible_cpu(cpu) {	
-		for (i = 0; i < forp_rec_num; i++)
+		for (i = 0; i < FORP_REC_SIZE; i++)
 			forp_reset_rec(&per_cpu(forp_recs[i], cpu));
-		for (i = 0; i < FORP_ENTRY_REC_SIZE; i++)
-			forp_reset_rec(&per_cpu(forp_entry_recs[i], cpu));
 	}
 
 	/* reset per-task state */
@@ -256,9 +254,9 @@ void forp_register(struct forp_label *labels, int n)
 	int i;
 
 	mutex_lock(&forp_mu);
-	if (forp_labels)
-		kfree(forp_labels);
-	forp_labels = labels;
+	if (forp_dyn_labels)
+		kfree(forp_dyn_labels);
+	forp_dyn_labels = labels;
 
 	/* Check for labels that refer to static instrumentation */
 	static_enable = 0;
@@ -270,14 +268,15 @@ void forp_register(struct forp_label *labels, int n)
 		}
 	}
 
-	forp_rec_num = n;
+	forp_dyn_label_num = n;
 	mutex_unlock(&forp_mu);
 }
 
 unsigned long __forp_push(unsigned int id)
 {
 	int depth = current->forp_curr_stack + 1;
-	if ((forp_enable & FORP_ENABLE_INST) && forp_labels[id].depth == depth) {
+	/* XXX could easily index off the end of forp_dyn_labels ...*/
+	if ((forp_enable & FORP_ENABLE_DYN) && forp_dyn_labels[id].depth == depth) {
 		int i = ++current->forp_curr_stack;
 		forp_stamp(&current->forp_stack[i], id);
 		return 1;
@@ -290,7 +289,7 @@ void __forp_pop(void)
 	struct forp_call_stamp *f;	
 	int i;
 
-	if (forp_enable & FORP_ENABLE_INST) {
+	if (forp_enable & FORP_ENABLE_DYN) {
 		i = current->forp_curr_stack;
 		if (i < 0)
 			return;

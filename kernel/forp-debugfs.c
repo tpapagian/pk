@@ -28,14 +28,21 @@
 #include "forp.h"
 #include "forp-entry-label.h"
 
+static inline struct forp_label *forp_get_label(int i)
+{
+	if (i >= FORP_DYN_REC_SIZE)
+		return &forp_entry_label[i];
+	BUG_ON(i >= forp_dyn_label_num);
+	return &forp_dyn_labels[i];
+}
+
 static int forp_open_rec(struct inode *inode, struct file *filp)
 {
 	filp->private_data = inode->i_private;
 	return 0;
 }
 
-static int forp_snprintf_recs(struct forp_rec *recs, struct forp_label *labels, 
-			      int n, char *buf, int sz)
+static int forp_snprintf_recs(struct forp_rec *recs, char *buf, int sz)
 {
 	char *p, *e;
 	int i;
@@ -46,14 +53,15 @@ static int forp_snprintf_recs(struct forp_rec *recs, struct forp_label *labels,
 	p += snprintf(p, e - p, "# Function                          "
 		      "Depth         Hit         Sched    Time\n");
 
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < FORP_REC_SIZE; i++) {
 		struct forp_rec *rec = &recs[i];
-		struct forp_label *label = &labels[i];
-		if (rec->count)
+		if (rec->count) {
+			struct forp_label *label = forp_get_label(i);
 			p += snprintf(p, e - p, 
 				      "  %-30.30s      %3u  %10llu    %10llu    %-10llu\n",
 				      label->name, label->depth, rec->count, 
 				      rec->sched, rec->time);
+		}
 	}
 
 	return p - buf;
@@ -73,8 +81,7 @@ static ssize_t forp_read_rec(struct file *filp, char __user *ubuf,
 		return -ENOMEM;
 
 	mutex_lock(&forp_mu);
-	r = forp_snprintf_recs(&per_cpu(forp_recs[0], cpu), forp_labels, 
-			       forp_rec_num, buf, sz); 
+	r = forp_snprintf_recs(&per_cpu(forp_recs[0], cpu), buf, sz); 
 	mutex_unlock(&forp_mu);
 
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
@@ -103,17 +110,15 @@ static const struct file_operations forp_rec_ops = {
 };
 
 static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt, 
-				   loff_t *ppos, unsigned long n, 
-				   struct forp_rec __percpu *rec, 
-				   struct forp_label *labels)
+				   loff_t *ppos, struct forp_rec __percpu *rec)
 {
 	/* About 256 characters per line */
-	int sz = 256 + (n * 256);
+	int sz = 256 + (FORP_REC_SIZE * 256);
 	struct forp_rec *recs;
 	int i, cpu, r;
 	char *buf;
 
-	recs = kzalloc(n * sizeof(struct forp_rec), GFP_KERNEL);
+	recs = kzalloc(FORP_REC_SIZE * sizeof(struct forp_rec), GFP_KERNEL);
 	if (recs == NULL)
 		return -ENOMEM;
 
@@ -125,7 +130,7 @@ static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt,
 
 	mutex_lock(&forp_mu);
 
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < FORP_REC_SIZE; i++) {
 		for_each_possible_cpu(cpu) {
 			struct forp_rec *r = &per_cpu(rec[i], cpu);
 			recs[i].time += r->time;
@@ -135,20 +140,20 @@ static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt,
 	}
 	mutex_unlock(&forp_mu);
 
-	r = forp_snprintf_recs(recs, labels, n, buf, sz);
+	r = forp_snprintf_recs(recs, buf, sz);
 	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
 	kfree(buf);
 	kfree(recs);
 	return r;
 }
 
-static void forp_write_aggregate(int n, struct forp_rec __percpu *rec)
+static void forp_write_aggregate(struct forp_rec __percpu *rec)
 {
 	int cpu, i;
 
 	mutex_lock(&forp_mu);
 	for_each_possible_cpu(cpu)
-		for (i = 0; i < n; i++)
+		for (i = 0; i < FORP_REC_SIZE; i++)
 			forp_reset_rec(&per_cpu(rec[i], cpu));
 	mutex_unlock(&forp_mu);
 }
@@ -156,14 +161,13 @@ static void forp_write_aggregate(int n, struct forp_rec __percpu *rec)
 static ssize_t forp_read_all_rec(struct file *filp, char __user *ubuf,
 				 size_t cnt, loff_t *ppos)
 {
-	return forp_read_aggregate(ubuf, cnt, ppos, forp_rec_num, 
-				   forp_recs, forp_labels);
+	return forp_read_aggregate(ubuf, cnt, ppos, forp_recs);
 }
 
 static ssize_t forp_write_all_rec(struct file *filp, const char __user *ubuf,
 				  size_t cnt, loff_t *ppos)
 {
-	forp_write_aggregate(forp_rec_num, forp_recs);
+	forp_write_aggregate(forp_recs);
 	return cnt;
 }
 
@@ -176,16 +180,16 @@ forp_labels_read(struct file *filp, char __user *ubuf,
 	int i, r = 0;
 	
 	/* Roughly (log10(MAX_ULONG) + ':' + 32) * forp_rec_num */
-	sz = (20 + sizeof(forp_labels[0].name)) * forp_rec_num;
+	sz = (20 + sizeof(forp_dyn_labels[0].name)) * forp_dyn_label_num;
 	if ((buf = kmalloc(sz, GFP_KERNEL)) == NULL)
 		return -ENOMEM;
 	
 	p = buf;
 	mutex_lock(&forp_mu);
-	for (i = 0; i < forp_rec_num; i++) {
+	for (i = 0; i < forp_dyn_label_num; i++) {
 		r += snprintf(p, sz - r, "%u:%s ", 
-			      forp_labels[i].depth, 
-			      forp_labels[i].name);
+			      forp_dyn_labels[i].depth, 
+			      forp_dyn_labels[i].name);
 		p = &buf[r];
 	}
 	mutex_unlock(&forp_mu);
@@ -305,6 +309,7 @@ out:
 	return ret;
 }
 
+#if 0
 static ssize_t forp_read_entry_rec(struct file *filp, char __user *ubuf,
 				   size_t cnt, loff_t *ppos)
 {
@@ -318,6 +323,7 @@ static ssize_t forp_write_entry_rec(struct file *filp, const char __user *ubuf,
 	forp_write_aggregate(FORP_ENTRY_REC_SIZE, forp_entry_recs);
 	return cnt;
 }
+#endif
 
 static ssize_t
 forp_flags_read(struct file *filp, char __user *ubuf,
@@ -375,7 +381,9 @@ static struct {
 	{ "forp-conf",	  F_OPS(forp_labels_read, forp_labels_write) },
 	{ "forp-flags",	  F_OPS(forp_flags_read, forp_flags_write) },
 	{ "forp-enable",  F_OPS(forp_enable_read, forp_enable_write) },
+#if 0
 	{ "forp-entry",   F_OPS(forp_read_entry_rec, forp_write_entry_rec) },
+#endif
 	{ NULL }
 };
 
