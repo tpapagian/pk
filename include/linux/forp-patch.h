@@ -30,11 +30,6 @@ extern void __forp_pop(void);
 			__forp_pop();			\
       } while(0)
 
-static inline u64 forp_time(void)
-{
-	return __native_read_tsc();
-}
-
 enum {
 	FORP_STATIC_SCHEDULE = 0,
 };

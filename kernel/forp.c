@@ -43,6 +43,11 @@ unsigned long forp_flags __read_mostly;
 static unsigned long static_enable;
 static unsigned long static_to_id[sizeof(static_enable)];
 
+static inline u64 forp_time(void)
+{
+	return __native_read_tsc();
+}
+
 static inline void forp_stamp(struct forp_call_stamp *f, unsigned long id)
 {
 	f->calltime = forp_time();
