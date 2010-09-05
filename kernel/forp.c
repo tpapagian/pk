@@ -277,7 +277,7 @@ void forp_register(struct forp_label *labels, int n)
 	mutex_unlock(&forp_mu);
 }
 
-unsigned long __forp_push(unsigned int id)
+forp_flags_t __forp_push(unsigned int id)
 {
 	int depth = current->forp_curr_stack + 1;
 	/* XXX could easily index off the end of forp_dyn_labels ...*/

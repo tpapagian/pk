@@ -14,19 +14,35 @@ struct forp_label {
 	int depth;
 };
 
-extern unsigned long __forp_push(unsigned int id);
+typedef u8 forp_flags_t;
+
+extern forp_flags_t __forp_push(unsigned int id);
 extern void __forp_pop(void);
 
-#define forp_push(id, flags)				\
+/* forp_push and forp_pop usage:
+ * 
+ * void foo(void) 
+ * {
+ *	forp_flags_t forp0, forp1;
+ * 	forp_push(0);
+ * 	goo();
+ * 	forp_push(1);
+ * 	poo();
+ * 	forp_pop(1);
+ * 	forp_pop(0);
+ * }
+*/
+
+#define forp_push(id)					\
 	do {					       	\
-		typecheck(unsigned long, flags);	\
-		flags = __forp_push(id); 		\
+		typecheck(forp_flags_t, forp##id);	\
+		forp##id = __forp_push(id); 		\
 	} while (0)
 
-#define forp_pop(flags)					\
+#define forp_pop(id)					\
       do {					        \
-		typecheck(unsigned long, flags);	\
-		if (flags)	   	 		\
+		typecheck(forp_flags_t, forp##id);	\
+		if (forp##id)	   	 		\
 			__forp_pop();			\
       } while(0)
 
