@@ -31,7 +31,7 @@
 static inline struct forp_label *forp_get_label(int i)
 {
 	if (i >= FORP_DYN_REC_SIZE)
-		return &forp_entry_label[i];
+		return &forp_entry_label[i - FORP_DYN_REC_SIZE];
 	BUG_ON(i >= forp_dyn_label_num);
 	return &forp_dyn_labels[i];
 }
