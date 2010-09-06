@@ -609,9 +609,9 @@ struct sock *inet_csk_clone(struct sock *sk, const struct request_sock *req,
 
 EXPORT_SYMBOL_GPL(inet_csk_clone);
 
-static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority)
+static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority, int node)
 {
-	struct sock *newsk = sk_clone(sk, priority);
+	struct sock *newsk = sk_clone_node(sk, priority, node);
 
 	if (newsk != NULL) {
 		struct tcp_sock *newtp = tcp_sk(newsk);
@@ -769,10 +769,11 @@ void inet_csk_destroy_sock(struct sock *sk)
 
 EXPORT_SYMBOL(inet_csk_destroy_sock);
 
-static inline int __inet_csk_listen_start_one(struct sock *sk, const int nr_table_entries)
+static inline int __inet_csk_listen_start_one(struct sock *sk,
+		const int nr_table_entries, int node)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
-	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, nr_table_entries);
+	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, nr_table_entries, node);
 
 	if (rc != 0)
 		return rc;
@@ -819,7 +820,7 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 	// socket object.  Since it looks like all interaction with the wait
 	// queue is done through the sk_sleep pointer, is might be safe to
 	// allocate wait queues here.
-	icsk->icsk_ma_socks = kmalloc(sizeof(struct socket) * num_sockets, GFP_KERNEL);
+	icsk->icsk_ma_socks = kmalloc(sizeof(struct socket *) * num_sockets, GFP_KERNEL);
 	if (!icsk->icsk_ma_socks) {
 		err = -ENOMEM;
 		goto socks_error;
@@ -827,14 +828,21 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 
 	for (c = 1; c < num_sockets; c++) {
 		struct sock *newsk;
-		struct socket *newsock = &icsk->icsk_ma_socks[c];
+		struct socket *newsock =  kmalloc_node(sizeof(struct socket), GFP_KERNEL, cpu_to_node(c));
+
+		if (!newsock) {
+			err = -ENOMEM;
+			goto clone_error;
+		}
+
+		icsk->icsk_ma_socks[c] = newsock;
 
 		printk("cloning socket %d\n", c);
 		// AP: TODO: might be nice to tell it to allocate from a
 		// certain NUMA node.
 		//
 		// AP: TODO is this the right alloc flag?
-		newsk = inet_csk_listen_clone(sk, GFP_ATOMIC);
+		newsk = inet_csk_listen_clone(sk, GFP_ATOMIC, cpu_to_node(c));
 		if (!newsk) {
 			err = -ENOMEM; // AP: TODO not sure if this is the right error type
 			goto clone_error;
@@ -855,9 +863,10 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 		newsock->flags = sk->sk_socket->flags;
 
 		// AP: TODO must check when this memory is deallocated
-		newsock->wq = kmalloc(sizeof(struct socket_wq), GFP_KERNEL);
+		newsock->wq = kmalloc_node(sizeof(struct socket_wq), GFP_KERNEL, cpu_to_node(c));
 		if (!newsock->wq) {
 			err = -ENOMEM;
+			kfree(newsock);
 			goto clone_error;
 		}
 		init_waitqueue_head(&newsock->wq->wait);
@@ -879,7 +888,8 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 
 	for (s = 0; s < num_sockets; s++) {
 		printk("starting socket %d\n", s);
-		err = __inet_csk_listen_start_one(icsk->icsk_ma_sks[s], nr_table_entries);
+		err = __inet_csk_listen_start_one(icsk->icsk_ma_sks[s],
+				nr_table_entries, cpu_to_node(s));
 		if (err)
 			goto start_error;
 
@@ -917,12 +927,18 @@ start_error:
 		__reqsk_queue_destroy(&icsk->icsk_accept_queue);
 	}
 
+	for (c = 0; c < num_sockets; c++) {
+		printk("destroying socket %d\n", c);
+		kfree(icsk->icsk_ma_sks[c]);
+	}
+
 	goto free_wqs;
 
 clone_error:
 	for (c--; c > 1; c--) {
 		printk("destroying socket %d\n", c);
 		__inet_csk_destroy_sock_one(icsk->icsk_ma_sks[c]);
+		kfree(icsk->icsk_ma_sks[c]);
 	}
 
 free_wqs:

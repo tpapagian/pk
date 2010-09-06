@@ -88,7 +88,7 @@ struct inet_connection_sock {
 	struct inet_sock	  icsk_inet;
 	int			  icsk_multi_accept;
 	struct sock 		  **icsk_ma_sks;
-	struct socket		  *icsk_ma_socks;
+	struct socket		  **icsk_ma_socks;
 	struct request_sock_queue icsk_accept_queue;
 	struct inet_bind_bucket	  *icsk_bind_hash;
 	unsigned long		  icsk_timeout;

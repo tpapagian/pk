@@ -991,14 +991,14 @@ static void sock_copy(struct sock *nsk, const struct sock *osk)
 }
 
 static struct sock *sk_prot_alloc(struct proto *prot, gfp_t priority,
-		int family)
+		int family, int node)
 {
 	struct sock *sk;
 	struct kmem_cache *slab;
 
 	slab = prot->slab;
 	if (slab != NULL) {
-		sk = kmem_cache_alloc(slab, priority & ~__GFP_ZERO);
+		sk = kmem_cache_alloc_node(slab, priority & ~__GFP_ZERO, node);
 		if (!sk)
 			return sk;
 		if (priority & __GFP_ZERO) {
@@ -1015,7 +1015,7 @@ static struct sock *sk_prot_alloc(struct proto *prot, gfp_t priority,
 		}
 	}
 	else
-		sk = kmalloc(prot->obj_size, priority);
+		sk = kmalloc_node(prot->obj_size, priority, node);
 
 	if (sk != NULL) {
 		kmemcheck_annotate_bitfield(sk, flags);
@@ -1068,18 +1068,18 @@ EXPORT_SYMBOL(sock_update_classid);
 #endif
 
 /**
- *	sk_alloc - All socket objects are allocated here
+ *	sk_alloc_node - All socket objects are allocated here
  *	@net: the applicable net namespace
  *	@family: protocol family
  *	@priority: for allocation (%GFP_KERNEL, %GFP_ATOMIC, etc)
  *	@prot: struct proto associated with this new sock instance
  */
-struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
-		      struct proto *prot)
+struct sock *sk_alloc_node(struct net *net, int family, gfp_t priority,
+		      struct proto *prot, int node)
 {
 	struct sock *sk;
 
-	sk = sk_prot_alloc(prot, priority | __GFP_ZERO, family);
+	sk = sk_prot_alloc(prot, priority | __GFP_ZERO, family, node);
 	if (sk) {
 		sk->sk_family = family;
 		/*
@@ -1095,6 +1095,13 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 	}
 
 	return sk;
+}
+EXPORT_SYMBOL(sk_alloc_node);
+
+struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
+		      struct proto *prot)
+{
+	return sk_alloc_node(net, family, priority, prot, -1);
 }
 EXPORT_SYMBOL(sk_alloc);
 
@@ -1155,11 +1162,11 @@ void sk_release_kernel(struct sock *sk)
 }
 EXPORT_SYMBOL(sk_release_kernel);
 
-struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
+struct sock *sk_clone_node(const struct sock *sk, const gfp_t priority, int node)
 {
 	struct sock *newsk;
 
-	newsk = sk_prot_alloc(sk->sk_prot, priority, sk->sk_family);
+	newsk = sk_prot_alloc(sk->sk_prot, priority, sk->sk_family, node);
 	if (newsk != NULL) {
 		struct sk_filter *filter;
 
@@ -1246,6 +1253,12 @@ struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
 	}
 out:
 	return newsk;
+}
+EXPORT_SYMBOL_GPL(sk_clone_node);
+
+struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
+{
+	return sk_clone_node(sk, priority, -1); 
 }
 EXPORT_SYMBOL_GPL(sk_clone);
 
