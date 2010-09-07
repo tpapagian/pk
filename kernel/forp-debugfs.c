@@ -30,9 +30,12 @@
 
 static inline struct forp_label *forp_get_label(int i)
 {
+	static struct forp_label no_label = { "---", 0 };
+	
 	if (i >= FORP_DYN_REC_SIZE)
 		return &forp_entry_label[i - FORP_DYN_REC_SIZE];
-	BUG_ON(i >= forp_dyn_label_num);
+	if (i >= forp_dyn_label_num)
+		return &no_label;
 	return &forp_dyn_labels[i];
 }
 
