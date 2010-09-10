@@ -90,9 +90,6 @@ struct inet_bind_bucket *inet_bind_bucket_create(struct kmem_cache *cachep,
  */
 void inet_bind_bucket_destroy(struct kmem_cache *cachep, struct inet_bind_bucket *tb)
 {
-	struct sock *sk;
-	struct hlist_node *node;
-
 	if (hlist_empty(&tb->owners)) {
 		int c;
 		
