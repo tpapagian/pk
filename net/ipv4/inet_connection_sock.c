@@ -755,6 +755,7 @@ void inet_csk_destroy_sock(struct sock *sk)
 			inet_csk(tsk)->icsk_bind_hash = NULL;
 			call_rcu(&tsk->sk_wq->rcu, wq_free_rcu);
 			__inet_csk_destroy_sock_one(tsk);
+			kfree(icsk->icsk_ma_socks[i]);
 		}
 
 		kfree(icsk->icsk_ma_socks);
@@ -825,6 +826,8 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 		err = -ENOMEM;
 		goto socks_error;
 	}
+
+	icsk->icsk_ma_socks[0] = NULL;
 
 	for (c = 1; c < num_sockets; c++) {
 		struct sock *newsk;
