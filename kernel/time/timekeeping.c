@@ -216,7 +216,7 @@ void getnstimeofday(struct timespec *ts)
 	unsigned long seq;
 	s64 nsecs;
 
-	WARN_ON(timekeeping_suspended);
+	//WARN_ON(timekeeping_suspended);
 
 	do {
 		seq = read_seqbegin(&xtime_lock);
@@ -239,7 +239,7 @@ ktime_t ktime_get(void)
 	unsigned int seq;
 	s64 secs, nsecs;
 
-	WARN_ON(timekeeping_suspended);
+	//WARN_ON(timekeeping_suspended);
 
 	do {
 		seq = read_seqbegin(&xtime_lock);
@@ -270,7 +270,7 @@ void ktime_get_ts(struct timespec *ts)
 	unsigned int seq;
 	s64 nsecs;
 
-	WARN_ON(timekeeping_suspended);
+	//WARN_ON(timekeeping_suspended);
 
 	do {
 		seq = read_seqbegin(&xtime_lock);
