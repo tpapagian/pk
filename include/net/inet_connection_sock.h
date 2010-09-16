@@ -86,10 +86,12 @@ struct inet_connection_sock_af_ops {
 struct inet_connection_sock {
 	/* inet_sock has to be the first member! */
 	struct inet_sock	  icsk_inet;
-	int			  icsk_multi_accept;
+
+	int			  icsk_multi_accept ____cacheline_aligned_in_smp;
 	struct sock 		  **icsk_ma_sks;
 	struct socket		  **icsk_ma_socks;
-	struct request_sock_queue icsk_accept_queue;
+
+	struct request_sock_queue icsk_accept_queue ____cacheline_aligned_in_smp;
 	struct inet_bind_bucket	  *icsk_bind_hash;
 	unsigned long		  icsk_timeout;
  	struct timer_list	  icsk_retransmit_timer;
