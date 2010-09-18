@@ -675,6 +675,7 @@ static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority,
 		/* Deinitialize accept_queue to trap illegal accesses. */
 		// AP: TODO not sure
 		memset(&newicsk->icsk_accept_queue, 0, sizeof(newicsk->icsk_accept_queue));
+		newicsk->icsk_accept_queue.rskq_defer_accept = inet_csk(sk)->icsk_accept_queue.rskq_defer_accept;
 
 		// AP: I do not think a timer is needed for listen sockets
 		tcp_init_xmit_timers(newsk);

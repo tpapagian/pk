@@ -2345,6 +2345,15 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		icsk->icsk_accept_queue.rskq_defer_accept =
 			secs_to_retrans(val, TCP_TIMEOUT_INIT / HZ,
 					TCP_RTO_MAX / HZ);
+
+		if (icsk->icsk_multi_accept) {
+			int i;
+			for (i = 1; i < num_possible_cpus(); i++) {
+				inet_csk(icsk->icsk_ma_sks[i])->icsk_accept_queue.rskq_defer_accept =
+					icsk->icsk_accept_queue.rskq_defer_accept;
+			}
+		}
+
 		break;
 
 	case TCP_WINDOW_CLAMP:
