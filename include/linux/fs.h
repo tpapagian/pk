@@ -885,6 +885,8 @@ struct fown_struct {
 	int signum;		/* posix.1b rt signal to be delivered on IO */
 };
 
+#define HAVE_PERCPU_RA
+
 /*
  * Track a single file's readahead state
  */
@@ -901,11 +903,14 @@ struct file_ra_state {
 					   there are only # of pages ahead */
 
 	unsigned int ra_pages;		/* Maximum readahead window */
+#ifdef HAVE_PERCPU_RA
 	struct percpu_file_ra_state percpu[NR_CPUS];
 #define percpu_mmap_miss percpu[smp_processor_id()].mmap_miss
 #define percpu_prev_pos	 percpu[smp_processor_id()].prev_pos
-	//unsigned int mmap_miss;		/* Cache miss stat for mmap accesses */
-	//loff_t prev_pos;		/* Cache last read() position */
+#else
+	unsigned int mmap_miss;		/* Cache miss stat for mmap accesses */
+	loff_t prev_pos;		/* Cache last read() position */
+#endif
 };
 
 /*
