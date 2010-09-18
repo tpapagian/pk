@@ -73,7 +73,7 @@
  * SPARSEMEM_EXTREME with !SPARSEMEM_VMEMMAP).
  */
 enum pageflags {
-	PG_locked,		/* Page is locked. Don't touch. */
+	PG_locked_,		/* Page is locked. Don't touch. */
 	PG_error,
 	PG_referenced,
 	PG_uptodate,
@@ -138,35 +138,35 @@ enum pageflags {
  */
 #define TESTPAGEFLAG(uname, lname)					\
 static inline int Page##uname(struct page *page) 			\
-			{ return test_bit(PG_##lname, &page->flags); }
+			{ return test_bit(PG_##lname, &page->flags_); }
 
 #define SETPAGEFLAG(uname, lname)					\
 static inline void SetPage##uname(struct page *page)			\
-			{ set_bit(PG_##lname, &page->flags); }
+			{ set_bit(PG_##lname, &page->flags_); }
 
 #define CLEARPAGEFLAG(uname, lname)					\
 static inline void ClearPage##uname(struct page *page)			\
-			{ clear_bit(PG_##lname, &page->flags); }
+			{ clear_bit(PG_##lname, &page->flags_); }
 
 #define __SETPAGEFLAG(uname, lname)					\
 static inline void __SetPage##uname(struct page *page)			\
-			{ __set_bit(PG_##lname, &page->flags); }
+			{ __set_bit(PG_##lname, &page->flags_); }
 
 #define __CLEARPAGEFLAG(uname, lname)					\
 static inline void __ClearPage##uname(struct page *page)		\
-			{ __clear_bit(PG_##lname, &page->flags); }
+			{ __clear_bit(PG_##lname, &page->flags_); }
 
 #define TESTSETFLAG(uname, lname)					\
 static inline int TestSetPage##uname(struct page *page)			\
-		{ return test_and_set_bit(PG_##lname, &page->flags); }
+		{ return test_and_set_bit(PG_##lname, &page->flags_); }
 
 #define TESTCLEARFLAG(uname, lname)					\
 static inline int TestClearPage##uname(struct page *page)		\
-		{ return test_and_clear_bit(PG_##lname, &page->flags); }
+		{ return test_and_clear_bit(PG_##lname, &page->flags_); }
 
 #define __TESTCLEARFLAG(uname, lname)					\
 static inline int __TestClearPage##uname(struct page *page)		\
-		{ return __test_and_clear_bit(PG_##lname, &page->flags); }
+		{ return __test_and_clear_bit(PG_##lname, &page->flags_); }
 
 #define PAGEFLAG(uname, lname) TESTPAGEFLAG(uname, lname)		\
 	SETPAGEFLAG(uname, lname) CLEARPAGEFLAG(uname, lname)
@@ -198,7 +198,15 @@ static inline int __TestClearPage##uname(struct page *page) { return 0; }
 
 struct page;	/* forward declaration */
 
-TESTPAGEFLAG(Locked, locked) TESTSETFLAG(Locked, locked)
+static inline int PageLocked(struct page *page) 
+{ 
+	return test_bit(PG_locked_, &page->flags_wo);
+}
+
+#if 0
+TESTPAGEFLAG(Locked, locked_) 
+TESTSETFLAG(Locked, locked)
+#endif
 PAGEFLAG(Error, error)
 PAGEFLAG(Referenced, referenced) TESTCLEARFLAG(Referenced, referenced)
 PAGEFLAG(Dirty, dirty) TESTSCFLAG(Dirty, dirty) __CLEARPAGEFLAG(Dirty, dirty)
@@ -286,7 +294,7 @@ u64 stable_page_flags(struct page *page);
 
 static inline int PageUptodate(struct page *page)
 {
-	int ret = test_bit(PG_uptodate, &(page)->flags);
+	int ret = test_bit(PG_uptodate, &(page)->flags_);
 
 	/*
 	 * Must ensure that the data we read out of the page is loaded
@@ -305,7 +313,7 @@ static inline int PageUptodate(struct page *page)
 static inline void __SetPageUptodate(struct page *page)
 {
 	smp_wmb();
-	__set_bit(PG_uptodate, &(page)->flags);
+	__set_bit(PG_uptodate, &(page)->flags_);
 }
 
 static inline void SetPageUptodate(struct page *page)
@@ -323,7 +331,7 @@ static inline void SetPageUptodate(struct page *page)
 	 * set bit already provides full barriers.
 	 */
 	smp_wmb();
-	set_bit(PG_uptodate, &(page)->flags);
+	set_bit(PG_uptodate, &(page)->flags_);
 #endif
 }
 
@@ -351,7 +359,7 @@ __PAGEFLAG(Tail, tail)
 
 static inline int PageCompound(struct page *page)
 {
-	return page->flags & ((1L << PG_head) | (1L << PG_tail));
+	return page->flags_ & ((1L << PG_head) | (1L << PG_tail));
 
 }
 #else
@@ -404,11 +412,15 @@ static inline void __ClearPageTail(struct page *page)
  * these flags set.  It they are, there is a problem.
  */
 #define PAGE_FLAGS_CHECK_AT_FREE \
-	(1 << PG_lru	 | 1 << PG_locked    | \
+	(1 << PG_lru	 | \
 	 1 << PG_private | 1 << PG_private_2 | \
 	 1 << PG_buddy	 | 1 << PG_writeback | 1 << PG_reserved | \
 	 1 << PG_slab	 | 1 << PG_swapcache | 1 << PG_active | \
 	 1 << PG_unevictable | __PG_MLOCKED | __PG_HWPOISON)
+
+#define PAGE_WO_FLAGS_CHECK_AT_FREE \
+	(1 << PG_locked_)
+
 
 /*
  * Flags checked when a page is prepped for return by the page allocator.
@@ -428,7 +440,7 @@ static inline void __ClearPageTail(struct page *page)
  */
 static inline int page_has_private(struct page *page)
 {
-	return !!(page->flags & PAGE_FLAGS_PRIVATE);
+	return !!(page->flags_ & PAGE_FLAGS_PRIVATE);
 }
 
 #endif /* !__GENERATING_BOUNDS_H */

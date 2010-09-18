@@ -9,6 +9,7 @@
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/buffer_head.h>
+#include <linux/gfp.h>
 
 #define PAGE_OFS(ofs) ((ofs) & (PAGE_SIZE-1))
 
@@ -302,6 +303,11 @@ static void bdev_put_device(struct super_block *sb)
 	close_bdev_exclusive(logfs_super(sb)->s_bdev, FMODE_READ|FMODE_WRITE);
 }
 
+static int bdev_can_write_buf(struct super_block *sb, u64 ofs)
+{
+	return 0;
+}
+
 static const struct logfs_device_ops bd_devops = {
 	.find_first_sb	= bdev_find_first_sb,
 	.find_last_sb	= bdev_find_last_sb,
@@ -309,6 +315,7 @@ static const struct logfs_device_ops bd_devops = {
 	.readpage	= bdev_readpage,
 	.writeseg	= bdev_writeseg,
 	.erase		= bdev_erase,
+	.can_write_buf	= bdev_can_write_buf,
 	.sync		= bdev_sync,
 	.put_device	= bdev_put_device,
 };

@@ -1,0 +1,4 @@
+* move the devres_lock away from the highly read archdata
+
+Since the devres_lock is causing archdata to be kicked out of the cache,
+why/where is devres_lock contended?

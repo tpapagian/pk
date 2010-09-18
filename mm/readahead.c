@@ -9,6 +9,7 @@
 
 #include <linux/kernel.h>
 #include <linux/fs.h>
+#include <linux/gfp.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/blkdev.h>
@@ -24,8 +25,12 @@
 void
 file_ra_state_init(struct file_ra_state *ra, struct address_space *mapping)
 {
+	int c;
 	ra->ra_pages = mapping->backing_dev_info->ra_pages;
-	ra->prev_pos = -1;
+	
+	for_each_possible_cpu(c) {
+		ra->percpu[c].prev_pos = -1;
+	}
 }
 EXPORT_SYMBOL_GPL(file_ra_state_init);
 
@@ -444,7 +449,7 @@ ondemand_readahead(struct address_space *mapping,
 	/*
 	 * sequential cache miss
 	 */
-	if (offset - (ra->prev_pos >> PAGE_CACHE_SHIFT) <= 1UL)
+	if (offset - (ra->percpu_prev_pos >> PAGE_CACHE_SHIFT) <= 1UL)
 		goto initial_readahead;
 
 	/*
@@ -502,7 +507,7 @@ void page_cache_sync_readahead(struct address_space *mapping,
 		return;
 
 	/* be dumb */
-	if (filp->f_mode & FMODE_RANDOM) {
+	if (filp && (filp->f_mode & FMODE_RANDOM)) {
 		force_page_cache_readahead(mapping, filp, offset, req_size);
 		return;
 	}
@@ -522,7 +527,7 @@ EXPORT_SYMBOL_GPL(page_cache_sync_readahead);
  * @req_size: hint: total size of the read which the caller is performing in
  *            pagecache pages
  *
- * page_cache_async_ondemand() should be called when a page is used which
+ * page_cache_async_readahead() should be called when a page is used which
  * has the PG_readahead flag; this is a marker to suggest that the application
  * has used up enough of the readahead window that we should start pulling in
  * more pages.

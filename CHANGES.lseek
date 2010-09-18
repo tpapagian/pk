@@ -1,0 +1,4 @@
+* Don't hold the inode mutex during lseek operations.
+* Traditional behavior (holding the mutex) can be restored by
+    echo 1 > /proc/sys/fs/enable_lseek_lock
+  Likewise, setting it to 0 disables the lseek lock

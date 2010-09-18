@@ -20,6 +20,7 @@
 #include <net/inet_hashtables.h>
 #include <net/inet_timewait_sock.h>
 #include <net/ip.h>
+#include <net/tcp.h>
 #include <net/route.h>
 #include <net/tcp_states.h>
 #include <net/xfrm.h>
@@ -37,6 +38,9 @@ struct local_ports sysctl_local_ports __read_mostly = {
 	.range = { 32768, 61000 },
 };
 
+unsigned long *sysctl_local_reserved_ports;
+EXPORT_SYMBOL(sysctl_local_reserved_ports);
+
 void inet_get_local_port_range(int *low, int *high)
 {
 	unsigned seq;
@@ -50,12 +54,13 @@ void inet_get_local_port_range(int *low, int *high)
 EXPORT_SYMBOL(inet_get_local_port_range);
 
 int inet_csk_bind_conflict(const struct sock *sk,
-			   const struct inet_bind_bucket *tb)
+			   struct inet_bind_bucket *tb)
 {
 	const __be32 sk_rcv_saddr = inet_rcv_saddr(sk);
 	struct sock *sk2;
 	struct hlist_node *node;
 	int reuse = sk->sk_reuse;
+	int c;
 
 	/*
 	 * Unlike other sk lookup places we do not check
@@ -63,6 +68,12 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	 * in tb->owners list belong to the same net - the
 	 * one this bucket belongs to.
 	 */
+
+	// AP: TODO this is code here is ugly, would be best to hide such details
+	for_each_possible_cpu(c)
+		spin_lock_nested(&tb->per_cpu[c].lock, c);
+
+	__inet_bind_bucket_per_cpu_flush(tb, 0);
 
 	sk_for_each_bound(sk2, node, &tb->owners) {
 		if (sk != sk2 &&
@@ -79,6 +90,10 @@ int inet_csk_bind_conflict(const struct sock *sk,
 			}
 		}
 	}
+
+	for_each_possible_cpu(c)
+		spin_unlock(&tb->per_cpu[c].lock);
+
 	return node != NULL;
 }
 
@@ -97,6 +112,10 @@ int inet_csk_get_port(struct sock *sk, unsigned short snum)
 	struct net *net = sock_net(sk);
 	int smallest_size = -1, smallest_rover;
 
+#ifdef DEBUG_AP
+	printk("inet_csk_get_port called sk=%p snum=%d\n", sk, snum);
+#endif
+
 	local_bh_disable();
 	if (!snum) {
 		int remaining, rover, low, high;
@@ -108,11 +127,14 @@ again:
 
 		smallest_size = -1;
 		do {
+			if (inet_is_reserved_local_port(rover))
+				goto next_nolock;
 			head = &hashinfo->bhash[inet_bhashfn(net, rover,
 					hashinfo->bhash_size)];
 			spin_lock(&head->lock);
 			inet_bind_bucket_for_each(tb, node, &head->chain)
 				if (net_eq(ib_net(tb), net) && tb->port == rover) {
+					inet_bind_bucket_per_cpu_flush(tb);
 					if (tb->fastreuse > 0 &&
 					    sk->sk_reuse &&
 					    sk->sk_state != TCP_LISTEN &&
@@ -130,6 +152,7 @@ again:
 			break;
 		next:
 			spin_unlock(&head->lock);
+		next_nolock:
 			if (++rover > high)
 				rover = low;
 		} while (--remaining > 0);
@@ -164,6 +187,7 @@ have_snum:
 	tb = NULL;
 	goto tb_not_found;
 tb_found:
+	inet_bind_bucket_per_cpu_flush(tb);
 	if (!hlist_empty(&tb->owners)) {
 		if (tb->fastreuse > 0 &&
 		    sk->sk_reuse && sk->sk_state != TCP_LISTEN &&
@@ -186,6 +210,7 @@ tb_not_found:
 	if (!tb && (tb = inet_bind_bucket_create(hashinfo->bind_bucket_cachep,
 					net, head, snum)) == NULL)
 		goto fail_unlock;
+	inet_bind_bucket_per_cpu_flush(tb);
 	if (hlist_empty(&tb->owners)) {
 		if (sk->sk_reuse && sk->sk_state != TCP_LISTEN)
 			tb->fastreuse = 1;
@@ -234,7 +259,7 @@ static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 	 * having to remove and re-insert us on the wait queue.
 	 */
 	for (;;) {
-		prepare_to_wait_exclusive(sk->sk_sleep, &wait,
+		prepare_to_wait_exclusive(sk_sleep(sk), &wait,
 					  TASK_INTERRUPTIBLE);
 		release_sock(sk);
 		if (reqsk_queue_empty(&icsk->icsk_accept_queue))
@@ -253,7 +278,7 @@ static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 		if (!timeo)
 			break;
 	}
-	finish_wait(sk->sk_sleep, &wait);
+	finish_wait(sk_sleep(sk), &wait);
 	return err;
 }
 
@@ -588,6 +613,8 @@ struct sock *inet_csk_clone(struct sock *sk, const struct request_sock *req,
 
 		/* Deinitialize accept_queue to trap illegal accesses. */
 		memset(&newicsk->icsk_accept_queue, 0, sizeof(newicsk->icsk_accept_queue));
+		newicsk->icsk_multi_accept = 0;
+		newicsk->icsk_ma_sks = NULL;
 
 		security_inet_csk_clone(newsk, req);
 	}
@@ -596,22 +623,85 @@ struct sock *inet_csk_clone(struct sock *sk, const struct request_sock *req,
 
 EXPORT_SYMBOL_GPL(inet_csk_clone);
 
-/*
- * At this point, there should be no process reference to this
- * socket, and thus no user references at all.  Therefore we
- * can assume the socket waitqueue is inactive and nobody will
- * try to jump onto it.
- */
-void inet_csk_destroy_sock(struct sock *sk)
+static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority, int node)
 {
-	WARN_ON(sk->sk_state != TCP_CLOSE);
-	WARN_ON(!sock_flag(sk, SOCK_DEAD));
+	struct sock *newsk = sk_clone_node(sk, priority, node);
 
-	/* It cannot be in hash table! */
-	WARN_ON(!sk_unhashed(sk));
+	if (newsk != NULL) {
+		struct tcp_sock *newtp = tcp_sk(newsk);
+		struct inet_connection_sock *newicsk = inet_csk(newsk);
 
-	/* If it has not 0 inet_sk(sk)->inet_num, it must be bound */
-	WARN_ON(inet_sk(sk)->inet_num && !inet_csk(sk)->icsk_bind_hash);
+		// AP: TODO commented this out because when calling
+		// __inet_inherit_port after accepting a connection, the kernel
+		// would panic.
+		//newicsk->icsk_bind_hash = NULL; // AP: TODO not sure
+
+		newsk->sk_write_space = sk_stream_write_space; // AP: TODO not sure
+
+		// AP: TODO not sure
+		newicsk->icsk_retransmits = 0;
+		newicsk->icsk_backoff	  = 0;
+		newicsk->icsk_probes_out  = 0;
+
+#if 0
+		// AP: TODO: not sure if this applies
+		struct tcp_sock *oldtp = tcp_sk(sk);
+		struct tcp_cookie_values *oldcvp = oldtp->cookie_values;
+
+		/* TCP Cookie Transactions require space for the cookie pair,
+		 * as it differs for each connection.  There is no need to
+		 * copy any s_data_payload stored at the original socket.
+		 * Failure will prevent resuming the connection.
+		 *
+		 * Presumed copied, in order of appearance:
+		 *	cookie_in_always, cookie_out_never
+		 */
+		if (oldcvp != NULL) {
+			struct tcp_cookie_values *newcvp =
+				kzalloc(sizeof(*newtp->cookie_values),
+					GFP_ATOMIC);
+
+			if (newcvp != NULL) {
+				kref_init(&newcvp->kref);
+				newcvp->cookie_desired =
+						oldcvp->cookie_desired;
+				newtp->cookie_values = newcvp;
+			} else {
+				/* Not Yet Implemented */
+				newtp->cookie_values = NULL;
+			}
+		}
+
+#endif
+
+		skb_queue_head_init(&newtp->out_of_order_queue);
+
+		// AP: TODO I might need to do more here. Take a look at tcp_prequeue_init.
+		skb_queue_head_init(&newtp->ucopy.prequeue);
+
+		skb_queue_head_init(&newsk->sk_receive_queue);
+		skb_queue_head_init(&newsk->sk_write_queue);
+#ifdef CONFIG_NET_DMA
+		skb_queue_head_init(&newsk->sk_async_wait_queue);
+#endif
+		skb_queue_head_init(&newsk->sk_error_queue);
+
+		/* Deinitialize accept_queue to trap illegal accesses. */
+		// AP: TODO not sure
+		memset(&newicsk->icsk_accept_queue, 0, sizeof(newicsk->icsk_accept_queue));
+		newicsk->icsk_accept_queue.rskq_defer_accept = inet_csk(sk)->icsk_accept_queue.rskq_defer_accept;
+
+		// AP: I do not think a timer is needed for listen sockets
+		tcp_init_xmit_timers(newsk);
+	}
+	return newsk;
+}
+
+static inline void __inet_csk_destroy_sock_one(struct sock *sk)
+{
+#ifdef DEBUG_AP
+	printk("destroy begin\n");
+#endif
 
 	sk->sk_prot->destroy(sk);
 
@@ -623,15 +713,83 @@ void inet_csk_destroy_sock(struct sock *sk)
 
 	percpu_counter_dec(sk->sk_prot->orphan_count);
 	sock_put(sk);
+
+#ifdef DEBUG_AP
+	printk("destroy done\n");
+#endif
+}
+
+// AP: this is a giant hack. This function is from net/socket.c.
+// had to add this because of some new feature in 2.6.35
+static void wq_free_rcu(struct rcu_head *head)
+{
+	struct socket_wq *wq = container_of(head, struct socket_wq, rcu);
+
+	kfree(wq);
+}
+
+/*
+ * At this point, there should be no process reference to this
+ * socket, and thus no user references at all.  Therefore we
+ * can assume the socket waitqueue is inactive and nobody will
+ * try to jump onto it.
+ */
+void inet_csk_destroy_sock(struct sock *sk)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+
+	WARN_ON(sk->sk_state != TCP_CLOSE);
+	WARN_ON(!sock_flag(sk, SOCK_DEAD));
+
+	/* It cannot be in hash table! */
+	WARN_ON(!sk_unhashed(sk));
+
+	/* If it has not 0 inet_sk(sk)->inet_num, it must be bound */
+	WARN_ON(inet_sk(sk)->inet_num && !inet_csk(sk)->icsk_bind_hash);
+
+#ifdef DEBUG_AP
+	printk("inet_num=%d icsk_bind_hash=%p icsk_ma_sks=%p\n", inet_sk(sk)->inet_num, inet_csk(sk)->icsk_bind_hash, icsk->icsk_ma_sks);
+#endif
+
+	if (icsk->icsk_multi_accept && icsk->icsk_ma_sks != NULL) {
+		int i;
+#ifdef DEBUG_AP
+		printk("starting to destroy slave socket\n");
+#endif
+		for (i = 1; i < num_possible_cpus(); i++) {
+			struct sock *tsk = icsk->icsk_ma_sks[i];
+
+#ifdef DEBUG_AP
+			printk("destroying slave %d\n", i);
+			printk("slave inet_num=%d icsk_bind_hash=%p\n", inet_sk(tsk)->inet_num, inet_csk(tsk)->icsk_bind_hash);
+#endif
+
+			tsk->sk_state = TCP_CLOSE;
+			sock_set_flag(tsk, SOCK_DEAD);
+			//inet_sk(tsk)->inet_num = 0;
+			inet_csk(tsk)->icsk_bind_hash = NULL;
+			call_rcu(&tsk->sk_wq->rcu, wq_free_rcu);
+			__inet_csk_destroy_sock_one(tsk);
+			kfree(icsk->icsk_ma_socks[i]);
+		}
+
+		kfree(icsk->icsk_ma_socks);
+		icsk->icsk_ma_socks = NULL;
+		kfree(icsk->icsk_ma_sks);
+		icsk->icsk_ma_sks = NULL;
+	}
+
+	__inet_csk_destroy_sock_one(sk);
+
 }
 
 EXPORT_SYMBOL(inet_csk_destroy_sock);
 
-int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
+static inline int __inet_csk_listen_start_one(struct sock *sk,
+		const int nr_table_entries, int node)
 {
-	struct inet_sock *inet = inet_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
-	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, nr_table_entries);
+	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, nr_table_entries, node);
 
 	if (rc != 0)
 		return rc;
@@ -639,34 +797,187 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 	sk->sk_max_ack_backlog = 0;
 	sk->sk_ack_backlog = 0;
 	inet_csk_delack_init(sk);
+	sk->sk_state = TCP_LISTEN;
+	return 0;
+}
+
+static inline void __inet_csk_listen_start_one_finish(struct sock *sk)
+{
+	struct inet_sock *inet = inet_sk(sk);
+	inet->inet_sport = htons(inet->inet_num);
+	sk_dst_reset(sk);
+}
+
+static void __inet_csk_listen_stop_one(struct sock *sk);
+
+int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
+{
+	struct inet_sock *inet = inet_sk(sk);
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	int c, s, num_sockets = 1;
+	int err;
+
+	if (icsk->icsk_multi_accept)
+		num_sockets = num_possible_cpus();
+
+	printk("multi_accept is %s\n", icsk->icsk_multi_accept ? "ON" : "OFF" );
+	printk("using %d sockets\n", num_sockets);
+
+	icsk->icsk_ma_sks = kmalloc(sizeof(struct sock *) * num_sockets, GFP_KERNEL);
+	if (!icsk->icsk_ma_sks) {
+		err = -ENOMEM;
+		goto sks_error;
+	}
+
+	icsk->icsk_ma_sks[0] = sk;
+
+	// AP: I am allocating wait queues because the new sockets need a wait
+	// queue.  The wait queue for the original sock is provided by the
+	// socket object.  Since it looks like all interaction with the wait
+	// queue is done through the sk_sleep pointer, is might be safe to
+	// allocate wait queues here.
+	icsk->icsk_ma_socks = kmalloc(sizeof(struct socket *) * num_sockets, GFP_KERNEL);
+	if (!icsk->icsk_ma_socks) {
+		err = -ENOMEM;
+		goto socks_error;
+	}
+
+	icsk->icsk_ma_socks[0] = NULL;
+
+	for (c = 1; c < num_sockets; c++) {
+		struct sock *newsk;
+		struct socket *newsock =  kmalloc_node(sizeof(struct socket), GFP_KERNEL, cpu_to_node(c));
+
+		if (!newsock) {
+			err = -ENOMEM;
+			goto clone_error;
+		}
+
+		icsk->icsk_ma_socks[c] = newsock;
+
+		printk("cloning socket %d\n", c);
+		// AP: TODO: might be nice to tell it to allocate from a
+		// certain NUMA node.
+		//
+		// AP: TODO is this the right alloc flag?
+		newsk = inet_csk_listen_clone(sk, GFP_ATOMIC, cpu_to_node(c));
+		if (!newsk) {
+			err = -ENOMEM; // AP: TODO not sure if this is the right error type
+			goto clone_error;
+		}
+		printk("cloned socket %p\n", newsk);
+
+		// AP: TODO there is probably a bunch of stuff that needs to
+		// be cleared/set to make cloning complete.
+		//
+		// THIS IS CLEARED IN sk_clone:
+		//newsk->sk_dst_cache	= NULL;
+		//newsk->sk_send_head	= NULL;
+		//sock_reset_flag(newsk, SOCK_DONE);
+		//sk_set_socket(newsk, NULL);
+
+		newsock->state = sk->sk_socket->state;
+		newsock->type = sk->sk_socket->type;
+		newsock->flags = sk->sk_socket->flags;
+
+		// AP: TODO must check when this memory is deallocated
+		newsock->wq = kmalloc_node(sizeof(struct socket_wq), GFP_KERNEL, cpu_to_node(c));
+		if (!newsock->wq) {
+			err = -ENOMEM;
+			kfree(newsock);
+			goto clone_error;
+		}
+		init_waitqueue_head(&newsock->wq->wait);
+		newsock->wq->fasync_list = NULL;
+
+		newsock->file = NULL;
+		newsock->sk = newsk;
+		newsock->ops = sk->sk_socket->ops;
+
+		sk_set_socket(newsk, newsock);
+
+		newsk->sk_wq = newsock->wq;
+
+		bh_unlock_sock(newsk);
+		sock_put(newsk);
+
+		icsk->icsk_ma_sks[c] = newsk;
+	}
+
+	for (s = 0; s < num_sockets; s++) {
+		printk("starting socket %d\n", s);
+		err = __inet_csk_listen_start_one(icsk->icsk_ma_sks[s],
+				nr_table_entries, cpu_to_node(s));
+		if (err)
+			goto start_error;
+
+		icsk->icsk_ma_sks[s]->sk_max_ack_backlog = nr_table_entries;
+	}
 
 	/* There is race window here: we announce ourselves listening,
 	 * but this transition is still not validated by get_port().
 	 * It is OK, because this socket enters to hash table only
 	 * after validation is complete.
 	 */
-	sk->sk_state = TCP_LISTEN;
 	if (!sk->sk_prot->get_port(sk, inet->inet_num)) {
-		inet->inet_sport = htons(inet->inet_num);
-
-		sk_dst_reset(sk);
+		for (s = 0; s < num_sockets; s++) {
+			printk("finishing starting socket %d\n", s);
+			__inet_csk_listen_start_one_finish(icsk->icsk_ma_sks[s]);
+		}
 		sk->sk_prot->hash(sk);
-
 		return 0;
 	}
 
+	printk("Address in use\n");
+
+	err = -EADDRINUSE;
+
+	// AP: TODO I did not test the following.
+
+start_error:
+	for (s--; s > 1; s--) {
+		printk("stopping socket %d\n", s);
+		__inet_csk_listen_stop_one(icsk->icsk_ma_sks[s]);
+	}
+
+	if (s == 0) {
+		printk("deleting reqsk for queue 0\n");
+		__reqsk_queue_destroy(&icsk->icsk_accept_queue);
+	}
+
+	for (c = 0; c < num_sockets; c++) {
+		printk("destroying socket %d\n", c);
+		kfree(icsk->icsk_ma_sks[c]);
+	}
+
+	goto free_wqs;
+
+clone_error:
+	for (c--; c > 1; c--) {
+		printk("destroying socket %d\n", c);
+		__inet_csk_destroy_sock_one(icsk->icsk_ma_sks[c]);
+		kfree(icsk->icsk_ma_sks[c]);
+	}
+
+free_wqs:
+
+	kfree(icsk->icsk_ma_socks);
+	icsk->icsk_ma_socks = NULL;
+
+socks_error:
+
+	printk("freeing icsk->icsk_ma_sks\n");
+	kfree(icsk->icsk_ma_sks);
+	icsk->icsk_ma_sks = NULL;
+
+sks_error:
 	sk->sk_state = TCP_CLOSE;
-	__reqsk_queue_destroy(&icsk->icsk_accept_queue);
-	return -EADDRINUSE;
+	return err;
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_listen_start);
 
-/*
- *	This routine closes sockets which have been at least partially
- *	opened, but not yet accepted.
- */
-void inet_csk_listen_stop(struct sock *sk)
+static void __inet_csk_listen_stop_one(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct request_sock *acc_req;
@@ -713,6 +1024,29 @@ void inet_csk_listen_stop(struct sock *sk)
 		__reqsk_free(req);
 	}
 	WARN_ON(sk->sk_ack_backlog);
+}
+
+/*
+ *	This routine closes sockets which have been at least partially
+ *	opened, but not yet accepted.
+ */
+void inet_csk_listen_stop(struct sock *sk)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+
+	printk("inet_csk_listen_stop sk=%p\n", sk);
+
+	if (icsk->icsk_multi_accept) {
+		int i;
+		for (i = 1; i < num_possible_cpus(); i++) {
+			printk("inet_csk_listen_stop stopping slave %d\n", i);
+			__inet_csk_listen_stop_one(icsk->icsk_ma_sks[i]);
+		}
+	}
+
+	printk("inet_csk_listen_stop stopping master\n");
+
+	__inet_csk_listen_stop_one(sk);
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_listen_stop);

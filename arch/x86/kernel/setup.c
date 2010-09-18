@@ -55,7 +55,6 @@
 #include <linux/stddef.h>
 #include <linux/unistd.h>
 #include <linux/ptrace.h>
-#include <linux/slab.h>
 #include <linux/user.h>
 #include <linux/delay.h>
 
@@ -608,6 +607,16 @@ static int __init setup_elfcorehdr(char *arg)
 early_param("elfcorehdr", setup_elfcorehdr);
 #endif
 
+static __init void reserve_ibft_region(void)
+{
+	unsigned long addr, size = 0;
+
+	addr = find_ibft_region(&size);
+
+	if (size)
+		reserve_early_overlap_ok(addr, addr + size, "ibft");
+}
+
 #ifdef CONFIG_X86_RESERVE_LOW_64K
 static int __init dmi_low_memory_corruption(const struct dmi_system_id *d)
 {
@@ -667,6 +676,17 @@ static struct dmi_system_id __initdata bad_bios_dmi_table[] = {
 			DMI_MATCH(DMI_BOARD_NAME, "DG45FC"),
 		},
 	},
+	/*
+	 * The Dell Inspiron Mini 1012 has DMI_BIOS_VENDOR = "Dell Inc.", so
+	 * match on the product name.
+	 */
+	{
+		.callback = dmi_low_memory_corruption,
+		.ident = "Phoenix BIOS",
+		.matches = {
+			DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 1012"),
+		},
+	},
 #endif
 	{}
 };
@@ -716,6 +736,7 @@ void __init setup_arch(char **cmdline_p)
 	/* VMI may relocate the fixmap; do this before touching ioremap area */
 	vmi_init();
 
+	early_trap_init();
 	early_cpu_init();
 	early_ioremap_init();
 
@@ -910,6 +931,8 @@ void __init setup_arch(char **cmdline_p)
 	 */
 	find_smp_config();
 
+	reserve_ibft_region();
+
 	reserve_trampoline_memory();
 
 #ifdef CONFIG_ACPI_SLEEP
@@ -976,8 +999,6 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 	dma32_reserve_bootmem();
-
-	reserve_ibft_region();
 
 #ifdef CONFIG_KVM_CLOCK
 	kvmclock_init();

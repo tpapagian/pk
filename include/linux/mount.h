@@ -13,11 +13,11 @@
 #include <linux/list.h>
 #include <linux/nodemask.h>
 #include <linux/spinlock.h>
+#include <linux/fs.h>
 #include <asm/atomic.h>
 
-struct super_block;
-struct vfsmount;
-struct dentry;
+#include <linux/percpu.h>
+
 struct mnt_namespace;
 
 #define MNT_NOSUID	0x01
@@ -47,6 +47,15 @@ struct mnt_namespace;
 
 #define MNT_INTERNAL	0x4000
 
+struct per_cpu_vfsmount {
+	struct list_head list;
+	struct vfsmount *mnt;
+	unsigned int count;
+	unsigned int expiry_mark;
+	char pad[64 - sizeof(struct list_head) - 2*sizeof(unsigned int) - 
+		 sizeof(struct vfsmount *)];
+};
+
 struct vfsmount {
 	struct list_head mnt_hash;
 	struct vfsmount *mnt_parent;	/* fs we are mounted on */
@@ -73,7 +82,10 @@ struct vfsmount {
 	 * (so that reads of mnt_flags wont ping-pong on SMP machines)
 	 */
 	atomic_t mnt_count;
+#if 0
 	int mnt_expiry_mark;		/* true if marked for expiry */
+#endif
+
 	int mnt_pinned;
 	int mnt_ghosts;
 #ifdef CONFIG_SMP
@@ -81,6 +93,10 @@ struct vfsmount {
 #else
 	int mnt_writers;
 #endif
+
+	char pad0[32];
+	struct per_cpu_vfsmount __percpu *mnt_per_cpu;
+	char pad1[56];
 };
 
 static inline int *get_mnt_writers_ptr(struct vfsmount *mnt)
@@ -92,10 +108,14 @@ static inline int *get_mnt_writers_ptr(struct vfsmount *mnt)
 #endif
 }
 
+extern struct vfsmount *per_cpu_mntget(struct vfsmount *mnt);
+
 static inline struct vfsmount *mntget(struct vfsmount *mnt)
 {
-	if (mnt)
-		atomic_inc(&mnt->mnt_count);
+	if (mnt && !(mnt->mnt_sb->s_flags & MS_NOREFCOUNT)) {
+		if (per_cpu_mntget(mnt) == NULL)
+			atomic_inc(&mnt->mnt_count);
+	}
 	return mnt;
 }
 
@@ -110,10 +130,23 @@ extern void mnt_pin(struct vfsmount *mnt);
 extern void mnt_unpin(struct vfsmount *mnt);
 extern int __mnt_is_readonly(struct vfsmount *mnt);
 
+static inline void per_cpu_set_mnt_expiry_mark(struct vfsmount *mnt)
+{
+	struct per_cpu_vfsmount *p;
+	int c;
+	c = smp_processor_id();
+	p = per_cpu_ptr(mnt->mnt_per_cpu, c);
+	p->expiry_mark = 0;
+}
+
 static inline void mntput(struct vfsmount *mnt)
 {
-	if (mnt) {
+	if (mnt && !(mnt->mnt_sb->s_flags & MS_NOREFCOUNT)) {
+#if 1
+		per_cpu_set_mnt_expiry_mark(mnt);
+#else
 		mnt->mnt_expiry_mark = 0;
+#endif
 		mntput_no_expire(mnt);
 	}
 }
