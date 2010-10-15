@@ -1355,14 +1355,8 @@ static int do_umount(struct vfsmount *mnt, int flags)
 		if (atomic_read(&mnt->mnt_count) != 2)
 			return -EBUSY;
 		
-
-#if 1
 		if (!per_cpu_expiry_mark_xchg(mnt, 1))
 			return -EAGAIN;
-#else
-		if (!xchg(&mnt->mnt_expiry_mark, 1))
-			return -EAGAIN;
-#endif
 	}
 
 	/*
@@ -2068,15 +2062,9 @@ void mark_mounts_for_expiry(struct list_head *mounts)
 	 *   cleared by mntput())
 	 */
 	list_for_each_entry_safe(mnt, next, mounts, mnt_expire) {
-#if 1
 		if (!per_cpu_expiry_mark_xchg(mnt, 1) ||
 			propagate_mount_busy(mnt, 1))
 			continue;
-#else
-		if (!xchg(&mnt->mnt_expiry_mark, 1) ||
-			propagate_mount_busy(mnt, 1))
-			continue;
-#endif
 		list_move(&mnt->mnt_expire, &graveyard);
 	}
 	while (!list_empty(&graveyard)) {

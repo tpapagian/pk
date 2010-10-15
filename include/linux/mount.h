@@ -82,9 +82,6 @@ struct vfsmount {
 	 * (so that reads of mnt_flags wont ping-pong on SMP machines)
 	 */
 	atomic_t mnt_count;
-#if 0
-	int mnt_expiry_mark;		/* true if marked for expiry */
-#endif
 
 	int mnt_pinned;
 	int mnt_ghosts;
