@@ -36,9 +36,8 @@ struct tcp_congestion_ops;
  * (i.e. things that depend on the address family)
  */
 struct inet_connection_sock_af_ops {
-	int	    (*queue_xmit)(struct sk_buff *skb, int ipfragok);
-	void	    (*send_check)(struct sock *sk, int len,
-				  struct sk_buff *skb);
+	int	    (*queue_xmit)(struct sk_buff *skb);
+	void	    (*send_check)(struct sock *sk, struct sk_buff *skb);
 	int	    (*rebuild_header)(struct sock *sk);
 	int	    (*conn_request)(struct sock *sk, struct sk_buff *skb);
 	struct sock *(*syn_recv_sock)(struct sock *sk, struct sk_buff *skb,
@@ -87,7 +86,12 @@ struct inet_connection_sock_af_ops {
 struct inet_connection_sock {
 	/* inet_sock has to be the first member! */
 	struct inet_sock	  icsk_inet;
-	struct request_sock_queue icsk_accept_queue;
+
+	int			  icsk_multi_accept ____cacheline_aligned_in_smp;
+	struct sock 		  **icsk_ma_sks;
+	struct socket		  **icsk_ma_socks;
+
+	struct request_sock_queue icsk_accept_queue ____cacheline_aligned_in_smp;
 	struct inet_bind_bucket	  *icsk_bind_hash;
 	unsigned long		  icsk_timeout;
  	struct timer_list	  icsk_retransmit_timer;
@@ -147,6 +151,20 @@ static inline void *inet_csk_ca(const struct sock *sk)
 extern struct sock *inet_csk_clone(struct sock *sk,
 				   const struct request_sock *req,
 				   const gfp_t priority);
+
+
+static inline struct sock *icsk_get_local_listen(struct sock *sk)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct sock *tsk = sk;
+	if (icsk->icsk_multi_accept) {
+		tsk = icsk->icsk_ma_sks[smp_processor_id()];
+#ifdef DEBUG_AP
+		printk("icsk_get_local_listen CPU=%d sk=%p tsk=%p\n", smp_processor_id(), sk, tsk);
+#endif
+	}
+	return tsk;
+}
 
 enum inet_csk_ack_state_t {
 	ICSK_ACK_SCHED	= 1,
@@ -246,7 +264,7 @@ extern struct request_sock *inet_csk_search_req(const struct sock *sk,
 						const __be32 raddr,
 						const __be32 laddr);
 extern int inet_csk_bind_conflict(const struct sock *sk,
-				  const struct inet_bind_bucket *tb);
+				  struct inet_bind_bucket *tb);
 extern int inet_csk_get_port(struct sock *sk, unsigned short snum);
 
 extern struct dst_entry* inet_csk_route_req(struct sock *sk,

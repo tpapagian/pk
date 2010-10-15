@@ -10,6 +10,7 @@
 
 #include <linux/kernel.h>
 #include <linux/kmemcheck.h>
+#include <linux/slab.h>
 #include <net/inet_hashtables.h>
 #include <net/inet_timewait_sock.h>
 #include <net/ip.h>
@@ -124,22 +125,19 @@ EXPORT_SYMBOL_GPL(inet_twsk_put);
 void __inet_twsk_hashdance(struct inet_timewait_sock *tw, struct sock *sk,
 			   struct inet_hashinfo *hashinfo)
 {
-	const struct inet_sock *inet = inet_sk(sk);
+	int cpu = smp_processor_id();
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	struct inet_ehash_bucket *ehead = inet_ehash_bucket(hashinfo, sk->sk_hash);
 	spinlock_t *lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
-	struct inet_bind_hashbucket *bhead;
 	/* Step 1: Put TW into bind hash. Original socket stays there too.
 	   Note, that any socket with inet->num != 0 MUST be bound in
 	   binding cache, even if it is closed.
 	 */
-	bhead = &hashinfo->bhash[inet_bhashfn(twsk_net(tw), inet->inet_num,
-			hashinfo->bhash_size)];
-	spin_lock(&bhead->lock);
+	spin_lock(&icsk->icsk_bind_hash->per_cpu[cpu].lock);
 	tw->tw_tb = icsk->icsk_bind_hash;
 	WARN_ON(!icsk->icsk_bind_hash);
-	inet_twsk_add_bind_node(tw, &tw->tw_tb->owners);
-	spin_unlock(&bhead->lock);
+	inet_twsk_add_bind_node(tw, &tw->tw_tb->per_cpu[cpu].owners);
+	spin_unlock(&icsk->icsk_bind_hash->per_cpu[cpu].lock);
 
 	spin_lock(lock);
 

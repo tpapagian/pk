@@ -105,6 +105,7 @@ enum {
 #define TCP_COOKIE_TRANSACTIONS	15	/* TCP Cookie Transactions */
 #define TCP_THIN_LINEAR_TIMEOUTS 16      /* Use linear timeouts for thin streams*/
 #define TCP_THIN_DUPACK         17      /* Fast retrans. after 1 dupack */
+#define TCP_MULTI_ACCEPT        18      /* Multi-accept: allocate per core req queue. */
 
 /* for TCP_INFO socket option */
 #define TCPI_OPT_TIMESTAMPS	1

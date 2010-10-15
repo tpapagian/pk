@@ -76,6 +76,14 @@ struct inet_ehash_bucket {
  * users logged onto your box, isn't it nice to know that new data
  * ports are created in O(1) time?  I thought so. ;-)	-DaveM
  */
+
+struct per_cpu_inet_bind_bucket {
+	spinlock_t 		lock;
+	int			num_owners;
+	struct hlist_head	owners;
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+};
+
 struct inet_bind_bucket {
 #ifdef CONFIG_NET_NS
 	struct net		*ib_net;
@@ -85,6 +93,8 @@ struct inet_bind_bucket {
 	int			num_owners;
 	struct hlist_node	node;
 	struct hlist_head	owners;
+
+	struct per_cpu_inet_bind_bucket per_cpu[NR_CPUS];
 };
 
 static inline struct net *ib_net(struct inet_bind_bucket *ib)
@@ -153,6 +163,10 @@ struct inet_hashinfo {
 
 	atomic_t			bsockets;
 };
+
+#define inet_bind_bucket_per_cpu_flush(tb) __inet_bind_bucket_per_cpu_flush((tb), 1)
+
+extern void __inet_bind_bucket_per_cpu_flush(struct inet_bind_bucket *tb, int lock);
 
 static inline struct inet_ehash_bucket *inet_ehash_bucket(
 	struct inet_hashinfo *hashinfo,

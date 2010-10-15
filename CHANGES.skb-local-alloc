@@ -1,0 +1,2 @@
+Allocate skbuffs and packets from the local memory subsystem not the one
+closest to the PCI device.

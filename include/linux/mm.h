@@ -13,13 +13,13 @@
 #include <linux/debug_locks.h>
 #include <linux/mm_types.h>
 #include <linux/range.h>
+#include <linux/pfn.h>
 
 struct mempolicy;
 struct anon_vma;
 struct file_ra_state;
 struct user_struct;
 struct writeback_control;
-struct rlimit;
 
 #ifndef CONFIG_DISCONTIGMEM          /* Don't use mapnrs, do it properly */
 extern unsigned long max_mapnr;
@@ -106,6 +106,9 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_SAO		0x20000000	/* Strong Access Ordering (powerpc) */
 #define VM_PFN_AT_MMAP	0x40000000	/* PFNMAP vma that is fully mapped at mmap time */
 #define VM_MERGEABLE	0x80000000	/* KSM may merge identical pages */
+
+/* Bits set in the VMA until the stack is in its final location */
+#define VM_STACK_INCOMPLETE_SETUP	(VM_RAND_READ | VM_SEQ_READ)
 
 #ifndef VM_STACK_DEFAULT_FLAGS		/* arch can override this */
 #define VM_STACK_DEFAULT_FLAGS VM_DATA_DEFAULT_FLAGS
@@ -335,6 +338,7 @@ void put_page(struct page *page);
 void put_pages_list(struct list_head *pages);
 
 void split_page(struct page *page, unsigned int order);
+int split_free_page(struct page *page);
 
 /*
  * Compound pages have a destructor function.  Provide a
@@ -513,7 +517,7 @@ static inline void set_compound_order(struct page *page, unsigned long order)
 
 static inline enum zone_type page_zonenum(struct page *page)
 {
-	return (page->flags >> ZONES_PGSHIFT) & ZONES_MASK;
+	return (page->flags_ >> ZONES_PGSHIFT) & ZONES_MASK;
 }
 
 /*
@@ -526,7 +530,7 @@ static inline enum zone_type page_zonenum(struct page *page)
  */
 static inline int page_zone_id(struct page *page)
 {
-	return (page->flags >> ZONEID_PGSHIFT) & ZONEID_MASK;
+	return (page->flags_ >> ZONEID_PGSHIFT) & ZONEID_MASK;
 }
 
 static inline int zone_to_nid(struct zone *zone)
@@ -543,7 +547,7 @@ extern int page_to_nid(struct page *page);
 #else
 static inline int page_to_nid(struct page *page)
 {
-	return (page->flags >> NODES_PGSHIFT) & NODES_MASK;
+	return (page->flags_ >> NODES_PGSHIFT) & NODES_MASK;
 }
 #endif
 
@@ -561,20 +565,20 @@ static inline unsigned long page_to_section(struct page *page)
 
 static inline void set_page_zone(struct page *page, enum zone_type zone)
 {
-	page->flags &= ~(ZONES_MASK << ZONES_PGSHIFT);
-	page->flags |= (zone & ZONES_MASK) << ZONES_PGSHIFT;
+	page->flags_ &= ~(ZONES_MASK << ZONES_PGSHIFT);
+	page->flags_ |= (zone & ZONES_MASK) << ZONES_PGSHIFT;
 }
 
 static inline void set_page_node(struct page *page, unsigned long node)
 {
-	page->flags &= ~(NODES_MASK << NODES_PGSHIFT);
-	page->flags |= (node & NODES_MASK) << NODES_PGSHIFT;
+	page->flags_ &= ~(NODES_MASK << NODES_PGSHIFT);
+	page->flags_ |= (node & NODES_MASK) << NODES_PGSHIFT;
 }
 
 static inline void set_page_section(struct page *page, unsigned long section)
 {
-	page->flags &= ~(SECTIONS_MASK << SECTIONS_PGSHIFT);
-	page->flags |= (section & SECTIONS_MASK) << SECTIONS_PGSHIFT;
+	page->flags_ &= ~(SECTIONS_MASK << SECTIONS_PGSHIFT);
+	page->flags_ |= (section & SECTIONS_MASK) << SECTIONS_PGSHIFT;
 }
 
 static inline void set_page_links(struct page *page, enum zone_type zone,
@@ -592,7 +596,7 @@ static inline void set_page_links(struct page *page, enum zone_type zone,
 
 static __always_inline void *lowmem_page_address(struct page *page)
 {
-	return __va(page_to_pfn(page) << PAGE_SHIFT);
+	return __va(PFN_PHYS(page_to_pfn(page)));
 }
 
 #if defined(CONFIG_HIGHMEM) && !defined(WANT_PAGE_VIRTUAL)
@@ -783,8 +787,8 @@ struct mm_walk {
 	int (*pmd_entry)(pmd_t *, unsigned long, unsigned long, struct mm_walk *);
 	int (*pte_entry)(pte_t *, unsigned long, unsigned long, struct mm_walk *);
 	int (*pte_hole)(unsigned long, unsigned long, struct mm_walk *);
-	int (*hugetlb_entry)(pte_t *, unsigned long, unsigned long,
-			     struct mm_walk *);
+	int (*hugetlb_entry)(pte_t *, unsigned long,
+			     unsigned long, unsigned long, struct mm_walk *);
 	struct mm_struct *mm;
 	void *private;
 };
@@ -1449,9 +1453,6 @@ int vmemmap_populate_basepages(struct page *start_page,
 int vmemmap_populate(struct page *start_page, unsigned long pages, int node);
 void vmemmap_populate_print_last(void);
 
-extern int account_locked_memory(struct mm_struct *mm, struct rlimit *rlim,
-				 size_t size);
-extern void refund_locked_memory(struct mm_struct *mm, size_t size);
 
 enum mf_flags {
 	MF_COUNT_INCREASED = 1 << 0,

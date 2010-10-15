@@ -10,13 +10,13 @@
  * the NFS filesystem used to do this differently, for example)
  */
 #include <linux/module.h>
-#include <linux/slab.h>
 #include <linux/compiler.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
 #include <linux/aio.h>
 #include <linux/capability.h>
 #include <linux/kernel_stat.h>
+#include <linux/gfp.h>
 #include <linux/mm.h>
 #include <linux/swap.h>
 #include <linux/mman.h>
@@ -151,13 +151,14 @@ void remove_from_page_cache(struct page *page)
 	spin_unlock_irq(&mapping->tree_lock);
 	mem_cgroup_uncharge_cache_page(page);
 }
+EXPORT_SYMBOL(remove_from_page_cache);
 
 static int sync_page(void *word)
 {
 	struct address_space *mapping;
 	struct page *page;
 
-	page = container_of((unsigned long *)word, struct page, flags);
+	page = container_of((unsigned long *)word, struct page, flags_);
 
 	/*
 	 * page_mapping() is being called without PG_locked held.
@@ -441,7 +442,7 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 	/*
 	 * Splice_read and readahead add shmem/tmpfs pages into the page cache
 	 * before shmem_readpage has a chance to mark them as SwapBacked: they
-	 * need to go on the active_anon lru below, and mem_cgroup_cache_charge
+	 * need to go on the anon lru below, and mem_cgroup_cache_charge
 	 * (called in add_to_page_cache) needs to know where they're going too.
 	 */
 	if (mapping_cap_swap_backed(mapping))
@@ -452,7 +453,7 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 		if (page_is_file_cache(page))
 			lru_cache_add_file(page);
 		else
-			lru_cache_add_active_anon(page);
+			lru_cache_add_anon(page);
 	}
 	return ret;
 }
@@ -461,9 +462,15 @@ EXPORT_SYMBOL_GPL(add_to_page_cache_lru);
 #ifdef CONFIG_NUMA
 struct page *__page_cache_alloc(gfp_t gfp)
 {
+	int n;
+	struct page *page;
+
 	if (cpuset_do_page_mem_spread()) {
-		int n = cpuset_mem_spread_node();
-		return alloc_pages_exact_node(n, gfp, 0);
+		get_mems_allowed();
+		n = cpuset_mem_spread_node();
+		page = alloc_pages_exact_node(n, gfp, 0);
+		put_mems_allowed();
+		return page;
 	}
 	return alloc_pages(gfp, 0);
 }
@@ -495,14 +502,28 @@ static wait_queue_head_t *page_waitqueue(struct page *page)
 
 static inline void wake_up_page(struct page *page, int bit)
 {
-	__wake_up_bit(page_waitqueue(page), &page->flags, bit);
+	__wake_up_bit(page_waitqueue(page), &page->flags_, bit);
+}
+
+static inline void wake_up_page_wo(struct page *page, int bit)
+{
+	__wake_up_bit(page_waitqueue(page), &page->flags_wo, bit);
+}
+
+void wait_on_page_bit_wo(struct page *page, int bit_nr)
+{
+	DEFINE_WAIT_BIT(wait, &page->flags_wo, bit_nr);
+
+	if (test_bit(bit_nr, &page->flags_wo))
+		__wait_on_bit(page_waitqueue(page), &wait, sync_page,
+							TASK_UNINTERRUPTIBLE);
 }
 
 void wait_on_page_bit(struct page *page, int bit_nr)
 {
-	DEFINE_WAIT_BIT(wait, &page->flags, bit_nr);
+	DEFINE_WAIT_BIT(wait, &page->flags_, bit_nr);
 
-	if (test_bit(bit_nr, &page->flags))
+	if (test_bit(bit_nr, &page->flags_))
 		__wait_on_bit(page_waitqueue(page), &wait, sync_page,
 							TASK_UNINTERRUPTIBLE);
 }
@@ -541,9 +562,9 @@ EXPORT_SYMBOL_GPL(add_page_wait_queue);
 void unlock_page(struct page *page)
 {
 	VM_BUG_ON(!PageLocked(page));
-	clear_bit_unlock(PG_locked, &page->flags);
+	clear_bit_unlock(PG_locked_, &page->flags_wo);
 	smp_mb__after_clear_bit();
-	wake_up_page(page, PG_locked);
+	wake_up_page_wo(page, PG_locked_);
 }
 EXPORT_SYMBOL(unlock_page);
 
@@ -575,7 +596,7 @@ EXPORT_SYMBOL(end_page_writeback);
  */
 void __lock_page(struct page *page)
 {
-	DEFINE_WAIT_BIT(wait, &page->flags, PG_locked);
+	DEFINE_WAIT_BIT(wait, &page->flags_wo, PG_locked_);
 
 	__wait_on_bit_lock(page_waitqueue(page), &wait, sync_page,
 							TASK_UNINTERRUPTIBLE);
@@ -584,7 +605,7 @@ EXPORT_SYMBOL(__lock_page);
 
 int __lock_page_killable(struct page *page)
 {
-	DEFINE_WAIT_BIT(wait, &page->flags, PG_locked);
+	DEFINE_WAIT_BIT(wait, &page->flags_wo, PG_locked_);
 
 	return __wait_on_bit_lock(page_waitqueue(page), &wait,
 					sync_page_killable, TASK_KILLABLE);
@@ -600,7 +621,7 @@ EXPORT_SYMBOL_GPL(__lock_page_killable);
  */
 void __lock_page_nosync(struct page *page)
 {
-	DEFINE_WAIT_BIT(wait, &page->flags, PG_locked);
+	DEFINE_WAIT_BIT(wait, &page->flags_wo, PG_locked_);
 	__wait_on_bit_lock(page_waitqueue(page), &wait, __sleep_on_page_lock,
 							TASK_UNINTERRUPTIBLE);
 }
@@ -976,8 +997,8 @@ static void do_generic_file_read(struct file *filp, loff_t *ppos,
 	int error;
 
 	index = *ppos >> PAGE_CACHE_SHIFT;
-	prev_index = ra->prev_pos >> PAGE_CACHE_SHIFT;
-	prev_offset = ra->prev_pos & (PAGE_CACHE_SIZE-1);
+	prev_index = ra->percpu_prev_pos >> PAGE_CACHE_SHIFT;
+	prev_offset = ra->percpu_prev_pos & (PAGE_CACHE_SIZE-1);
 	last_index = (*ppos + desc->count + PAGE_CACHE_SIZE-1) >> PAGE_CACHE_SHIFT;
 	offset = *ppos & ~PAGE_CACHE_MASK;
 
@@ -1099,6 +1120,12 @@ page_not_up_to_date_locked:
 		}
 
 readpage:
+		/*
+		 * A previous I/O error may have been due to temporary
+		 * failures, eg. multipath errors.
+		 * PG_error will be set again if readpage fails.
+		 */
+		ClearPageError(page);
 		/* Start the actual read. The read will unlock the page. */
 		error = mapping->a_ops->readpage(filp, page);
 
@@ -1162,9 +1189,9 @@ no_cached_page:
 	}
 
 out:
-	ra->prev_pos = prev_index;
-	ra->prev_pos <<= PAGE_CACHE_SHIFT;
-	ra->prev_pos |= prev_offset;
+	ra->percpu_prev_pos = prev_index;
+	ra->percpu_prev_pos <<= PAGE_CACHE_SHIFT;
+	ra->percpu_prev_pos |= prev_offset;
 
 	*ppos = ((loff_t)index << PAGE_CACHE_SHIFT) + offset;
 	file_accessed(filp);
@@ -1263,7 +1290,7 @@ generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 {
 	struct file *filp = iocb->ki_filp;
 	ssize_t retval;
-	unsigned long seg;
+	unsigned long seg = 0;
 	size_t count;
 	loff_t *ppos = &iocb->ki_pos;
 
@@ -1290,21 +1317,47 @@ generic_file_aio_read(struct kiocb *iocb, const struct iovec *iov,
 				retval = mapping->a_ops->direct_IO(READ, iocb,
 							iov, pos, nr_segs);
 			}
-			if (retval > 0)
+			if (retval > 0) {
 				*ppos = pos + retval;
-			if (retval) {
+				count -= retval;
+			}
+
+			/*
+			 * Btrfs can have a short DIO read if we encounter
+			 * compressed extents, so if there was an error, or if
+			 * we've already read everything we wanted to, or if
+			 * there was a short read because we hit EOF, go ahead
+			 * and return.  Otherwise fallthrough to buffered io for
+			 * the rest of the read.
+			 */
+			if (retval < 0 || !count || *ppos >= size) {
 				file_accessed(filp);
 				goto out;
 			}
 		}
 	}
 
+	count = retval;
 	for (seg = 0; seg < nr_segs; seg++) {
 		read_descriptor_t desc;
+		loff_t offset = 0;
+
+		/*
+		 * If we did a short DIO read we need to skip the section of the
+		 * iov that we've already read data into.
+		 */
+		if (count) {
+			if (count > iov[seg].iov_len) {
+				count -= iov[seg].iov_len;
+				continue;
+			}
+			offset = count;
+			count = 0;
+		}
 
 		desc.written = 0;
-		desc.arg.buf = iov[seg].iov_base;
-		desc.count = iov[seg].iov_len;
+		desc.arg.buf = iov[seg].iov_base + offset;
+		desc.count = iov[seg].iov_len - offset;
 		if (desc.count == 0)
 			continue;
 		desc.error = 0;
@@ -1412,20 +1465,20 @@ static void do_sync_mmap_readahead(struct vm_area_struct *vma,
 		return;
 
 	if (VM_SequentialReadHint(vma) ||
-			offset - 1 == (ra->prev_pos >> PAGE_CACHE_SHIFT)) {
+			offset - 1 == (ra->percpu_prev_pos >> PAGE_CACHE_SHIFT)) {
 		page_cache_sync_readahead(mapping, ra, file, offset,
 					  ra->ra_pages);
 		return;
 	}
 
-	if (ra->mmap_miss < INT_MAX)
-		ra->mmap_miss++;
+	if (ra->percpu_mmap_miss < INT_MAX)
+		ra->percpu_mmap_miss++;
 
 	/*
 	 * Do we miss much more than hit in this file? If so,
 	 * stop bothering with read-ahead. It will only hurt.
 	 */
-	if (ra->mmap_miss > MMAP_LOTSAMISS)
+	if (ra->percpu_mmap_miss > MMAP_LOTSAMISS)
 		return;
 
 	/*
@@ -1455,8 +1508,8 @@ static void do_async_mmap_readahead(struct vm_area_struct *vma,
 	/* If we don't want any read-ahead, don't bother */
 	if (VM_RandomReadHint(vma))
 		return;
-	if (ra->mmap_miss > 0)
-		ra->mmap_miss--;
+	if (ra->percpu_mmap_miss > 0)
+		ra->percpu_mmap_miss--;
 	if (PageReadahead(page))
 		page_cache_async_readahead(mapping, ra, file,
 					   page, offset, ra->ra_pages);
@@ -1537,7 +1590,7 @@ retry_find:
 		return VM_FAULT_SIGBUS;
 	}
 
-	ra->prev_pos = (loff_t)offset << PAGE_CACHE_SHIFT;
+	ra->percpu_prev_pos = (loff_t)offset << PAGE_CACHE_SHIFT;
 	vmf->page = page;
 	return ret | VM_FAULT_LOCKED;
 

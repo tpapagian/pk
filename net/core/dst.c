@@ -12,6 +12,7 @@
 #include <linux/workqueue.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/slab.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/string.h>
@@ -20,6 +21,68 @@
 #include <linux/sched.h>
 
 #include <net/dst.h>
+
+#define PER_CPU_BATCH		64
+#define PER_CPU_BATCH_MAX 	128
+
+static struct kmem_cache *per_cpu_cache;
+
+static void per_cpu_flush(struct dst_entry *dst)
+{
+	struct per_cpu_dst_entry *p;
+	int c;
+
+	for_each_possible_cpu(c) {
+		p = dst->per_cpu[c];
+		if (spin_trylock(&p->lock)) {
+			atomic_sub(p->count, &dst->__refcnt);
+			p->count = 0;
+			spin_unlock(&p->lock);
+		}
+	}
+}
+
+static void free_per_cpu_dst_entry(struct dst_entry *dst)
+{
+	int c;
+
+	for_each_possible_cpu(c) {
+		if (dst->per_cpu[c])
+			kmem_cache_free(per_cpu_cache, dst->per_cpu[c]);
+		dst->per_cpu[c] = NULL;
+	}
+}
+
+static int alloc_per_cpu_dst_entry(struct dst_entry *dst)
+{
+	struct per_cpu_dst_entry *p;
+	int c;
+
+	memset(dst->per_cpu, 0, sizeof(dst->per_cpu));
+
+	for_each_possible_cpu(c) { 
+		p = kmem_cache_alloc_node(per_cpu_cache, GFP_ATOMIC, 
+					  cpu_to_node(c));
+		if (p == NULL) {
+			free_per_cpu_dst_entry(dst);
+			return -ENOMEM;;
+		}
+		spin_lock_init(&p->lock);
+		p->count = 0;
+		dst->per_cpu[c] = p;
+	}
+
+	return 0;
+}
+
+int __init dst_per_cpu_init(void)
+{
+	per_cpu_cache = kmem_cache_create("per_cpu_dst_entry_cache", 
+					  sizeof(struct per_cpu_dst_entry),
+					  0, SLAB_HWCACHE_ALIGN|SLAB_PANIC, NULL);
+	return 0;
+}
+fs_initcall(dst_per_cpu_init);
 
 /*
  * Theory of operations:
@@ -43,7 +106,7 @@ static atomic_t			 dst_total = ATOMIC_INIT(0);
  */
 static struct {
 	spinlock_t		lock;
-	struct dst_entry 	*list;
+	struct dst_entry	*list;
 	unsigned long		timer_inc;
 	unsigned long		timer_expires;
 } dst_garbage = {
@@ -51,7 +114,7 @@ static struct {
 	.timer_inc = DST_GC_MAX,
 };
 static void dst_gc_task(struct work_struct *work);
-static void ___dst_free(struct dst_entry * dst);
+static void ___dst_free(struct dst_entry *dst);
 
 static DECLARE_DELAYED_WORK(dst_gc_work, dst_gc_task);
 
@@ -81,6 +144,7 @@ loop:
 		next = dst->next;
 		prefetch(&next->next);
 		cond_resched();
+		per_cpu_flush(dst);
 		if (likely(atomic_read(&dst->__refcnt))) {
 			last->next = dst;
 			last = dst;
@@ -135,8 +199,8 @@ loop:
 		}
 		expires = dst_garbage.timer_expires;
 		/*
-		 * if the next desired timer is more than 4 seconds in the future
-		 * then round the timer to whole seconds
+		 * if the next desired timer is more than 4 seconds in the
+		 * future then round the timer to whole seconds
 		 */
 		if (expires > 4*HZ)
 			expires = round_jiffies_relative(expires);
@@ -151,7 +215,8 @@ loop:
 		" expires: %lu elapsed: %lu us\n",
 		atomic_read(&dst_total), delayed, work_performed,
 		expires,
-		elapsed.tv_sec * USEC_PER_SEC + elapsed.tv_nsec / NSEC_PER_USEC);
+		elapsed.tv_sec * USEC_PER_SEC +
+		  elapsed.tv_nsec / NSEC_PER_USEC);
 #endif
 }
 
@@ -162,9 +227,9 @@ int dst_discard(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(dst_discard);
 
-void * dst_alloc(struct dst_ops * ops)
+void *dst_alloc(struct dst_ops *ops)
 {
-	struct dst_entry * dst;
+	struct dst_entry *dst;
 
 	if (ops->gc && atomic_read(&ops->entries) > ops->gc_thresh) {
 		if (ops->gc(ops))
@@ -173,6 +238,12 @@ void * dst_alloc(struct dst_ops * ops)
 	dst = kmem_cache_zalloc(ops->kmem_cachep, GFP_ATOMIC);
 	if (!dst)
 		return NULL;
+
+	if (alloc_per_cpu_dst_entry(dst)) {
+		kmem_cache_free(ops->kmem_cachep, dst);
+		return NULL;
+	}
+
 	atomic_set(&dst->__refcnt, 0);
 	dst->ops = ops;
 	dst->lastuse = jiffies;
@@ -184,19 +255,20 @@ void * dst_alloc(struct dst_ops * ops)
 	atomic_inc(&ops->entries);
 	return dst;
 }
+EXPORT_SYMBOL(dst_alloc);
 
-static void ___dst_free(struct dst_entry * dst)
+static void ___dst_free(struct dst_entry *dst)
 {
 	/* The first case (dev==NULL) is required, when
 	   protocol module is unloaded.
 	 */
-	if (dst->dev == NULL || !(dst->dev->flags&IFF_UP)) {
+	if (dst->dev == NULL || !(dst->dev->flags&IFF_UP))
 		dst->input = dst->output = dst_discard;
-	}
 	dst->obsolete = 2;
 }
+EXPORT_SYMBOL(__dst_free);
 
-void __dst_free(struct dst_entry * dst)
+void __dst_free(struct dst_entry *dst)
 {
 	spin_lock_bh(&dst_garbage.lock);
 	___dst_free(dst);
@@ -242,6 +314,7 @@ again:
 #if RT_CACHE_DEBUG >= 2
 	atomic_dec(&dst_total);
 #endif
+	free_per_cpu_dst_entry(dst);
 	kmem_cache_free(dst->ops->kmem_cachep, dst);
 
 	dst = child;
@@ -261,15 +334,38 @@ again:
 	}
 	return NULL;
 }
+EXPORT_SYMBOL(dst_destroy);
+
+static inline void __dst_release(struct dst_entry *dst)
+{
+	int newrefcnt;
+
+	smp_mb__before_atomic_dec();
+	newrefcnt = atomic_dec_return(&dst->__refcnt);
+	WARN_ON(newrefcnt < 0);
+}
 
 void dst_release(struct dst_entry *dst)
 {
 	if (dst) {
-               int newrefcnt;
+		struct per_cpu_dst_entry *p;
 
-		smp_mb__before_atomic_dec();
-               newrefcnt = atomic_dec_return(&dst->__refcnt);
-               WARN_ON(newrefcnt < 0);
+		p = dst->per_cpu[smp_processor_id()];
+		if (spin_trylock(&p->lock)) {
+			if (p->count == 0) {
+				p->count += PER_CPU_BATCH + 1;
+				atomic_add(PER_CPU_BATCH, &dst->__refcnt);
+			} else if (p->count > PER_CPU_BATCH_MAX) {
+				p->count++;
+				p->count -= PER_CPU_BATCH;
+				atomic_sub(PER_CPU_BATCH, &dst->__refcnt);
+			} else {
+				p->count++;
+			}
+			spin_unlock(&p->lock);
+			return;
+		}
+		__dst_release(dst);
 	}
 }
 EXPORT_SYMBOL(dst_release);
@@ -282,8 +378,8 @@ EXPORT_SYMBOL(dst_release);
  *
  * Commented and originally written by Alexey.
  */
-static inline void dst_ifdown(struct dst_entry *dst, struct net_device *dev,
-			      int unregister)
+static void dst_ifdown(struct dst_entry *dst, struct net_device *dev,
+		       int unregister)
 {
 	if (dst->ops->ifdown)
 		dst->ops->ifdown(dst, dev, unregister);
@@ -305,7 +401,8 @@ static inline void dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 	}
 }
 
-static int dst_dev_event(struct notifier_block *this, unsigned long event, void *ptr)
+static int dst_dev_event(struct notifier_block *this, unsigned long event,
+			 void *ptr)
 {
 	struct net_device *dev = ptr;
 	struct dst_entry *dst, *last = NULL;
@@ -328,9 +425,8 @@ static int dst_dev_event(struct notifier_block *this, unsigned long event, void 
 			last->next = dst;
 		else
 			dst_busy_list = dst;
-		for (; dst; dst = dst->next) {
+		for (; dst; dst = dst->next)
 			dst_ifdown(dst, dev, event != NETDEV_DOWN);
-		}
 		mutex_unlock(&dst_gc_mutex);
 		break;
 	}
@@ -345,7 +441,3 @@ void __init dst_init(void)
 {
 	register_netdevice_notifier(&dst_dev_notifier);
 }
-
-EXPORT_SYMBOL(__dst_free);
-EXPORT_SYMBOL(dst_alloc);
-EXPORT_SYMBOL(dst_destroy);

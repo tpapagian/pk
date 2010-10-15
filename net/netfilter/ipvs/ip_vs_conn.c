@@ -32,6 +32,7 @@
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 #include <linux/proc_fs.h>		/* for proc_net_* */
+#include <linux/slab.h>
 #include <linux/seq_file.h>
 #include <linux/jhash.h>
 #include <linux/random.h>
@@ -161,6 +162,7 @@ static inline int ip_vs_conn_hash(struct ip_vs_conn *cp)
 	hash = ip_vs_conn_hashkey(cp->af, cp->protocol, &cp->caddr, cp->cport);
 
 	ct_write_lock(hash);
+	spin_lock(&cp->lock);
 
 	if (!(cp->flags & IP_VS_CONN_F_HASHED)) {
 		list_add(&cp->c_list, &ip_vs_conn_tab[hash]);
@@ -173,6 +175,7 @@ static inline int ip_vs_conn_hash(struct ip_vs_conn *cp)
 		ret = 0;
 	}
 
+	spin_unlock(&cp->lock);
 	ct_write_unlock(hash);
 
 	return ret;
@@ -192,6 +195,7 @@ static inline int ip_vs_conn_unhash(struct ip_vs_conn *cp)
 	hash = ip_vs_conn_hashkey(cp->af, cp->protocol, &cp->caddr, cp->cport);
 
 	ct_write_lock(hash);
+	spin_lock(&cp->lock);
 
 	if (cp->flags & IP_VS_CONN_F_HASHED) {
 		list_del(&cp->c_list);
@@ -201,6 +205,7 @@ static inline int ip_vs_conn_unhash(struct ip_vs_conn *cp)
 	} else
 		ret = 0;
 
+	spin_unlock(&cp->lock);
 	ct_write_unlock(hash);
 
 	return ret;

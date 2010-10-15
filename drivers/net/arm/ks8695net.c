@@ -30,6 +30,7 @@
 #include <linux/platform_device.h>
 #include <linux/irq.h>
 #include <linux/io.h>
+#include <linux/slab.h>
 
 #include <asm/irq.h>
 
@@ -331,16 +332,16 @@ ks8695_init_partial_multicast(struct ks8695_priv *ksp,
 {
 	u32 low, high;
 	int i;
-	struct dev_mc_list *dmi;
+	struct netdev_hw_addr *ha;
 
 	i = 0;
-	netdev_for_each_mc_addr(dmi, ndev) {
+	netdev_for_each_mc_addr(ha, ndev) {
 		/* Ran out of space in chip? */
 		BUG_ON(i == KS8695_NR_ADDRESSES);
 
-		low = (dmi->dmi_addr[2] << 24) | (dmi->dmi_addr[3] << 16) |
-		      (dmi->dmi_addr[4] << 8) | (dmi->dmi_addr[5]);
-		high = (dmi->dmi_addr[0] << 8) | (dmi->dmi_addr[1]);
+		low = (ha->addr[2] << 24) | (ha->addr[3] << 16) |
+		      (ha->addr[4] << 8) | (ha->addr[5]);
+		high = (ha->addr[0] << 8) | (ha->addr[1]);
 
 		ks8695_writereg(ksp, KS8695_AAL_(i), low);
 		ks8695_writereg(ksp, KS8695_AAH_(i), AAH_E | high);
@@ -1301,8 +1302,6 @@ ks8695_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	if (++ksp->tx_ring_used == MAX_TX_DESC)
 		netif_stop_queue(ndev);
 
-	ndev->trans_start = jiffies;
-
 	/* Kick the TX DMA in case it decided to go IDLE */
 	ks8695_writereg(ksp, KS8695_DTSC, 0);
 
@@ -1471,7 +1470,6 @@ ks8695_probe(struct platform_device *pdev)
 
 	/* Configure our private structure a little */
 	ksp = netdev_priv(ndev);
-	memset(ksp, 0, sizeof(struct ks8695_priv));
 
 	ksp->dev = &pdev->dev;
 	ksp->ndev = ndev;

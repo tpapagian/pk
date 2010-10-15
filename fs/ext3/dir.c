@@ -139,7 +139,7 @@ static int ext3_readdir(struct file * filp,
 					sb->s_bdev->bd_inode->i_mapping,
 					&filp->f_ra, filp,
 					index, 1);
-			filp->f_ra.prev_pos = (loff_t)index << PAGE_CACHE_SHIFT;
+			filp->f_ra.percpu_prev_pos = (loff_t)index << PAGE_CACHE_SHIFT;
 			bh = ext3_bread(NULL, inode, blk, 0, &err);
 		}
 
@@ -297,7 +297,7 @@ static void free_rb_tree_fname(struct rb_root *root)
 			kfree (old);
 		}
 		if (!parent)
-			root->rb_node = NULL;
+			*root = RB_ROOT;
 		else if (parent->rb_left == n)
 			parent->rb_left = NULL;
 		else if (parent->rb_right == n)

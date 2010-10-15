@@ -27,7 +27,7 @@ static inline void invalidate_kernel_vmap_range(void *vaddr, int size)
 
 #include <asm/kmap_types.h>
 
-#if defined(CONFIG_DEBUG_HIGHMEM) && defined(CONFIG_TRACE_IRQFLAGS_SUPPORT)
+#ifdef CONFIG_DEBUG_HIGHMEM
 
 void debug_kmap_atomic(enum km_type type);
 
@@ -87,6 +87,12 @@ static inline void clear_user_highpage(struct page *page, unsigned long vaddr)
 {
 	void *addr = kmap_atomic(page, KM_USER0);
 	clear_user_page(addr, vaddr, page);
+	kunmap_atomic(addr, KM_USER0);
+}
+static inline void clear_user_highpage_nocache(struct page *page, unsigned long vaddr)
+{
+	void *addr = kmap_atomic(page, KM_USER0);
+	clear_user_page_nocache(addr, vaddr, page);
 	kunmap_atomic(addr, KM_USER0);
 }
 #endif

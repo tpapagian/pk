@@ -3,6 +3,7 @@
 #include <linux/fs.h>
 #include <linux/pagemap.h>
 #include <linux/xattr.h>
+#include <linux/slab.h>
 #include <linux/reiserfs_xattr.h>
 #include <linux/security.h>
 #include <asm/uaccess.h>
@@ -110,7 +111,7 @@ void reiserfs_security_free(struct reiserfs_security_handle *sec)
 	sec->value = NULL;
 }
 
-struct xattr_handler reiserfs_xattr_security_handler = {
+const struct xattr_handler reiserfs_xattr_security_handler = {
 	.prefix = XATTR_SECURITY_PREFIX,
 	.get = security_get,
 	.set = security_set,

@@ -296,17 +296,17 @@ extern void unlock_page(struct page *page);
 
 static inline void __set_page_locked(struct page *page)
 {
-	__set_bit(PG_locked, &page->flags);
+	__set_bit(PG_locked_, &page->flags_wo);
 }
 
 static inline void __clear_page_locked(struct page *page)
 {
-	__clear_bit(PG_locked, &page->flags);
+	__clear_bit(PG_locked_, &page->flags_wo);
 }
 
 static inline int trylock_page(struct page *page)
 {
-	return (likely(!test_and_set_bit_lock(PG_locked, &page->flags)));
+	return (likely(!test_and_set_bit_lock(PG_locked_, &page->flags_wo)));
 }
 
 /*
@@ -348,6 +348,7 @@ static inline void lock_page_nosync(struct page *page)
  * Never use this directly!
  */
 extern void wait_on_page_bit(struct page *page, int bit_nr);
+extern void wait_on_page_bit_wo(struct page *page, int bit_nr);
 
 /* 
  * Wait for a page to be unlocked.
@@ -359,7 +360,7 @@ extern void wait_on_page_bit(struct page *page, int bit_nr);
 static inline void wait_on_page_locked(struct page *page)
 {
 	if (PageLocked(page))
-		wait_on_page_bit(page, PG_locked);
+		wait_on_page_bit_wo(page, PG_locked_);
 }
 
 /* 

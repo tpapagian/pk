@@ -12,7 +12,6 @@
 #include <linux/file.h>
 #include <linux/poll.h>
 #include <linux/sched.h>
-#include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/mount.h>
@@ -105,7 +104,7 @@ struct file *anon_inode_getfile(const char *name,
 	this.name = name;
 	this.len = strlen(name);
 	this.hash = 0;
-	path.dentry = d_alloc(anon_inode_mnt->mnt_sb->s_root, &this);
+	path.dentry = d_alloc_single(&this, anon_inode_inode);
 	if (!path.dentry)
 		goto err_module;
 
@@ -118,7 +117,6 @@ struct file *anon_inode_getfile(const char *name,
 	atomic_inc(&anon_inode_inode->i_count);
 
 	path.dentry->d_op = &anon_inodefs_dentry_operations;
-	d_instantiate(path.dentry, anon_inode_inode);
 
 	error = -ENFILE;
 	file = alloc_file(&path, OPEN_FMODE(flags), fops);
@@ -190,7 +188,7 @@ EXPORT_SYMBOL_GPL(anon_inode_getfd);
  */
 static struct inode *anon_inode_mkinode(void)
 {
-	struct inode *inode = new_inode(anon_inode_mnt->mnt_sb);
+	struct inode *inode = new_inode_single(anon_inode_mnt->mnt_sb);
 
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
@@ -226,6 +224,7 @@ static int __init anon_inode_init(void)
 		error = PTR_ERR(anon_inode_mnt);
 		goto err_unregister_filesystem;
 	}
+	anon_inode_mnt->mnt_sb->s_flags |= MS_NOREFCOUNT;
 	anon_inode_inode = anon_inode_mkinode();
 	if (IS_ERR(anon_inode_inode)) {
 		error = PTR_ERR(anon_inode_inode);
