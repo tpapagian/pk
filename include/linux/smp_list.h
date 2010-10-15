@@ -4,14 +4,10 @@
 #include <linux/list.h>
 #include <linux/spinlock.h>
 
-#define CACHE_PAD_SIZE(sz) \
-	(((((sz) - 1) & ~(SMP_CACHE_BYTES - 1)) + SMP_CACHE_BYTES) - (sz))
-
 struct smp_list {
 	struct list_head	list;
 	spinlock_t		lock;
-	char			__pad[CACHE_PAD_SIZE(sizeof(struct list_head) + 
-						     sizeof(spinlock_t))];
+	char			__pad[0] ____cacheline_aligned_in_smp;
 } ____cacheline_aligned_in_smp;
 
 static inline void smp_list_init(struct smp_list *l)
