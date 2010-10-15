@@ -62,7 +62,7 @@ struct dentry_table {
 	spinlock_t free_lock;
 	unsigned int free_count;
 
-	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+	char __pad[0] ____cacheline_aligned_in_smp;
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_table, dentry_table);
 
@@ -74,7 +74,7 @@ struct dentry_stats {
 	unsigned long failed_insert;
 	unsigned long failed_alloc;
 	unsigned long failed_free;
-	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+	char __pad[0] ____cacheline_aligned_in_smp;
 };
 static DEFINE_PER_CPU_ALIGNED(struct dentry_stats, dentry_stats);
 
