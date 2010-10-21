@@ -68,6 +68,7 @@
 #include <linux/sfi.h>
 #include <linux/shmem_fs.h>
 #include <linux/slab.h>
+#include <linux/mtrace.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -528,6 +529,7 @@ static void __init mm_init(void)
 	page_cgroup_init_flatmem();
 	mem_init();
 	kmem_cache_init();
+	mtrace_init();
 	percpu_init_late();
 	pgtable_cache_init();
 	vmalloc_init();
