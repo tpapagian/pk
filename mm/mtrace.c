@@ -49,11 +49,65 @@ static void mtrace_kmem_free(void *unused,
 			     unsigned long call_site,
 			     const void *ptr)
 {
+	/* kfree(NULL) is acceptable */
+	if (ptr)
+		mtrace_label_register(ptr, 0, NULL, 0);
+}
+
+static void mtrace_mm_page_alloc(void *unused, 
+				 struct page *page, 
+				 unsigned int order,
+				 gfp_t gfp_flags, 
+				 int migratetype)
+{
 	
+}
+
+
+static void mtrace_mm_page_free_direct(void *unused,
+				       struct page *page,
+				       unsigned int order)
+{
+	
+}
+
+static void mtrace_mm_pagevec_free(void *unused,
+				   struct page *page,
+				   int cold)
+{
+
+}
+
+static void mtrace_mm_page_alloc_zone_locked(void *unused,
+					     struct page *page, 
+					     unsigned int order, 
+					     int migratetype)
+{
+	
+}
+
+static void mtrace_mm_page_pcpu_drain(void *unused,
+				      struct page *page, 
+				      unsigned int order, 
+				      int migratetype)
+{
+	
+}
+
+static void mtrace_mm_page_alloc_extfrag(void *unused,
+					 struct page *page,
+					 int alloc_order, 
+					 int fallback_order,
+					 int alloc_migratetype, 
+					 int fallback_migratetype)
+{
+
 }
 
 void __init mtrace_init(void)
 {
+#define REG(name) BUG_ON(register_trace_##name(mtrace_##name, NULL))
+
 	int ret;
 
 	ret = register_trace_kmalloc(mtrace_kmem_alloc, NULL);
@@ -70,4 +124,12 @@ void __init mtrace_init(void)
 	BUG_ON(ret);
 	ret = register_trace_kmem_cache_free(mtrace_kmem_free, NULL);
 	BUG_ON(ret);
+
+	REG(mm_page_free_direct);
+	REG(mm_pagevec_free);
+	REG(mm_page_alloc);
+	REG(mm_page_alloc_zone_locked);
+	REG(mm_page_pcpu_drain);
+	REG(mm_page_alloc_extfrag);
+#undef REG
 }
