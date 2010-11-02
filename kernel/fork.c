@@ -1012,6 +1012,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	ftrace_graph_init_task(p);
+	mtrace_init_task(p);
 
 	rt_mutex_init_task(p);
 

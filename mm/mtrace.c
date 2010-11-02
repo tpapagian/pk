@@ -3,7 +3,10 @@
 #include <linux/tracepoint.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
+
 #include <trace/events/kmem.h>
+#include <trace/events/syscalls.h>
+
 #include <asm/mtrace-magic.h>
 
 static inline struct kmem_cache *page_get_cache(struct page *page)
@@ -104,6 +107,48 @@ static void mtrace_mm_page_alloc_extfrag(void *unused,
 
 }
 
+void mtrace_end_entry(void)
+{
+}
+
+void mtrace_start_entry(unsigned long entry)
+{
+}
+
+static void __mtrace_push_call(struct task_struct *tsk, unsigned long pc)
+{
+	int i = ++tsk->mtrace_curr_stack;
+	tsk->mtrace_call_stack[i] = pc;
+}
+
+static void mtrace_sys_enter(void *unused, struct pt_regs *regs, long id)
+{
+	if (!current)
+		return;
+	__mtrace_push_call(current, sys_call_table[id]);
+}
+
+static void __mtrace_pop_call(struct task_struct *tsk)
+{
+	int i;
+
+	BUG_ON(tsk->mtrace_curr_stack <= -1);
+	i = tsk->mtrace_curr_stack--;
+	tsk->mtrace_call_stack[i] = 0;
+}
+
+static void mtrace_sys_exit(void *unused, struct pt_regs *regs, long id)
+{
+	if (!current)
+		return;
+	__mtrace_pop_call(current);
+}
+
+void mtrace_init_task(struct task_struct *tsk)
+{
+	tsk->mtrace_curr_stack = -1;
+}
+
 void __init mtrace_init(void)
 {
 #define REG(name) BUG_ON(register_trace_##name(mtrace_##name, NULL))
@@ -131,5 +176,8 @@ void __init mtrace_init(void)
 	REG(mm_page_alloc_zone_locked);
 	REG(mm_page_pcpu_drain);
 	REG(mm_page_alloc_extfrag);
+
+	REG(sys_enter);
+	REG(sys_exit);
 #undef REG
 }

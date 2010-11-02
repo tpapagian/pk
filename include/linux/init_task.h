@@ -171,6 +171,7 @@ extern struct cred init_cred;
 	INIT_LOCKDEP							\
 	INIT_FTRACE_GRAPH						\
 	INIT_TRACE_RECURSION						\
+	INIT_MTRACE							\
 	INIT_TASK_RCU_PREEMPT(tsk)					\
 }
 

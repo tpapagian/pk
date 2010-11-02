@@ -91,6 +91,7 @@ struct sched_param {
 #include <linux/kobject.h>
 #include <linux/latencytop.h>
 #include <linux/cred.h>
+#include <linux/mtrace.h>
 
 #include <asm/processor.h>
 
@@ -1480,6 +1481,8 @@ struct task_struct {
 	/* Pause for the tracing */
 	atomic_t tracing_graph_pause;
 #endif
+	int mtrace_curr_stack;
+	unsigned long mtrace_call_stack[MTRACE_CALL_STACK_DEPTH];
 #ifdef CONFIG_TRACING
 	/* state flags for use by tracers */
 	unsigned long trace;
