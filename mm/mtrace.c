@@ -10,6 +10,8 @@
 
 #include <asm/mtrace-magic.h>
 
+static DEFINE_PER_CPU_ALIGNED(atomic64_t, mtrace_call_tag);
+
 static inline struct kmem_cache *page_get_cache(struct page *page)
 {
 	page = compound_head(page);
@@ -111,27 +113,30 @@ static void mtrace_mm_page_alloc_extfrag(void *unused,
 static void __mtrace_fcall_start(struct task_struct *tsk)
 {
 	int i = tsk->mtrace_curr_stack;
-	mtrace_fcall_register(task_pid_nr(tsk), tsk->mtrace_call_stack[i], i, 0);
+	mtrace_fcall_register(task_pid_nr(tsk), tsk->mtrace_call_stack[i].pc, 
+			      tsk->mtrace_call_stack[i].tag, i, 0);
 }
 
 static void __mtrace_fcall_stop(struct task_struct *tsk)
 {
 	int i = tsk->mtrace_curr_stack;
-	mtrace_fcall_register(task_pid_nr(tsk), tsk->mtrace_call_stack[i], i, 1);
+	mtrace_fcall_register(task_pid_nr(tsk), tsk->mtrace_call_stack[i].pc, 
+			      tsk->mtrace_call_stack[i].tag, i, 1);
 }
 
 static void __mtrace_push_call(struct task_struct *tsk, unsigned long pc)
 {
-	int i = ++tsk->mtrace_curr_stack;
-	tsk->mtrace_call_stack[i] = pc;
-	__mtrace_fcall_start(tsk);
-}
+	atomic64_t *counter;
+	u64 tag;
+	int i;
+	
+	i = ++tsk->mtrace_curr_stack;
+	counter = &per_cpu(mtrace_call_tag, smp_processor_id());
+	tag = atomic64_add_return(1, counter);
 
-void mtrace_sys_enter(void *unused, struct pt_regs *regs, long id)
-{
-	if (!current)
-		return;
-	__mtrace_push_call(current, sys_call_table[id]);
+	tsk->mtrace_call_stack[i].pc = pc;
+	tsk->mtrace_call_stack[i].tag = tag;
+	__mtrace_fcall_start(tsk);
 }
 
 void mtrace_start_entry(long id)
@@ -148,17 +153,11 @@ static void __mtrace_pop_call(struct task_struct *tsk)
 	BUG_ON(tsk->mtrace_curr_stack <= -1);
 	__mtrace_fcall_stop(tsk);
 	i = tsk->mtrace_curr_stack--;
-	tsk->mtrace_call_stack[i] = 0;
+	tsk->mtrace_call_stack[i].pc = 0;
+	tsk->mtrace_call_stack[i].tag = 0;
 }
 
 void mtrace_end_entry(void)
-{
-	if (!current)
-		return;
-	__mtrace_pop_call(current);
-}
-
-void mtrace_sys_exit(void *unused, struct pt_regs *regs, long id)
 {
 	if (!current)
 		return;

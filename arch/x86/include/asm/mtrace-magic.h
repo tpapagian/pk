@@ -41,9 +41,10 @@ static inline void mtrace_label_register(const void * addr,
 static inline void mtrace_fcall_register(unsigned long tid,
 					 unsigned long pc,
 					 unsigned int depth,
+					 unsigned long tag,
 					 int end)
 {
-    mtrace_magic(MTRACE_FCALL_REGISTER, tid, pc, depth, end, 0);
+    mtrace_magic(MTRACE_FCALL_REGISTER, tid, pc, depth, tag, end);
 }
 
 #endif /* QEMU_MTRACE */
