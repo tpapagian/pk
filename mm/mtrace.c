@@ -6,6 +6,7 @@
 
 #include <trace/events/kmem.h>
 #include <trace/events/syscalls.h>
+#include <trace/events/sched.h>
 
 #include <asm/mtrace-magic.h>
 
@@ -107,21 +108,33 @@ static void mtrace_mm_page_alloc_extfrag(void *unused,
 
 }
 
-void mtrace_end_entry(void)
+static void __mtrace_fcall_start(struct task_struct *tsk)
 {
+	int i = tsk->mtrace_curr_stack;
+	mtrace_fcall_register(task_pid_nr(tsk), tsk->mtrace_call_stack[i], i, 0);
 }
 
-void mtrace_start_entry(unsigned long entry)
+static void __mtrace_fcall_stop(struct task_struct *tsk)
 {
+	int i = tsk->mtrace_curr_stack;
+	mtrace_fcall_register(task_pid_nr(tsk), tsk->mtrace_call_stack[i], i, 1);
 }
 
 static void __mtrace_push_call(struct task_struct *tsk, unsigned long pc)
 {
 	int i = ++tsk->mtrace_curr_stack;
 	tsk->mtrace_call_stack[i] = pc;
+	__mtrace_fcall_start(tsk);
 }
 
-static void mtrace_sys_enter(void *unused, struct pt_regs *regs, long id)
+void mtrace_sys_enter(void *unused, struct pt_regs *regs, long id)
+{
+	if (!current)
+		return;
+	__mtrace_push_call(current, sys_call_table[id]);
+}
+
+void mtrace_start_entry(long id)
 {
 	if (!current)
 		return;
@@ -133,11 +146,19 @@ static void __mtrace_pop_call(struct task_struct *tsk)
 	int i;
 
 	BUG_ON(tsk->mtrace_curr_stack <= -1);
+	__mtrace_fcall_stop(tsk);
 	i = tsk->mtrace_curr_stack--;
 	tsk->mtrace_call_stack[i] = 0;
 }
 
-static void mtrace_sys_exit(void *unused, struct pt_regs *regs, long id)
+void mtrace_end_entry(void)
+{
+	if (!current)
+		return;
+	__mtrace_pop_call(current);
+}
+
+void mtrace_sys_exit(void *unused, struct pt_regs *regs, long id)
 {
 	if (!current)
 		return;
@@ -149,10 +170,28 @@ void mtrace_init_task(struct task_struct *tsk)
 	tsk->mtrace_curr_stack = -1;
 }
 
+void mtrace_exit_task(struct task_struct *t)
+{
+        if (t == NULL)
+		return;
+	
+        while (t->mtrace_curr_stack >= 0)
+		__mtrace_pop_call(t);
+}
+
+static void mtrace_sched_switch(void *unused, struct task_struct *prev, 
+				struct task_struct *next)
+{
+	if (prev->mtrace_curr_stack >= 0)
+		__mtrace_fcall_stop(prev);
+
+	if (next->mtrace_curr_stack >= 0)
+		__mtrace_fcall_start(next);
+}
+
 void __init mtrace_init(void)
 {
 #define REG(name) BUG_ON(register_trace_##name(mtrace_##name, NULL))
-
 	int ret;
 
 	ret = register_trace_kmalloc(mtrace_kmem_alloc, NULL);
@@ -177,7 +216,7 @@ void __init mtrace_init(void)
 	REG(mm_page_pcpu_drain);
 	REG(mm_page_alloc_extfrag);
 
-	REG(sys_enter);
-	REG(sys_exit);
+	REG(sched_switch);
+
 #undef REG
 }
