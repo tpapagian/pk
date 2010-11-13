@@ -35,7 +35,7 @@ static void mtrace_kmem_alloc(void *unsned,
 	struct kmem_cache *cachep;
 
 	cachep = virt_to_cache(ptr);
-	mtrace_label_register(ptr, bytes_alloc, 
+	mtrace_label_register(mtrace_label_heap, ptr, bytes_alloc, 
 			      cachep->name, strlen(cachep->name));
 }
 
@@ -57,7 +57,7 @@ static void mtrace_kmem_free(void *unused,
 {
 	/* kfree(NULL) is acceptable */
 	if (ptr)
-		mtrace_label_register(ptr, 0, NULL, 0);
+		mtrace_label_register(mtrace_label_heap, ptr, 0, NULL, 0);
 }
 
 static void mtrace_mm_page_alloc(void *unused, 
@@ -66,7 +66,11 @@ static void mtrace_mm_page_alloc(void *unused,
 				 gfp_t gfp_flags, 
 				 int migratetype)
 {
-	
+    unsigned long length = (1 << order) << PAGE_SHIFT;
+    void * va = page_address(page);    
+
+    mtrace_label_register(mtrace_label_block, va, length, 
+			  "pages", strlen("pages"));
 }
 
 
@@ -74,14 +78,19 @@ static void mtrace_mm_page_free_direct(void *unused,
 				       struct page *page,
 				       unsigned int order)
 {
-	
+    void * va = page_address(page);    
+
+    mtrace_label_register(mtrace_label_block, va, 0, NULL, 0);
 }
 
 static void mtrace_mm_pagevec_free(void *unused,
 				   struct page *page,
 				   int cold)
 {
-
+    /* 
+     * __pagevec_free ends up calling free_pages_prepare 
+     * free_pages_prepare calls trace_mm_page_free_direct
+     */
 }
 
 static void mtrace_mm_page_alloc_zone_locked(void *unused,
@@ -89,7 +98,11 @@ static void mtrace_mm_page_alloc_zone_locked(void *unused,
 					     unsigned int order, 
 					     int migratetype)
 {
-	
+    /* 
+     * __alloc_pages_nodemask sometimes ends up calling 
+     * trace_mm_page_alloc_zone_locked, but it always calls
+     * trace_mm_page_alloc
+     */
 }
 
 static void mtrace_mm_page_pcpu_drain(void *unused,
