@@ -21,6 +21,8 @@
 #include <asm/cpu.h>
 #include <asm/stackprotector.h>
 
+#include <asm/mtrace-magic.h>
+
 DEFINE_PER_CPU(int, cpu_number);
 EXPORT_PER_CPU_SYMBOL(cpu_number);
 
@@ -214,6 +216,12 @@ void __init setup_per_cpu_areas(void)
 	delta = (unsigned long)pcpu_base_addr - (unsigned long)__per_cpu_start;
 	for_each_possible_cpu(cpu) {
 		per_cpu_offset(cpu) = delta + pcpu_unit_offsets[cpu];
+
+		mtrace_segment_register(per_cpu_offset(cpu), 
+					per_cpu_offset(cpu) + 
+					(unsigned long)__per_cpu_end, 
+					mtrace_label_percpu, cpu);
+
 		per_cpu(this_cpu_off, cpu) = per_cpu_offset(cpu);
 		per_cpu(cpu_number, cpu) = cpu;
 		setup_percpu_segment(cpu);
