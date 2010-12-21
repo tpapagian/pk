@@ -7,6 +7,7 @@
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/prio_tree.h>
+#include <linux/cbtree.h>
 #include <linux/rbtree.h>
 #include <linux/rwsem.h>
 #include <linux/completion.h>
@@ -139,7 +140,7 @@ struct vm_area_struct {
 	pgprot_t vm_page_prot;		/* Access permissions of this VMA. */
 	unsigned long vm_flags;		/* Flags, see mm.h. */
 
-	struct rb_node vm_rb;
+	struct cb_node vm_rb;
 
 	/*
 	 * For areas with an address space and backing store,
