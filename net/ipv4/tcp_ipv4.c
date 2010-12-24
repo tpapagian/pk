@@ -2443,6 +2443,14 @@ static struct tcp_seq_afinfo tcp4_seq_afinfo = {
 	},
 };
 
+static inline void print_ewma(struct ewma *e, struct seq_file *f)
+{
+	uint64_t ewma = ewma_scaled_average(e);
+	uint64_t bits = ewma_scale(e);
+	uint64_t bits_mask = (1 << bits) - 1;
+	seq_printf(f, "%llu %llu/%llu\n", ewma >> bits, ewma & bits_mask, bits_mask+1);
+}
+
 static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
 {
 	int i;
@@ -2451,9 +2459,11 @@ static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
 	if (icsk->icsk_multi_accept) {
 		for (i = 0; i < num_possible_cpus(); i++) {
 			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma_sks[i]);
+			print_ewma(&per_cpu_icsk->icsk_accept_queue.ewma, f);
 			reqsk_queue_hash_print(&per_cpu_icsk->icsk_accept_queue, f);
 		}
 	} else {
+		print_ewma(&icsk->icsk_accept_queue.ewma, f);
 		reqsk_queue_hash_print(&icsk->icsk_accept_queue, f);
 	}
 }
