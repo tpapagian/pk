@@ -1610,7 +1610,7 @@ static void fsnotify_d_instantiate_helper(struct dentry *dentry,
 		return;
 #ifdef CONFIG_FSNOTIFY
 	spin_lock(&dcache_lock);
-	fsnotify_d_instantiate(entry, inode);
+	fsnotify_d_instantiate(dentry, inode);
 	spin_unlock(&dcache_lock);
 #endif
 }
