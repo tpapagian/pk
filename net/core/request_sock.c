@@ -11,6 +11,7 @@
  *		2 of the License, or (at your option) any later version.
  */
 
+#include <linux/ewma.h>
 #include <linux/module.h>
 #include <linux/random.h>
 #include <linux/slab.h>
@@ -67,6 +68,7 @@ int reqsk_queue_alloc(struct request_sock_queue *queue,
 	     lopt->max_qlen_log++);
 
 	reqsk_hist_init(queue);
+	ewma_init(&queue->ewma);
 
 	get_random_bytes(&lopt->hash_rnd, sizeof(lopt->hash_rnd));
 	rwlock_init(&queue->syn_wait_lock);
