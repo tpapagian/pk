@@ -19,6 +19,7 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 #include <linux/bug.h>
+#include <linux/histogram.h>
 
 #include <net/sock.h>
 
@@ -128,6 +129,9 @@ struct request_sock_queue {
 	u8			rskq_defer_accept;
 	/* 3 bytes hole, try to pack */
 	struct listen_sock	*listen_opt;
+
+	struct Hist		histogram;
+	struct stat_data	stats;
 };
 
 extern int reqsk_queue_alloc(struct request_sock_queue *queue,
@@ -159,11 +163,15 @@ static inline void reqsk_queue_unlink(struct request_sock_queue *queue,
 	write_unlock(&queue->syn_wait_lock);
 }
 
+static inline void reqsk_hist_update(struct request_sock_queue *queue);
+
 static inline void reqsk_queue_add(struct request_sock_queue *queue,
 				   struct request_sock *req,
 				   struct sock *parent,
 				   struct sock *child)
 {
+	reqsk_hist_update(queue);
+
 	req->sk = child;
 	sk_acceptq_added(parent);
 
@@ -252,6 +260,22 @@ static inline void reqsk_queue_hash_req(struct request_sock_queue *queue,
 	write_lock(&queue->syn_wait_lock);
 	lopt->syn_table[hash] = req;
 	write_unlock(&queue->syn_wait_lock);
+}
+
+static inline void reqsk_hist_update(struct request_sock_queue *queue)
+{
+	int len = reqsk_queue_len(queue);
+	_stp_stat_add(&queue->histogram, &queue->stats, len);
+}
+
+static inline void reqsk_hist_clear(struct request_sock_queue *queue)
+{
+	memset(&queue->stats, 0, sizeof(struct stat_data));
+}
+
+static inline void reqsk_queue_hash_print(struct request_sock_queue *queue, struct seq_file *f)
+{
+	_stp_stat_print_histogram_seq(&queue->histogram, &queue->stats, f);
 }
 
 #endif /* _REQUEST_SOCK_H */

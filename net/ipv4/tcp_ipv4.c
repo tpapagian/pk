@@ -2443,13 +2443,84 @@ static struct tcp_seq_afinfo tcp4_seq_afinfo = {
 	},
 };
 
+static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
+{
+	int i;
+	struct inet_connection_sock *icsk = inet_csk(sk);
+
+	if (icsk->icsk_multi_accept) {
+		for (i = 0; i < num_possible_cpus(); i++) {
+			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma_sks[i]);
+			reqsk_queue_hash_print(&per_cpu_icsk->icsk_accept_queue, f);
+		}
+	} else {
+		reqsk_queue_hash_print(&icsk->icsk_accept_queue, f);
+	}
+}
+
+static void tcp4_seq_hist_stop(struct seq_file *seq, void *v)
+{
+	int i;
+	struct inet_connection_sock *icsk = inet_csk((struct sock *)v);
+
+	// Check to make sure that buffer did not overflow.
+	if (seq_printf(seq, "\n") != 0)
+		return;
+
+	if (icsk->icsk_multi_accept) {
+		for (i = 0; i < num_possible_cpus(); i++) {
+			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma_sks[i]);
+			reqsk_hist_clear(&per_cpu_icsk->icsk_accept_queue);
+		}
+	} else {
+		reqsk_hist_clear(&icsk->icsk_accept_queue);
+	}
+}
+
+static int tcp4_seq_hist_show(struct seq_file *seq, void *v)
+{
+	struct tcp_iter_state *st;
+
+	if (v == SEQ_START_TOKEN) {
+		goto out;
+	}
+	st = seq->private;
+
+	switch (st->state) {
+	case TCP_SEQ_STATE_LISTENING:
+		get_tcp4_accept_hist(v, seq);
+		tcp4_seq_hist_stop(seq, v);
+		break;
+	default:
+		break;
+	}
+out:
+	return 0;
+}
+
+static struct tcp_seq_afinfo tcp4_seq_accept_hist = {
+	.name		= "accept_histogram",
+	.family		= AF_INET,
+	.seq_fops	= {
+		.owner		= THIS_MODULE,
+	},
+	.seq_ops	= {
+		.show		= tcp4_seq_hist_show,
+	},
+};
+
 static int __net_init tcp4_proc_init_net(struct net *net)
 {
-	return tcp_proc_register(net, &tcp4_seq_afinfo);
+	int r = tcp_proc_register(net, &tcp4_seq_afinfo);
+	if (r != 0)
+		return r;
+
+	return tcp_proc_register(net, &tcp4_seq_accept_hist);
 }
 
 static void __net_exit tcp4_proc_exit_net(struct net *net)
 {
+	tcp_proc_unregister(net, &tcp4_seq_accept_hist);
 	tcp_proc_unregister(net, &tcp4_seq_afinfo);
 }
 

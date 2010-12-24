@@ -19,6 +19,15 @@
 
 #include <net/request_sock.h>
 
+static inline void reqsk_hist_init(struct request_sock_queue *queue)
+{
+	queue->histogram.type = HIST_LINEAR;
+	queue->histogram.start = 0;
+	queue->histogram.stop = 64;
+	queue->histogram.interval = 1;
+	queue->histogram.buckets = _stp_stat_calc_buckets(64, 0, 1);
+}
+
 /*
  * Maximum number of SYN_RECV sockets in queue per LISTEN socket.
  * One SYN_RECV socket costs about 80bytes on a 32bit machine.
@@ -56,6 +65,8 @@ int reqsk_queue_alloc(struct request_sock_queue *queue,
 	for (lopt->max_qlen_log = 3;
 	     (1 << lopt->max_qlen_log) < nr_table_entries;
 	     lopt->max_qlen_log++);
+
+	reqsk_hist_init(queue);
 
 	get_random_bytes(&lopt->hash_rnd, sizeof(lopt->hash_rnd));
 	rwlock_init(&queue->syn_wait_lock);
