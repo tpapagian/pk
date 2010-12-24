@@ -36,7 +36,7 @@ static void mtrace_kmem_alloc(void *unsned,
 
 	cachep = virt_to_cache(ptr);
 	mtrace_label_register(mtrace_label_heap, ptr, bytes_alloc, 
-			      cachep->name, strlen(cachep->name));
+			      cachep->name, strlen(cachep->name), call_site);
 }
 
 static void mtrace_kmem_alloc_node(void *unused,
@@ -57,7 +57,7 @@ static void mtrace_kmem_free(void *unused,
 {
 	/* kfree(NULL) is acceptable */
 	if (ptr)
-		mtrace_label_register(mtrace_label_heap, ptr, 0, NULL, 0);
+		mtrace_label_register(mtrace_label_heap, ptr, 0, NULL, 0, call_site);
 }
 
 static void mtrace_mm_page_alloc(void *unused, 
@@ -70,7 +70,7 @@ static void mtrace_mm_page_alloc(void *unused,
     void * va = page_address(page);    
 
     mtrace_label_register(mtrace_label_block, va, length, 
-			  "pages", strlen("pages"));
+			  "pages", strlen("pages"), 0);
 }
 
 
@@ -80,7 +80,7 @@ static void mtrace_mm_page_free_direct(void *unused,
 {
     void * va = page_address(page);    
 
-    mtrace_label_register(mtrace_label_block, va, 0, NULL, 0);
+    mtrace_label_register(mtrace_label_block, va, 0, NULL, 0, 0);
 }
 
 static void mtrace_mm_pagevec_free(void *unused,
