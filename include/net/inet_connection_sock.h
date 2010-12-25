@@ -63,6 +63,18 @@ struct inet_connection_sock_af_ops {
 				     const struct inet_bind_bucket *tb);
 };
 
+// AP: TODO are the cache aligned flags placed in the right place?
+/** inet_connection_sock - INET connection oriented sock
+ * @ma_sks:
+ * @ma_socks:
+ */
+struct multi_accept {
+	// read mostly
+	struct sock *ma_sks[NR_CPUS];
+};
+
+extern int inet_csk_ma_init(struct sock *sk);
+
 /** inet_connection_sock - INET connection oriented sock
  *
  * @icsk_accept_queue:	   FIFO of established children 
@@ -87,9 +99,7 @@ struct inet_connection_sock {
 	/* inet_sock has to be the first member! */
 	struct inet_sock	  icsk_inet;
 
-	int			  icsk_multi_accept ____cacheline_aligned_in_smp;
-	struct sock 		  **icsk_ma_sks;
-	struct socket		  **icsk_ma_socks;
+	struct multi_accept	  *icsk_ma;
 
 	struct request_sock_queue icsk_accept_queue ____cacheline_aligned_in_smp;
 	struct inet_bind_bucket	  *icsk_bind_hash;
@@ -157,8 +167,8 @@ static inline struct sock *icsk_get_local_listen(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct sock *tsk = sk;
-	if (icsk->icsk_multi_accept) {
-		tsk = icsk->icsk_ma_sks[smp_processor_id()];
+	if (icsk->icsk_ma) {
+		tsk = icsk->icsk_ma->ma_sks[smp_processor_id()];
 #ifdef DEBUG_AP
 		printk("icsk_get_local_listen CPU=%d sk=%p tsk=%p\n", smp_processor_id(), sk, tsk);
 #endif

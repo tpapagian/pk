@@ -2227,9 +2227,12 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 
 	switch (optname) {
 	case TCP_MULTI_ACCEPT:
-		if (val != 1)
-			return -EINVAL;
-		icsk->icsk_multi_accept = 1;
+		if (val != 1) {
+			err = -EINVAL;
+			break;
+		}
+
+		err = inet_csk_ma_init(sk);
 		break;
 	case TCP_MAXSEG:
 		/* Values greater than interface MTU won't take effect. However
@@ -2346,10 +2349,10 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			secs_to_retrans(val, TCP_TIMEOUT_INIT / HZ,
 					TCP_RTO_MAX / HZ);
 
-		if (icsk->icsk_multi_accept) {
+		if (icsk->icsk_ma) {
 			int i;
 			for (i = 1; i < num_possible_cpus(); i++) {
-				inet_csk(icsk->icsk_ma_sks[i])->icsk_accept_queue.rskq_defer_accept =
+				inet_csk(icsk->icsk_ma->ma_sks[i])->icsk_accept_queue.rskq_defer_accept =
 					icsk->icsk_accept_queue.rskq_defer_accept;
 			}
 		}

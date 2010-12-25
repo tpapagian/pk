@@ -1885,7 +1885,7 @@ static int tcp_v4_init_sock(struct sock *sk)
 	tp->af_specific = &tcp_sock_ipv4_specific;
 #endif
 
-	icsk->icsk_multi_accept = 0;
+	icsk->icsk_ma = NULL;
 
 	/* TCP Cookie Transactions */
 	if (sysctl_tcp_cookie_size > 0) {
@@ -2456,9 +2456,9 @@ static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
 	int i;
 	struct inet_connection_sock *icsk = inet_csk(sk);
 
-	if (icsk->icsk_multi_accept) {
+	if (icsk->icsk_ma) {
 		for (i = 0; i < num_possible_cpus(); i++) {
-			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma_sks[i]);
+			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma->ma_sks[i]);
 			print_ewma(&per_cpu_icsk->icsk_accept_queue.ewma, f);
 			reqsk_queue_hash_print(&per_cpu_icsk->icsk_accept_queue, f);
 		}
@@ -2477,9 +2477,9 @@ static void tcp4_seq_hist_stop(struct seq_file *seq, void *v)
 	if (seq_printf(seq, "\n") != 0)
 		return;
 
-	if (icsk->icsk_multi_accept) {
+	if (icsk->icsk_ma) {
 		for (i = 0; i < num_possible_cpus(); i++) {
-			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma_sks[i]);
+			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma->ma_sks[i]);
 			reqsk_hist_clear(&per_cpu_icsk->icsk_accept_queue);
 		}
 	} else {

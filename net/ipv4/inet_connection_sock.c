@@ -101,10 +101,6 @@ int inet_csk_get_port(struct sock *sk, unsigned short snum)
 	struct net *net = sock_net(sk);
 	int smallest_size = -1, smallest_rover;
 
-#ifdef DEBUG_AP
-	printk("inet_csk_get_port called sk=%p snum=%d\n", sk, snum);
-#endif
-
 	local_bh_disable();
 	if (!snum) {
 		int remaining, rover, low, high;
@@ -599,8 +595,7 @@ struct sock *inet_csk_clone(struct sock *sk, const struct request_sock *req,
 
 		/* Deinitialize accept_queue to trap illegal accesses. */
 		memset(&newicsk->icsk_accept_queue, 0, sizeof(newicsk->icsk_accept_queue));
-		newicsk->icsk_multi_accept = 0;
-		newicsk->icsk_ma_sks = NULL;
+		newicsk->icsk_ma = NULL;
 
 		security_inet_csk_clone(newsk, req);
 	}
@@ -685,10 +680,6 @@ static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority,
 
 static inline void __inet_csk_destroy_sock_one(struct sock *sk)
 {
-#ifdef DEBUG_AP
-	printk("destroy begin\n");
-#endif
-
 	sk->sk_prot->destroy(sk);
 
 	sk_stream_kill_queues(sk);
@@ -699,10 +690,6 @@ static inline void __inet_csk_destroy_sock_one(struct sock *sk)
 
 	percpu_counter_dec(sk->sk_prot->orphan_count);
 	sock_put(sk);
-
-#ifdef DEBUG_AP
-	printk("destroy done\n");
-#endif
 }
 
 // AP: this is a giant hack. This function is from net/socket.c.
@@ -733,22 +720,17 @@ void inet_csk_destroy_sock(struct sock *sk)
 	/* If it has not 0 inet_sk(sk)->inet_num, it must be bound */
 	WARN_ON(inet_sk(sk)->inet_num && !inet_csk(sk)->icsk_bind_hash);
 
-#ifdef DEBUG_AP
-	printk("inet_num=%d icsk_bind_hash=%p icsk_ma_sks=%p\n", inet_sk(sk)->inet_num, inet_csk(sk)->icsk_bind_hash, icsk->icsk_ma_sks);
-#endif
-
-	if (icsk->icsk_multi_accept && icsk->icsk_ma_sks != NULL) {
+	if (icsk->icsk_ma) {
 		int i;
-#ifdef DEBUG_AP
-		printk("starting to destroy slave socket\n");
-#endif
 		for (i = 1; i < num_possible_cpus(); i++) {
-			struct sock *tsk = icsk->icsk_ma_sks[i];
+			struct sock *tsk;
+			struct socket *tsock;
 
-#ifdef DEBUG_AP
-			printk("destroying slave %d\n", i);
-			printk("slave inet_num=%d icsk_bind_hash=%p\n", inet_sk(tsk)->inet_num, inet_csk(tsk)->icsk_bind_hash);
-#endif
+			tsk = icsk->icsk_ma->ma_sks[i];
+			if (!tsk)
+				continue;
+
+			tsock = tsk->sk_socket;
 
 			tsk->sk_state = TCP_CLOSE;
 			sock_set_flag(tsk, SOCK_DEAD);
@@ -756,17 +738,14 @@ void inet_csk_destroy_sock(struct sock *sk)
 			inet_csk(tsk)->icsk_bind_hash = NULL;
 			call_rcu(&tsk->sk_wq->rcu, wq_free_rcu);
 			__inet_csk_destroy_sock_one(tsk);
-			kfree(icsk->icsk_ma_socks[i]);
+			kfree(tsock);
 		}
 
-		kfree(icsk->icsk_ma_socks);
-		icsk->icsk_ma_socks = NULL;
-		kfree(icsk->icsk_ma_sks);
-		icsk->icsk_ma_sks = NULL;
+		kfree(icsk->icsk_ma);
+		icsk->icsk_ma = NULL;
 	}
 
 	__inet_csk_destroy_sock_one(sk);
-
 }
 
 EXPORT_SYMBOL(inet_csk_destroy_sock);
@@ -794,110 +773,108 @@ static inline void __inet_csk_listen_start_one_finish(struct sock *sk)
 	sk_dst_reset(sk);
 }
 
+int inet_csk_ma_init(struct sock *sk)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+
+	icsk->icsk_ma = kzalloc(sizeof(struct multi_accept), GFP_KERNEL);
+	if (!icsk->icsk_ma)
+		return -ENOMEM;
+	else
+		return 0;
+}
+
+//AP: TODO this is not really inet_csk specific code; move it?
+static struct sock *ma_alloc_node(struct sock *sk, int cpu)
+{
+	struct sock *newsk;
+	struct socket *newsock;
+
+	// AP: TODO is this the correct way to allocate a socket???
+	newsock = kmalloc_node(sizeof(struct socket), GFP_KERNEL, cpu_to_node(cpu));
+	if (!newsock)
+		return NULL;
+
+	// AP: TODO is this the right alloc flag?
+	newsk = inet_csk_listen_clone(sk, GFP_ATOMIC, cpu_to_node(cpu));
+	if (!newsk) {
+		kfree(newsock);
+		return NULL;
+	}
+
+	newsock->wq = kmalloc_node(sizeof(struct socket_wq), GFP_KERNEL, cpu_to_node(cpu));
+	if (!newsock->wq) {
+		__inet_csk_destroy_sock_one(newsk);
+		kfree(newsock);
+		return NULL;
+	}
+
+	// AP: TODO there is probably a bunch of stuff that needs to
+	// be cleared/set to make cloning complete.
+	//
+	// THIS IS CLEARED IN sk_clone:
+	//newsk->sk_dst_cache	= NULL;
+	//newsk->sk_send_head	= NULL;
+	//sock_reset_flag(newsk, SOCK_DONE);
+
+	newsock->state = sk->sk_socket->state;
+	newsock->type = sk->sk_socket->type;
+	newsock->flags = sk->sk_socket->flags;
+
+	init_waitqueue_head(&newsock->wq->wait);
+	newsock->wq->fasync_list = NULL;
+
+	newsock->file = NULL;
+	newsock->sk = newsk;
+	newsock->ops = sk->sk_socket->ops;
+
+	sk_set_socket(newsk, newsock);
+
+	newsk->sk_wq = newsock->wq;
+
+	bh_unlock_sock(newsk);
+	sock_put(newsk);
+
+	return newsk;
+}
+
 static void __inet_csk_listen_stop_one(struct sock *sk);
 
 int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
-	int c, s, num_sockets = 1;
+	int num_sockets = 1;
+	int c, s;
 	int err;
 
-	if (icsk->icsk_multi_accept)
+	printk("multi_accept is %s\n", icsk->icsk_ma ? "ON" : "OFF" );
+
+	if (icsk->icsk_ma) {
 		num_sockets = num_possible_cpus();
 
-	printk("multi_accept is %s\n", icsk->icsk_multi_accept ? "ON" : "OFF" );
-	printk("using %d sockets\n", num_sockets);
+		icsk->icsk_ma->ma_sks[0] = sk;
 
-	icsk->icsk_ma_sks = kmalloc(sizeof(struct sock *) * num_sockets, GFP_KERNEL);
-	if (!icsk->icsk_ma_sks) {
-		err = -ENOMEM;
-		goto sks_error;
-	}
-
-	icsk->icsk_ma_sks[0] = sk;
-
-	// AP: I am allocating wait queues because the new sockets need a wait
-	// queue.  The wait queue for the original sock is provided by the
-	// socket object.  Since it looks like all interaction with the wait
-	// queue is done through the sk_sleep pointer, is might be safe to
-	// allocate wait queues here.
-	icsk->icsk_ma_socks = kmalloc(sizeof(struct socket *) * num_sockets, GFP_KERNEL);
-	if (!icsk->icsk_ma_socks) {
-		err = -ENOMEM;
-		goto socks_error;
-	}
-
-	icsk->icsk_ma_socks[0] = NULL;
-
-	for (c = 1; c < num_sockets; c++) {
-		struct sock *newsk;
-		struct socket *newsock =  kmalloc_node(sizeof(struct socket), GFP_KERNEL, cpu_to_node(c));
-
-		if (!newsock) {
-			err = -ENOMEM;
-			goto clone_error;
+		for (c = 1; c < num_sockets; c++) {
+			icsk->icsk_ma->ma_sks[c] = ma_alloc_node(sk, c);
+			if (!icsk->icsk_ma->ma_sks[c]) {
+				err = -ENOMEM;
+				goto clone_error;
+			}
 		}
-
-		icsk->icsk_ma_socks[c] = newsock;
-
-		printk("cloning socket %d\n", c);
-		// AP: TODO: might be nice to tell it to allocate from a
-		// certain NUMA node.
-		//
-		// AP: TODO is this the right alloc flag?
-		newsk = inet_csk_listen_clone(sk, GFP_ATOMIC, cpu_to_node(c));
-		if (!newsk) {
-			err = -ENOMEM; // AP: TODO not sure if this is the right error type
-			goto clone_error;
-		}
-		printk("cloned socket %p\n", newsk);
-
-		// AP: TODO there is probably a bunch of stuff that needs to
-		// be cleared/set to make cloning complete.
-		//
-		// THIS IS CLEARED IN sk_clone:
-		//newsk->sk_dst_cache	= NULL;
-		//newsk->sk_send_head	= NULL;
-		//sock_reset_flag(newsk, SOCK_DONE);
-		//sk_set_socket(newsk, NULL);
-
-		newsock->state = sk->sk_socket->state;
-		newsock->type = sk->sk_socket->type;
-		newsock->flags = sk->sk_socket->flags;
-
-		// AP: TODO must check when this memory is deallocated
-		newsock->wq = kmalloc_node(sizeof(struct socket_wq), GFP_KERNEL, cpu_to_node(c));
-		if (!newsock->wq) {
-			err = -ENOMEM;
-			kfree(newsock);
-			goto clone_error;
-		}
-		init_waitqueue_head(&newsock->wq->wait);
-		newsock->wq->fasync_list = NULL;
-
-		newsock->file = NULL;
-		newsock->sk = newsk;
-		newsock->ops = sk->sk_socket->ops;
-
-		sk_set_socket(newsk, newsock);
-
-		newsk->sk_wq = newsock->wq;
-
-		bh_unlock_sock(newsk);
-		sock_put(newsk);
-
-		icsk->icsk_ma_sks[c] = newsk;
 	}
 
 	for (s = 0; s < num_sockets; s++) {
+		struct sock *start_sk = (s==0) ? sk : icsk->icsk_ma->ma_sks[s];
+
 		printk("starting socket %d\n", s);
-		err = __inet_csk_listen_start_one(icsk->icsk_ma_sks[s],
+
+		err = __inet_csk_listen_start_one(start_sk,
 				nr_table_entries, cpu_to_node(s));
 		if (err)
 			goto start_error;
 
-		icsk->icsk_ma_sks[s]->sk_max_ack_backlog = nr_table_entries;
+		start_sk->sk_max_ack_backlog = nr_table_entries;
 	}
 
 	/* There is race window here: we announce ourselves listening,
@@ -907,8 +884,9 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 	 */
 	if (!sk->sk_prot->get_port(sk, inet->inet_num)) {
 		for (s = 0; s < num_sockets; s++) {
+			struct sock *start_sk = (s==0) ? sk : icsk->icsk_ma->ma_sks[s];
 			printk("finishing starting socket %d\n", s);
-			__inet_csk_listen_start_one_finish(icsk->icsk_ma_sks[s]);
+			__inet_csk_listen_start_one_finish(start_sk);
 		}
 		sk->sk_prot->hash(sk);
 		return 0;
@@ -923,7 +901,7 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 start_error:
 	for (s--; s > 1; s--) {
 		printk("stopping socket %d\n", s);
-		__inet_csk_listen_stop_one(icsk->icsk_ma_sks[s]);
+		__inet_csk_listen_stop_one(icsk->icsk_ma->ma_sks[s]);
 	}
 
 	if (s == 0) {
@@ -931,32 +909,33 @@ start_error:
 		__reqsk_queue_destroy(&icsk->icsk_accept_queue);
 	}
 
-	for (c = 0; c < num_sockets; c++) {
+	for (c = 1; c < num_sockets; c++) {
 		printk("destroying socket %d\n", c);
-		kfree(icsk->icsk_ma_sks[c]);
+		kfree(icsk->icsk_ma->ma_sks[c]);
+		icsk->icsk_ma->ma_sks[c] = NULL;
 	}
 
-	goto free_wqs;
+	goto err_out;
 
 clone_error:
 	for (c--; c > 1; c--) {
+		struct socket *sock = icsk->icsk_ma->ma_sks[c]->sk_socket;
 		printk("destroying socket %d\n", c);
-		__inet_csk_destroy_sock_one(icsk->icsk_ma_sks[c]);
-		kfree(icsk->icsk_ma_sks[c]);
+
+		//AP: TODO what about freeing the socket and the wq??
+		//AP: This must not be the correct way to free this.
+		kfree(sock->wq);
+		kfree(sock);
+
+		__inet_csk_destroy_sock_one(icsk->icsk_ma->ma_sks[c]);
+
+		//kfree(icsk->icsk_ma->ma_sks[c]); // AP: XXX this is not
+		//needed becuase destroy above should take care of free.
+		icsk->icsk_ma->ma_sks[c] = NULL;
 	}
 
-free_wqs:
+err_out:
 
-	kfree(icsk->icsk_ma_socks);
-	icsk->icsk_ma_socks = NULL;
-
-socks_error:
-
-	printk("freeing icsk->icsk_ma_sks\n");
-	kfree(icsk->icsk_ma_sks);
-	icsk->icsk_ma_sks = NULL;
-
-sks_error:
 	sk->sk_state = TCP_CLOSE;
 	return err;
 }
@@ -1022,11 +1001,11 @@ void inet_csk_listen_stop(struct sock *sk)
 
 	printk("inet_csk_listen_stop sk=%p\n", sk);
 
-	if (icsk->icsk_multi_accept) {
+	if (icsk->icsk_ma) {
 		int i;
 		for (i = 1; i < num_possible_cpus(); i++) {
 			printk("inet_csk_listen_stop stopping slave %d\n", i);
-			__inet_csk_listen_stop_one(icsk->icsk_ma_sks[i]);
+			__inet_csk_listen_stop_one(icsk->icsk_ma->ma_sks[i]);
 		}
 	}
 
