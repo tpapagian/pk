@@ -484,10 +484,7 @@ system_call_fastpath:
 	cmpq $__NR_syscall_max,%rax
 	ja badsys
 	movq %r10,%rcx
-#if 0
-	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
-	movq %rax,RAX-ARGOFFSET(%rsp)
-#else
+#ifdef CONFIG_MTRACE
 	movq sys_call_table(,%rax,8), %rdi
 	call mtrace_start_entry
 	RESTORE_ARGS 0, -ARG_SKIP, 1
@@ -495,6 +492,9 @@ system_call_fastpath:
 	call *sys_call_table(,%rax,8)  # XXX:    rip relative
 	movq %rax,RAX-ARGOFFSET(%rsp)
 	call mtrace_end_entry
+#else
+	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
+	movq %rax,RAX-ARGOFFSET(%rsp)
 #endif
 /*
  * Syscall return path ending with SYSRET (fast path)
@@ -1133,7 +1133,7 @@ ENTRY(\sym)
 END(\sym)
 .endm
 
-#if 1
+#ifdef CONFIG_MTRACE
 ENTRY(mtrace_do_page_fault)
 	pushq %rdi
 	pushq %rsi
@@ -1377,10 +1377,10 @@ zeroentry xen_int3 do_int3
 errorentry xen_stack_segment do_stack_segment
 #endif
 errorentry general_protection do_general_protection
-#if 0
-errorentry page_fault do_page_fault
-#else
+#ifdef CONFIG_MTRACE
 errorentry page_fault mtrace_do_page_fault
+#else
+errorentry page_fault do_page_fault
 #endif
 #ifdef CONFIG_X86_MCE
 paranoidzeroentry machine_check *machine_check_vector(%rip)
