@@ -811,6 +811,10 @@ END(interrupt)
 	subq $10*8, %rsp
 	CFI_ADJUST_CFA_OFFSET 10*8
 	call save_args
+	push %rdi
+	mov $\func, %rdi
+	call mtrace_start_do_irq
+	pop %rdi
 	PARTIAL_FRAME 0
 	call \func
 	.endm
@@ -830,6 +834,7 @@ common_interrupt:
 	interrupt do_IRQ
 	/* 0(%rsp): old_rsp-ARGOFFSET */
 ret_from_intr:
+	call mtrace_end_do_irq
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
 	decl PER_CPU_VAR(irq_count)

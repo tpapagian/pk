@@ -65,6 +65,9 @@ bool handle_irq(unsigned irq, struct pt_regs *regs)
 
 extern void call_softirq(void);
 
+extern void mtrace_end_do_irq(void);
+extern void mtrace_start_do_irq(unsigned long pc);
+
 asmlinkage void do_softirq(void)
 {
 	__u32 pending;
@@ -77,7 +80,9 @@ asmlinkage void do_softirq(void)
 	pending = local_softirq_pending();
 	/* Switch to interrupt stack */
 	if (pending) {
+		mtrace_start_do_irq((unsigned long)&call_softirq);
 		call_softirq();
+		mtrace_end_do_irq();
 		WARN_ON_ONCE(softirq_count());
 	}
 	local_irq_restore(flags);
