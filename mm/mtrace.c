@@ -8,6 +8,11 @@
 #include <trace/events/syscalls.h>
 #include <trace/events/sched.h>
 
+#include <linux/kprobes.h>
+#include <linux/ptrace.h>
+
+#include <asm/traps.h>
+
 #include <asm/mtrace-magic.h>
 
 static DEFINE_PER_CPU_ALIGNED(atomic64_t, mtrace_call_tag);
@@ -152,13 +157,6 @@ static void __mtrace_push_call(struct task_struct *tsk, unsigned long pc)
 	__mtrace_fcall_start(tsk);
 }
 
-void mtrace_start_entry(long id)
-{
-	if (!current)
-		return;
-	__mtrace_push_call(current, sys_call_table[id]);
-}
-
 static void __mtrace_pop_call(struct task_struct *tsk)
 {
 	int i;
@@ -168,6 +166,40 @@ static void __mtrace_pop_call(struct task_struct *tsk)
 	i = tsk->mtrace_curr_stack--;
 	tsk->mtrace_call_stack[i].pc = 0;
 	tsk->mtrace_call_stack[i].tag = 0;
+}
+
+/*
+ * XXX mt2db doesn't support call stacks yet.  
+ * mtrace_{start,end}_do_page_fault is a hack to ensure the mtrace call
+ * stack never has more than one item.
+ */
+void mtrace_start_do_page_fault(unsigned long pc)
+{
+	if (!current)
+		return;
+	if (current->mtrace_curr_stack != -1)
+		return;
+
+	__mtrace_push_call(current, pc);
+}
+
+void mtrace_end_do_page_fault(void)
+{
+	int i;
+
+	if (!current)
+		return;
+	
+	i = current->mtrace_curr_stack;
+	if (current->mtrace_call_stack[i].pc == (unsigned long)do_page_fault)
+		__mtrace_pop_call(current);
+}
+
+void mtrace_start_entry(unsigned long pc)
+{
+	if (!current)
+		return;
+	__mtrace_push_call(current, pc);
 }
 
 void mtrace_end_entry(void)

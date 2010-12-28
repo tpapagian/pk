@@ -488,7 +488,7 @@ system_call_fastpath:
 	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
 	movq %rax,RAX-ARGOFFSET(%rsp)
 #else
-	movq %rax, %rdi
+	movq sys_call_table(,%rax,8), %rdi
 	call mtrace_start_entry
 	RESTORE_ARGS 0, -ARG_SKIP, 1
 	movq %r10, %rcx
@@ -1133,6 +1133,23 @@ ENTRY(\sym)
 END(\sym)
 .endm
 
+#if 1
+ENTRY(mtrace_do_page_fault)
+	pushq %rdi
+	pushq %rsi
+	movq $do_page_fault, %rdi
+	call mtrace_start_do_page_fault
+	popq %rsi
+	popq %rdi
+	
+	call do_page_fault
+
+	movq $do_page_fault, %rdi
+	call mtrace_end_do_page_fault
+
+	ret
+#endif
+
 zeroentry divide_error do_divide_error
 zeroentry overflow do_overflow
 zeroentry bounds do_bounds
@@ -1360,7 +1377,11 @@ zeroentry xen_int3 do_int3
 errorentry xen_stack_segment do_stack_segment
 #endif
 errorentry general_protection do_general_protection
+#if 0
 errorentry page_fault do_page_fault
+#else
+errorentry page_fault mtrace_do_page_fault
+#endif
 #ifdef CONFIG_X86_MCE
 paranoidzeroentry machine_check *machine_check_vector(%rip)
 #endif
