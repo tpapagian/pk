@@ -175,7 +175,6 @@ static inline void reqsk_queue_add(struct request_sock_queue *queue,
 				   struct sock *child)
 {
 	reqsk_hist_update(queue);
-	
 	ewma_update(&queue->ewma, reqsk_queue_len(queue));
 
 	req->sk = child;
