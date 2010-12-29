@@ -1060,20 +1060,44 @@ int inet_csk_compat_setsockopt(struct sock *sk, int level, int optname,
 
 EXPORT_SYMBOL_GPL(inet_csk_compat_setsockopt);
 
+#endif
+
 int sysctl_multi_accept_lb __read_mostly = 1;
 int sysctl_multi_accept_debug __read_mostly = 0;
 
+static struct multi_accept_ops *ma_ops = NULL;
+
+void inet_csk_ma_register(struct multi_accept_ops *ops)
+{
+	ma_ops = ops;
+}
+EXPORT_SYMBOL_GPL(inet_csk_ma_register);
+
+void inet_csk_ma_unregister(void)
+{
+	ma_ops = NULL;
+	rcu_barrier();
+}
+EXPORT_SYMBOL_GPL(inet_csk_ma_unregister);
+
 void inet_csk_reqsk_balance(struct sock *sk)
 {
-	const struct inet_connection_sock *icsk = inet_csk(sk);
-
-	if (!icsk->icsk_ma)
-		return;
+	rcu_read_lock();
+	if (ma_ops) ma_ops->balance(sk);
+	rcu_read_unlock();
 }
 
 int inet_csk_reqsk_steal(struct sock *sk)
 {
-	return smp_processor_id();
+	int r;
+
+	rcu_read_lock();
+	if (ma_ops)
+		r = ma_ops->steal(sk);
+	else
+		r = smp_processor_id();
+	rcu_read_unlock();
+
+	return r;
 }
 
-#endif

@@ -88,6 +88,14 @@ extern int sysctl_multi_accept_debug;
 
 extern int inet_csk_ma_init(struct sock *sk);
 
+struct multi_accept_ops {
+	void	(*balance) (struct sock *sk);
+	int	(*steal) (struct sock *sk);
+};
+
+void inet_csk_ma_register(struct multi_accept_ops *ops);
+void inet_csk_ma_unregister(void);
+
 /** inet_connection_sock - INET connection oriented sock
  *
  * @icsk_accept_queue:	   FIFO of established children 
