@@ -2459,10 +2459,20 @@ static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
 	if (icsk->icsk_ma) {
 		for (i = 0; i < num_possible_cpus(); i++) {
 			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma->ma_sks[i]);
+
+			seq_printf(f, "ewma: ");
 			print_ewma(&per_cpu_icsk->icsk_accept_queue.ewma, f);
+			seq_printf(f, "gewma: ");
+			print_ewma(&per_cpu_icsk->icsk_ma->ma_gewma, f);
+
+			seq_printf(f, "busy: %s\n", (per_cpu_icsk->icsk_ma->ma_core_busy[i]) ? "true" : "false");
+
+			seq_printf(f, "steals: %d\n", per_cpu_icsk->icsk_ma->ma_steals[i]);
+
 			reqsk_queue_hash_print(&per_cpu_icsk->icsk_accept_queue, f);
 		}
 	} else {
+		seq_printf(f, "ewma: ");
 		print_ewma(&icsk->icsk_accept_queue.ewma, f);
 		reqsk_queue_hash_print(&icsk->icsk_accept_queue, f);
 	}
@@ -2481,6 +2491,7 @@ static void tcp4_seq_hist_stop(struct seq_file *seq, void *v)
 		for (i = 0; i < num_possible_cpus(); i++) {
 			struct inet_connection_sock *per_cpu_icsk = inet_csk(icsk->icsk_ma->ma_sks[i]);
 			reqsk_hist_clear(&per_cpu_icsk->icsk_accept_queue);
+			atomic_set(&icsk->icsk_ma->ma_steals[i], 0);
 		}
 	} else {
 		reqsk_hist_clear(&icsk->icsk_accept_queue);

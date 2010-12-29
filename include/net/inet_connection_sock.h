@@ -71,7 +71,21 @@ struct inet_connection_sock_af_ops {
 struct multi_accept {
 	// read mostly
 	struct sock *ma_sks[NR_CPUS];
+
+	// read/write
+ 	//struct timer_list ma_timer[NR_CPUS]; // AP: TODO false sharing
+
+	int		ma_core_busy[NR_CPUS];
+	atomic_t	ma_steals[NR_CPUS];
+
+	spinlock_t	ma_lock ____cacheline_aligned_in_smp;
+	struct ewma	ma_gewma;
+	int		ma_gewma_update[NR_CPUS];
 };
+
+extern int sysctl_multi_accept_lb;
+extern int sysctl_multi_accept_debug;
+extern int sysctl_multi_accept_factor;
 
 extern int inet_csk_ma_init(struct sock *sk);
 

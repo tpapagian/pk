@@ -15,6 +15,7 @@
 
 #include <linux/module.h>
 #include <linux/jhash.h>
+#include <linux/ewma.h>
 
 #include <net/inet_connection_sock.h>
 #include <net/inet_hashtables.h>
@@ -780,8 +781,10 @@ int inet_csk_ma_init(struct sock *sk)
 	icsk->icsk_ma = kzalloc(sizeof(struct multi_accept), GFP_KERNEL);
 	if (!icsk->icsk_ma)
 		return -ENOMEM;
-	else
-		return 0;
+
+	ewma_init(&icsk->icsk_ma->ma_gewma);
+
+	return 0;
 }
 
 //AP: TODO this is not really inet_csk specific code; move it?
