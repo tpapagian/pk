@@ -1063,7 +1063,10 @@ EXPORT_SYMBOL_GPL(inet_csk_compat_setsockopt);
 #endif
 
 int sysctl_multi_accept_lb __read_mostly = 1;
+EXPORT_SYMBOL_GPL(sysctl_multi_accept_lb);
+
 int sysctl_multi_accept_debug __read_mostly = 0;
+EXPORT_SYMBOL_GPL(sysctl_multi_accept_debug);
 
 static struct multi_accept_ops *ma_ops = NULL;
 

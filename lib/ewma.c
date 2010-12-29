@@ -1,4 +1,5 @@
 #include <linux/ewma.h>
+#include <linux/module.h>
 
 static inline uint64_t ewma_stability_shift(void)
 {
@@ -25,6 +26,7 @@ inline void ewma_init(struct ewma *e) {
 inline uint64_t ewma_scaled_average(const struct ewma *e) {
 	return e->avg;
 }
+EXPORT_SYMBOL_GPL(ewma_scaled_average);
 
 /* Return the current moving average.
  * The returned value is unscaled.
@@ -32,6 +34,7 @@ inline uint64_t ewma_scaled_average(const struct ewma *e) {
 inline uint64_t ewma_unscaled_average(const struct ewma *e) {
 	return (e->avg + ewma_compensation()) >> ewma_scale(e);
 }
+EXPORT_SYMBOL_GPL(ewma_unscaled_average);
 
 inline void ewma_update(struct ewma *e, uint64_t val) {
     uint64_t val_scaled = (val << ewma_scale(e)) + ewma_compensation();
@@ -41,3 +44,4 @@ inline void ewma_update(struct ewma *e, uint64_t val) {
     else
 	e->avg += (val_scaled - e->avg) >> stability;
 }
+EXPORT_SYMBOL_GPL(ewma_update);
