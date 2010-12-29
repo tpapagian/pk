@@ -366,13 +366,6 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
-		.procname	= "multi_accept_factor",
-		.data		= &sysctl_multi_accept_factor,
-		.maxlen		= sizeof(sysctl_multi_accept_factor),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
 		.procname	= "multi_accept_load_balance",
 		.data		= &sysctl_multi_accept_lb,
 		.maxlen		= sizeof(sysctl_multi_accept_lb),

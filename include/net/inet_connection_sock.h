@@ -85,7 +85,6 @@ struct multi_accept {
 
 extern int sysctl_multi_accept_lb;
 extern int sysctl_multi_accept_debug;
-extern int sysctl_multi_accept_factor;
 
 extern int inet_csk_ma_init(struct sock *sk);
 
