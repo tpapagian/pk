@@ -1059,4 +1059,22 @@ int inet_csk_compat_setsockopt(struct sock *sk, int level, int optname,
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_compat_setsockopt);
+
+int sysctl_multi_accept_lb __read_mostly = 1;
+int sysctl_multi_accept_debug __read_mostly = 0;
+int sysctl_multi_accept_factor __read_mostly = 10;
+
+void inet_csk_reqsk_balance(struct sock *sk)
+{
+	const struct inet_connection_sock *icsk = inet_csk(sk);
+
+	if (!icsk->icsk_ma)
+		return;
+}
+
+int inet_csk_reqsk_steal(struct sock *sk)
+{
+	return smp_processor_id();
+}
+
 #endif

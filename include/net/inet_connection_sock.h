@@ -176,16 +176,15 @@ extern struct sock *inet_csk_clone(struct sock *sk,
 				   const struct request_sock *req,
 				   const gfp_t priority);
 
+extern int inet_csk_reqsk_steal(struct sock *sk);
 
 static inline struct sock *icsk_get_local_listen(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct sock *tsk = sk;
 	if (icsk->icsk_ma) {
-		tsk = icsk->icsk_ma->ma_sks[smp_processor_id()];
-#ifdef DEBUG_AP
-		printk("icsk_get_local_listen CPU=%d sk=%p tsk=%p\n", smp_processor_id(), sk, tsk);
-#endif
+		int cpu = inet_csk_reqsk_steal(sk);
+		tsk = icsk->icsk_ma->ma_sks[cpu];
 	}
 	return tsk;
 }
@@ -294,11 +293,14 @@ extern int inet_csk_get_port(struct sock *sk, unsigned short snum);
 extern struct dst_entry* inet_csk_route_req(struct sock *sk,
 					    const struct request_sock *req);
 
+extern void inet_csk_reqsk_balance(struct sock *sk);
+
 static inline void inet_csk_reqsk_queue_add(struct sock *sk,
 					    struct request_sock *req,
 					    struct sock *child)
 {
 	reqsk_queue_add(&inet_csk(sk)->icsk_accept_queue, req, sk, child);
+	inet_csk_reqsk_balance(sk);
 }
 
 extern void inet_csk_reqsk_queue_hash_add(struct sock *sk,
