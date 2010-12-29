@@ -2467,7 +2467,7 @@ static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
 
 			seq_printf(f, "busy: %s\n", (per_cpu_icsk->icsk_ma->ma_core_busy[i]) ? "true" : "false");
 
-			seq_printf(f, "steals: %d\n", per_cpu_icsk->icsk_ma->ma_steals[i]);
+			seq_printf(f, "steals: %d\n", atomic_read(&per_cpu_icsk->icsk_ma->ma_steals[i]));
 
 			reqsk_queue_hash_print(&per_cpu_icsk->icsk_accept_queue, f);
 		}
