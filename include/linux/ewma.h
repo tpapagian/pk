@@ -17,9 +17,9 @@ struct ewma {
 };
 
 void ewma_init(struct ewma *e);
-uint64_t ewma_scale(struct ewma *e);
-uint64_t ewma_scaled_average(struct ewma *e);
-uint64_t ewma_unscaled_average(struct ewma *e);
+uint64_t ewma_scale(const struct ewma *e);
+uint64_t ewma_scaled_average(const struct ewma *e);
+uint64_t ewma_unscaled_average(const struct ewma *e);
 void ewma_update(struct ewma *e, uint64_t val);
 
 #endif
