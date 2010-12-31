@@ -1,18 +1,23 @@
-//#include <assert.h>
-//#include <stdbool.h>
-//#include <stdlib.h>
-//#include <stdio.h>
-//#include <limits.h>
+#define KERNEL 1
+#if !KERNEL
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <limits.h>
 
+#include "mcorelib/mcorelib.h"
+#else
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/cbtree.h>
 #include <linux/module.h>
 
-//#include "mcorelib/mcorelib.h"
+#define assert(s) do{if (!(s)) panic(#s);} while(0);
+#endif
 
 // XXX
-#define RCU 0
+#define RCU 1
 #if RCU
 void rcu_init(void);
 void rcu_gc(void);
@@ -38,7 +43,9 @@ dfree(void *ptr)
         int i;
 
         totalFreed++;
-#if RCU
+#if KERNEL
+        // XXX Not implemented
+#elif RCU
         rcu_delayed(ptr, free);
 #else
         assert(dfreePos < MAX_DFREE);
@@ -257,13 +264,17 @@ insert(node_t *node, int value)
 }
 
 void
-TreeBB_Insert(struct TreeBB *tree, int value)
+TreeBB_Insert(struct cb_root *tree, int value)
 {
-#if RCU
+#if KERNEL
+        // XXX Not implemented
+#elif RCU
         rcu_begin_write(getCPU());
 #endif
         SET(tree->root, insert(GET(tree->root), value));
-#if RCU
+#if KERNEL
+        // XXX Not implemented
+#elif RCU
         rcu_end_write(getCPU());
         rcu_gc();
 #else
@@ -292,6 +303,8 @@ deleteMin(node_t *node, node_t **minOut)
 static node_t *
 delete(node_t *node, int value)
 {
+        node_t *min;
+
         // XXX Will crash if value isn't in the tree
         node_t *left = GET(node->left), *right = GET(node->right);
         if (value < node->value)
@@ -305,7 +318,6 @@ delete(node_t *node, int value)
                 return right;
         if (!right)
                 return left;
-        node_t *min;
         right = deleteMin(right, &min);
         // This needs to be performed non-destructively because the
         // min element is still linked in to the tree below us.  Thus,
@@ -316,13 +328,17 @@ delete(node_t *node, int value)
 }
 
 void
-TreeBB_Delete(struct TreeBB *tree, int value)
+TreeBB_Delete(struct cb_root *tree, int value)
 {
-#if RCU
+#if KERNEL
+        // XXX Not implemented
+#elif RCU
         rcu_begin_write(getCPU());
 #endif
         SET(tree->root, delete(GET(tree->root), value));
-#if RCU
+#if KERNEL
+        // XXX Not implemented
+#elif RCU
         rcu_end_write(getCPU());
 #else
         dfreeReleaseAll();
@@ -330,12 +346,15 @@ TreeBB_Delete(struct TreeBB *tree, int value)
 }
 
 bool
-TreeBB_Contains(struct TreeBB *tree, int value)
+TreeBB_Contains(struct cb_root *tree, int value)
 {
-#if RCU
+        node_t *node;
+#if KERNEL
+        // XXX Not implemented
+#elif RCU
         rcu_begin_read(getCPU());
 #endif
-        node_t *node = GET(tree->root);
+        node = GET(tree->root);
         while (node) {
                 if (node->value == value)
                         break;
@@ -344,7 +363,9 @@ TreeBB_Contains(struct TreeBB *tree, int value)
                 else
                         node = GET(node->right);
         }
-#if RCU
+#if KERNEL
+        // XXX Not implemented
+#elif RCU
         rcu_end_read(getCPU());
 #endif
         return !!node;
@@ -383,7 +404,7 @@ show(node_t *node, int depth)
 }
 
 void
-TreeBB_Check(struct TreeBB *tree, const int *vals)
+TreeBB_Check(struct cb_root *tree, const int *vals)
 {
         int pos = 0;
         check(GET(tree->root), INT_MIN, INT_MAX, vals, &pos);
