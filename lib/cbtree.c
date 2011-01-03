@@ -73,13 +73,21 @@ dfreeReleaseAll(void)
 
 enum { INPLACE = 1 };
 
+typedef uintptr_t k_t;
+
+typedef struct
+{
+        k_t key;
+        void *value;
+} kv_t;
+
 struct TreeBB_Node
 {
         SHARED(struct TreeBB_Node *, left);
         SHARED(struct TreeBB_Node *, right);
         SHARED(unsigned int, size);
 
-        int value;
+        kv_t kv;
 };
 
 typedef struct TreeBB_Node node_t;
@@ -105,77 +113,77 @@ nodeSize(node_t *node)
 }
 
 static inline node_t *
-mkNode(node_t *left, node_t *right, int value)
+mkNode(node_t *left, node_t *right, kv_t *kv)
 {
 //        node_t *node = malloc(sizeof *node);
         node_t *node = kmem_cache_alloc(node_cache, GFP_ATOMIC);
         SET(node->left, left);
         SET(node->right, right);
         SET(node->size, 1 + nodeSize(left) + nodeSize(right));
-        node->value = value;
+        node->kv = *kv;
         return node;
 }
 
 static node_t *
-singleL(node_t *left, node_t *right, int value)
+singleL(node_t *left, node_t *right, kv_t *kv)
 {
 //        printf("%s\n", __func__);
         dfree(right);
-        return mkNode(mkNode(left, GET(right->left), value),
-                      GET(right->right), right->value);
+        return mkNode(mkNode(left, GET(right->left), kv),
+                      GET(right->right), &right->kv);
 }
 
 static node_t *
-doubleL(node_t *left, node_t *right, int value)
+doubleL(node_t *left, node_t *right, kv_t *kv)
 {
 //        printf("%s\n", __func__);
         dfree(right);
         dfree(GET(right->left));
-        return mkNode(mkNode(left, GET(GET(right->left)->left), value),
+        return mkNode(mkNode(left, GET(GET(right->left)->left), kv),
                       mkNode(GET(GET(right->left)->right), GET(right->right),
-                             right->value),
-                      GET(right->left)->value);
+                             &right->kv),
+                      &GET(right->left)->kv);
 }
 
 static node_t *
-singleR(node_t *left, node_t *right, int value)
+singleR(node_t *left, node_t *right, kv_t *kv)
 {
 //        printf("%s\n", __func__);
         dfree(left);
-        return mkNode(GET(left->left), mkNode(GET(left->right), right, value),
-                      left->value);
+        return mkNode(GET(left->left), mkNode(GET(left->right), right, kv),
+                      &left->kv);
 }
 
 static node_t *
-doubleR(node_t *left, node_t *right, int value)
+doubleR(node_t *left, node_t *right, kv_t *kv)
 {
 //        printf("%s\n", __func__);
         dfree(left);
         dfree(GET(left->right));
         return mkNode(mkNode(GET(left->left), GET(GET(left->right)->left),
-                             left->value),
-                      mkNode(GET(GET(left->right)->right), right, value),
-                      GET(left->right)->value);
+                             &left->kv),
+                      mkNode(GET(GET(left->right)->right), right, kv),
+                      &GET(left->right)->kv);
 }
 
 static node_t *
-mkBalancedL(node_t *left, node_t *right, int value)
+mkBalancedL(node_t *left, node_t *right, kv_t *kv)
 {
         int rln = nodeSize(GET(right->left)),
                 rrn = nodeSize(GET(right->right));
         if (rln < rrn)
-                return singleL(left, right, value);
-        return doubleL(left, right, value);
+                return singleL(left, right, kv);
+        return doubleL(left, right, kv);
 }
 
 static node_t *
-mkBalancedR(node_t *left, node_t *right, int value)
+mkBalancedR(node_t *left, node_t *right, kv_t *kv)
 {
         int lln = nodeSize(GET(left->left)),
                 lrn = nodeSize(GET(left->right));
         if (lrn < lln)
-                return singleR(left, right, value);
-        return doubleR(left, right, value);
+                return singleR(left, right, kv);
+        return doubleR(left, right, kv);
 }
 
 /**
@@ -197,7 +205,7 @@ static inline node_t *
 mkBalanced(node_t *cur, node_t *left, node_t *right, int replace, bool inPlace)
 {
         int ln = nodeSize(left), rn = nodeSize(right);
-        int value = cur->value;
+        kv_t *kv = &cur->kv;
 
         if (!inPlace)
                 dfree(cur);
@@ -207,12 +215,12 @@ mkBalanced(node_t *cur, node_t *left, node_t *right, int replace, bool inPlace)
         if (rn > WEIGHT * ln) {
                 if (inPlace)
                         dfree(cur);
-                return mkBalancedL(left, right, value);
+                return mkBalancedL(left, right, kv);
         }
         if (ln > WEIGHT * rn) {
                 if (inPlace)
                         dfree(cur);
-                return mkBalancedR(left, right, value);
+                return mkBalancedR(left, right, kv);
         }
 
 balanced:
@@ -231,15 +239,15 @@ balanced:
                 SET(cur->size, 1 + nodeSize(left) + nodeSize(right));
                 return cur;
         } else {
-                return mkNode(left, right, value);
+                return mkNode(left, right, kv);
         }
 }
 
 static node_t *
-insert(node_t *node, int value)
+insert(node_t *node, kv_t *kv)
 {
         if (!node)
-                return mkNode(NULL, NULL, value);
+                return mkNode(NULL, NULL, kv);
 
         // Note that, even in in-place mode, we rebalance the tree
         // from the bottom up.  This has some nifty properties beyond
@@ -252,25 +260,26 @@ insert(node_t *node, int value)
         // delayed updates to the size fields combined with competing
         // writers might result in tree imbalance.
 
-        if (value < node->value)
-                return mkBalanced(node, insert(GET(node->left), value),
+        if (kv->key < node->kv.key)
+                return mkBalanced(node, insert(GET(node->left), kv),
                                   GET(node->right), 0, INPLACE);
-        if (value > node->value)
+        if (kv->key > node->kv.key)
                 return mkBalanced(node, GET(node->left),
-                                  insert(GET(node->right), value),
+                                  insert(GET(node->right), kv),
                                   1, INPLACE);
         return node;
 }
 
 void
-TreeBB_Insert(struct cb_root *tree, int value)
+TreeBB_Insert(struct cb_root *tree, uintptr_t key, void *value)
 {
+        kv_t kv = {key, value};
 #if KERNEL
         // XXX Not implemented
 #elif RCU
         rcu_begin_write(getCPU());
 #endif
-        SET(tree->root, insert(GET(tree->root), value));
+        SET(tree->root, insert(GET(tree->root), &kv));
 #if KERNEL
         // XXX Not implemented
 #elif RCU
@@ -300,16 +309,16 @@ deleteMin(node_t *node, node_t **minOut)
 }
 
 static node_t *
-delete(node_t *node, int value)
+delete(node_t *node, k_t key)
 {
         node_t *min;
 
         // XXX Will crash if value isn't in the tree
         node_t *left = GET(node->left), *right = GET(node->right);
-        if (value < node->value)
-                return mkBalanced(node, delete(left, value), right, 0, INPLACE);
-        if (value > node->value)
-                return mkBalanced(node, left, delete(right, value), 1, INPLACE);
+        if (key < node->kv.key)
+                return mkBalanced(node, delete(left, key), right, 0, INPLACE);
+        if (key > node->kv.key)
+                return mkBalanced(node, left, delete(right, key), 1, INPLACE);
 
         // We found our node to delete
         dfree(node);
@@ -327,14 +336,14 @@ delete(node_t *node, int value)
 }
 
 void
-TreeBB_Delete(struct cb_root *tree, int value)
+TreeBB_Delete(struct cb_root *tree, uintptr_t key)
 {
 #if KERNEL
         // XXX Not implemented
 #elif RCU
         rcu_begin_write(getCPU());
 #endif
-        SET(tree->root, delete(GET(tree->root), value));
+        SET(tree->root, delete(GET(tree->root), key));
 #if KERNEL
         // XXX Not implemented
 #elif RCU
@@ -344,8 +353,9 @@ TreeBB_Delete(struct cb_root *tree, int value)
 #endif
 }
 
+// XXX Need a lookup
 bool
-TreeBB_Contains(struct cb_root *tree, int value)
+TreeBB_Contains(struct cb_root *tree, uintptr_t key)
 {
         node_t *node;
 #if KERNEL
@@ -355,9 +365,9 @@ TreeBB_Contains(struct cb_root *tree, int value)
 #endif
         node = GET(tree->root);
         while (node) {
-                if (node->value == value)
+                if (node->kv.key == key)
                         break;
-                if (node->value < value)
+                if (node->kv.key < key)
                         node = GET(node->left);
                 else
                         node = GET(node->right);
@@ -375,20 +385,20 @@ TreeBB_Contains(struct cb_root *tree, int value)
  */
 
 static void
-check(node_t *node, int min, int max, const int *vals, int *pos)
+check(node_t *node, k_t min, k_t max, const k_t *keys, int *pos)
 {
         if (!node)
                 return;
 
-        assert(node->value > min);
-        assert(node->value < max);
+        assert(node->kv.key > min);
+        assert(node->kv.key < max);
         assert(nodeSize(node) ==
                1 + nodeSize(GET(node->left)) + nodeSize(GET(node->right)));
 
-        check(GET(node->left), min, node->value, vals, pos);
-        assert(node->value == vals[*pos]);
+        check(GET(node->left), min, node->kv.key, keys, pos);
+        assert(node->kv.key == keys[*pos]);
         (*pos)++;
-        check(GET(node->right), node->value, max, vals, pos);
+        check(GET(node->right), node->kv.key, max, keys, pos);
 }
 
 static void
@@ -398,21 +408,26 @@ show(node_t *node, int depth)
                 return;
 
         show(GET(node->left), depth + 1);
-        printk("%*s%d\n", depth*2, "", node->value);
+        printk("%*s%p -> %p\n", depth*2, "", (void*)node->kv.key, node->kv.value);
         show(GET(node->right), depth + 1);
 }
 
-void
-TreeBB_Check(struct cb_root *tree, const int *vals)
+static void
+TreeBB_Check(struct cb_root *tree, const k_t *keys)
 {
         int pos = 0;
-        check(GET(tree->root), INT_MIN, INT_MAX, vals, &pos);
+        check(GET(tree->root), 0, ~0, keys, &pos);
 }
 
 static int
-cmpInt(const void *p1, const void *p2)
+cmpKey(const void *p1, const void *p2)
 {
-        return (*(const int*)p1) - (*(const int*)p2);
+        k_t k1 = *(const k_t*)p1, k2 = *(const k_t*)p2;
+        if (k1 < k2)
+                return -1;
+        if (k1 > k2)
+                return 1;
+        return 0;
 }
 
 #if KERNEL
@@ -425,32 +440,31 @@ test(void)
 {
         enum { LEN = 10000, DEL = 50 };
         struct cb_root tree = {};
-        int *vals;
+        k_t *keys;
         int i, insertFrees, deleteFrees;
 
-        vals = vmalloc(LEN * sizeof *vals);
-        assert(vals);
+        keys = vmalloc(LEN * sizeof *keys);
+        assert(keys);
         
         for (i = 0; i < LEN; ++i) {
-                int val = get_random_int();
-                if (val < 0) val = -val;
+                k_t key = get_random_int();
                 //printf("+++ %d\n", val);
-                TreeBB_Insert(&tree, val);
-                vals[i] = val;
+                TreeBB_Insert(&tree, key, 0);
+                keys[i] = key;
         }
         insertFrees = totalFreed;
         totalFreed = 0;
 
         for (i = 0; i < DEL; ++i) {
                 //printf("--- %d\n", vals[i]);
-                TreeBB_Delete(&tree, vals[i]);
+                TreeBB_Delete(&tree, keys[i]);
         }
         deleteFrees = totalFreed;
         totalFreed = 0;
 
-        sort(vals+DEL, LEN-DEL, sizeof vals[0], cmpInt, NULL);
+        sort(keys+DEL, LEN-DEL, sizeof keys[0], cmpKey, NULL);
         assert(nodeSize(GET(tree.root)) == LEN-DEL);
-        TreeBB_Check(&tree, vals+DEL);
+        TreeBB_Check(&tree, keys+DEL);
         printk(KERN_INFO "***\n");
         printk(KERN_INFO "%d freed by %d inserts, %d freed by %d deletes\n",
                insertFrees, LEN, deleteFrees, DEL);
