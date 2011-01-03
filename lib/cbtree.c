@@ -11,7 +11,6 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/cbtree.h>
-#include <linux/module.h>
 
 #define assert(s) do{if (!(s)) panic(#s);} while(0);
 #endif
@@ -410,13 +409,57 @@ TreeBB_Check(struct cb_root *tree, const int *vals)
         check(GET(tree->root), INT_MIN, INT_MAX, vals, &pos);
 }
 
-#if 0
 static int
 cmpInt(const void *p1, const void *p2)
 {
         return (*(const int*)p1) - (*(const int*)p2);
 }
 
+#if KERNEL
+#include <linux/random.h>
+#include <linux/sort.h>
+#include <linux/vmalloc.h>
+
+static int
+test(void)
+{
+        enum { LEN = 10000, DEL = 50 };
+        struct cb_root tree = {};
+        int *vals;
+        int i, insertFrees, deleteFrees;
+
+        vals = vmalloc(LEN * sizeof *vals);
+        assert(vals);
+        
+        for (i = 0; i < LEN; ++i) {
+                int val = get_random_int();
+                if (val < 0) val = -val;
+                //printf("+++ %d\n", val);
+                TreeBB_Insert(&tree, val);
+                vals[i] = val;
+        }
+        insertFrees = totalFreed;
+        totalFreed = 0;
+
+        for (i = 0; i < DEL; ++i) {
+                //printf("--- %d\n", vals[i]);
+                TreeBB_Delete(&tree, vals[i]);
+        }
+        deleteFrees = totalFreed;
+        totalFreed = 0;
+
+        sort(vals+DEL, LEN-DEL, sizeof vals[0], cmpInt, NULL);
+        assert(nodeSize(GET(tree.root)) == LEN-DEL);
+        TreeBB_Check(&tree, vals+DEL);
+        printk(KERN_INFO "***\n");
+        printk(KERN_INFO "%d freed by %d inserts, %d freed by %d deletes\n",
+               insertFrees, LEN, deleteFrees, DEL);
+        printk(KERN_INFO "***\n");
+        return 0;
+}
+
+module_init(test);
+#else
 int
 main(int argc, char **argv)
 {
