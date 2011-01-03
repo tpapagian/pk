@@ -14,6 +14,7 @@ typedef enum {
     mtrace_entry_enable,
     mtrace_entry_fcall,
     mtrace_entry_segment,
+    mtrace_entry_call,
 } mtrace_entry_t;
 
 typedef enum {
@@ -43,6 +44,13 @@ struct mtrace_segment_entry {
 /*
  * The guest specified the begining or end to a function call
  */
+typedef enum {
+    mtrace_start = 1,
+    mtrace_done,
+    mtrace_resume,
+    mtrace_pause,
+} mtrace_call_state_t;
+
 struct mtrace_fcall_entry {
     mtrace_entry_t type;    
     uint64_t access_count;
@@ -52,7 +60,17 @@ struct mtrace_fcall_entry {
     uint64_t pc;
     uint64_t tag;
     uint16_t depth;
-    uint8_t end;
+    mtrace_call_state_t state;
+} __pack__;
+
+struct mtrace_call_entry {
+    mtrace_entry_t type;    
+    uint64_t access_count;
+
+    uint16_t cpu;
+    uint64_t target_pc;
+    uint64_t return_pc;    
+    int ret;
 } __pack__;
 
 /*
@@ -111,6 +129,7 @@ union mtrace_entry {
     struct mtrace_enable_entry enable;
     struct mtrace_fcall_entry fcall;
     struct mtrace_segment_entry seg;
+    struct mtrace_call_entry call;
 }__pack__;
 
 #ifndef QEMU_MTRACE
@@ -161,9 +180,9 @@ static inline void mtrace_fcall_register(unsigned long tid,
 					 unsigned long pc,
 					 unsigned long tag,
 					 unsigned int depth,
-					 int end)
+					 mtrace_call_state_t state)
 {
-    mtrace_magic(MTRACE_FCALL_REGISTER, tid, pc, tag, depth, end);
+    mtrace_magic(MTRACE_FCALL_REGISTER, tid, pc, tag, depth, state);
 }
 
 static inline void mtrace_segment_register(unsigned long baseaddr,

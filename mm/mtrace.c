@@ -134,14 +134,14 @@ static void __mtrace_fcall_start(struct mtrace_call_stack *stack)
 {
 	int i = stack->curr;
 	mtrace_fcall_register(0, stack->stack[i].pc, 
-			      stack->stack[i].tag, i, 0);
+			      stack->stack[i].tag, i, mtrace_start);
 }
 
 static void __mtrace_fcall_stop(struct mtrace_call_stack *stack)
 {
 	int i = stack->curr;
 	mtrace_fcall_register(0, stack->stack[i].pc, 
-			      stack->stack[i].tag, i, 1);
+			      stack->stack[i].tag, i, mtrace_done);
 }
 
 static void __mtrace_push_call(struct mtrace_call_stack *stack, unsigned long pc)
