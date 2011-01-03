@@ -39,20 +39,20 @@ int totalFreed;
 static inline void
 dfree(void *ptr)
 {
-        int i;
-
-        totalFreed++;
 #if KERNEL
         // XXX Not implemented
 #elif RCU
         rcu_delayed(ptr, free);
 #else
+        int i;
+
         assert(dfreePos < MAX_DFREE);
         dfreeList[dfreePos++] = ptr;
 
         for (i = 0; i < dfreePos-1; ++i)
                 assert(dfreeList[i] != ptr);
 #endif
+        totalFreed++;
 }
 
 void
@@ -401,7 +401,7 @@ check(node_t *node, k_t min, k_t max, const k_t *keys, int *pos)
         check(GET(node->right), node->kv.key, max, keys, pos);
 }
 
-static void
+static void __attribute__((__used__))
 show(node_t *node, int depth)
 {
         if (!node)
