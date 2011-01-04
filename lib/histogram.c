@@ -144,8 +144,6 @@ static void __stp_stat_print_histogram_seq(struct Hist *st, struct stat_data *sd
 	if (st->type != HIST_LOG && st->type != HIST_LINEAR)
 		return;
 
-	printk("printing Hist=%p\n", st);
-
 	/* Get the maximum value, for scaling. Also calculate the low
 	   and high values to bound the reporting range. */
 	for (i = 0; i < st->buckets; i++) {
