@@ -727,9 +727,12 @@ void inet_csk_destroy_sock(struct sock *sk)
 			struct sock *tsk;
 			struct socket *tsock;
 
-			tsk = icsk->icsk_ma->ma_sks[i];
+			tsk = icsk->icsk_ma->ma_per_cpu[i].sk;
 			if (!tsk)
 				continue;
+
+			if (timer_pending(&icsk->icsk_ma->ma_per_cpu[i].timer)) 
+				del_timer(&icsk->icsk_ma->ma_per_cpu[i].timer);
 
 			tsock = tsk->sk_socket;
 
@@ -741,6 +744,9 @@ void inet_csk_destroy_sock(struct sock *sk)
 			__inet_csk_destroy_sock_one(tsk);
 			kfree(tsock);
 		}
+
+		if (timer_pending(&icsk->icsk_ma->ma_gewma_timer)) 
+			del_timer(&icsk->icsk_ma->ma_gewma_timer);
 
 		kfree(icsk->icsk_ma);
 		icsk->icsk_ma = NULL;
@@ -783,6 +789,7 @@ int inet_csk_ma_init(struct sock *sk)
 		return -ENOMEM;
 
 	ewma_init(&icsk->icsk_ma->ma_gewma);
+	ewma_init(&icsk->icsk_ma->ma_gewma_count);
 
 	return 0;
 }
@@ -842,6 +849,13 @@ static struct sock *ma_alloc_node(struct sock *sk, int cpu)
 }
 
 static void __inet_csk_listen_stop_one(struct sock *sk);
+static void ma_gewma_handler(unsigned long);
+static void ma_ewma_handler(unsigned long);
+static unsigned long ma_timer_expires = HZ/10;
+static unsigned long ma_ewma_timer_expires = HZ/10;
+
+int sysctl_multi_accept_c __read_mostly = 1;
+EXPORT_SYMBOL_GPL(sysctl_multi_accept_c);
 
 int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 {
@@ -856,19 +870,29 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 	if (icsk->icsk_ma) {
 		num_sockets = num_possible_cpus();
 
-		icsk->icsk_ma->ma_sks[0] = sk;
+		icsk->icsk_ma->ma_per_cpu[0].sk = sk;
+		icsk->icsk_ma->ma_per_cpu[0].cpu = 0;
 
 		for (c = 1; c < num_sockets; c++) {
-			icsk->icsk_ma->ma_sks[c] = ma_alloc_node(sk, c);
-			if (!icsk->icsk_ma->ma_sks[c]) {
+			struct ma_per_cpu *ma_pc = &icsk->icsk_ma->ma_per_cpu[c];
+			ma_pc->sk = ma_alloc_node(sk, c);
+			if (!ma_pc->sk) {
 				err = -ENOMEM;
 				goto clone_error;
 			}
+			ma_pc->cpu = c;
+		}
+
+		for (c = sysctl_multi_accept_c; c < num_sockets; c++) {
+			struct ma_per_cpu *ma_pc = &icsk->icsk_ma->ma_per_cpu[c];
+			struct timer_list *timer = &ma_pc->timer;
+			setup_timer(timer, ma_ewma_handler, (unsigned long)ma_pc);
+			mod_timer(timer, jiffies + ma_ewma_timer_expires);
 		}
 	}
 
 	for (s = 0; s < num_sockets; s++) {
-		struct sock *start_sk = (s==0) ? sk : icsk->icsk_ma->ma_sks[s];
+		struct sock *start_sk = (s==0) ? sk : icsk->icsk_ma->ma_per_cpu[s].sk;
 
 		printk("starting socket %d\n", s);
 
@@ -880,6 +904,12 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 		start_sk->sk_max_ack_backlog = nr_table_entries;
 	}
 
+	if (icsk->icsk_ma) {
+		setup_timer(&icsk->icsk_ma->ma_gewma_timer, ma_gewma_handler,
+			(unsigned long)sk);
+		mod_timer(&icsk->icsk_ma->ma_gewma_timer, jiffies + ma_timer_expires);
+	}
+
 	/* There is race window here: we announce ourselves listening,
 	 * but this transition is still not validated by get_port().
 	 * It is OK, because this socket enters to hash table only
@@ -887,7 +917,7 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 	 */
 	if (!sk->sk_prot->get_port(sk, inet->inet_num)) {
 		for (s = 0; s < num_sockets; s++) {
-			struct sock *start_sk = (s==0) ? sk : icsk->icsk_ma->ma_sks[s];
+			struct sock *start_sk = (s==0) ? sk : icsk->icsk_ma->ma_per_cpu[s].sk;
 			printk("finishing starting socket %d\n", s);
 			__inet_csk_listen_start_one_finish(start_sk);
 		}
@@ -904,7 +934,7 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 start_error:
 	for (s--; s > 1; s--) {
 		printk("stopping socket %d\n", s);
-		__inet_csk_listen_stop_one(icsk->icsk_ma->ma_sks[s]);
+		__inet_csk_listen_stop_one(icsk->icsk_ma->ma_per_cpu[s].sk);
 	}
 
 	if (s == 0) {
@@ -914,15 +944,15 @@ start_error:
 
 	for (c = 1; c < num_sockets; c++) {
 		printk("destroying socket %d\n", c);
-		kfree(icsk->icsk_ma->ma_sks[c]);
-		icsk->icsk_ma->ma_sks[c] = NULL;
+		kfree(icsk->icsk_ma->ma_per_cpu[c].sk);
+		icsk->icsk_ma->ma_per_cpu[c].sk = NULL;
 	}
 
 	goto err_out;
 
 clone_error:
 	for (c--; c > 1; c--) {
-		struct socket *sock = icsk->icsk_ma->ma_sks[c]->sk_socket;
+		struct socket *sock = icsk->icsk_ma->ma_per_cpu[c].sk->sk_socket;
 		printk("destroying socket %d\n", c);
 
 		//AP: TODO what about freeing the socket and the wq??
@@ -930,11 +960,8 @@ clone_error:
 		kfree(sock->wq);
 		kfree(sock);
 
-		__inet_csk_destroy_sock_one(icsk->icsk_ma->ma_sks[c]);
-
-		//kfree(icsk->icsk_ma->ma_sks[c]); // AP: XXX this is not
-		//needed becuase destroy above should take care of free.
-		icsk->icsk_ma->ma_sks[c] = NULL;
+		__inet_csk_destroy_sock_one(icsk->icsk_ma->ma_per_cpu[c].sk);
+		icsk->icsk_ma->ma_per_cpu[c].sk = NULL;
 	}
 
 err_out:
@@ -1008,7 +1035,7 @@ void inet_csk_listen_stop(struct sock *sk)
 		int i;
 		for (i = 1; i < num_possible_cpus(); i++) {
 			printk("inet_csk_listen_stop stopping slave %d\n", i);
-			__inet_csk_listen_stop_one(icsk->icsk_ma->ma_sks[i]);
+			__inet_csk_listen_stop_one(icsk->icsk_ma->ma_per_cpu[i].sk);
 		}
 	}
 
@@ -1102,5 +1129,34 @@ int inet_csk_reqsk_steal(struct sock *sk)
 	rcu_read_unlock();
 
 	return r;
+}
+
+static void ma_gewma_handler(unsigned long a) {
+	struct sock *sk = (struct sock *) a;
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	unsigned long expires = ma_timer_expires;
+
+	rcu_read_lock();
+	if (ma_ops) {
+		unsigned long e = ma_ops->handler(sk);
+		if (e != 0) expires = e;
+	}
+	rcu_read_unlock();
+
+	mod_timer(&icsk->icsk_ma->ma_gewma_timer, jiffies + expires);
+}
+
+static void ma_ewma_handler(unsigned long a) {
+	struct ma_per_cpu *ma_per_cpu = (struct ma_per_cpu *) a;
+	unsigned long expires = ma_ewma_timer_expires;
+
+	rcu_read_lock();
+	if (ma_ops) {
+		unsigned long e = ma_ops->local_handler(ma_per_cpu);
+		if (e != 0) expires = e;
+	}
+	rcu_read_unlock();
+
+	mod_timer(&ma_per_cpu->timer, jiffies + expires);
 }
 

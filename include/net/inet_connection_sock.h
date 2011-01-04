@@ -63,34 +63,37 @@ struct inet_connection_sock_af_ops {
 				     const struct inet_bind_bucket *tb);
 };
 
-// AP: TODO are the cache aligned flags placed in the right place?
-/** inet_connection_sock - INET connection oriented sock
- * @ma_sks:
- * @ma_socks:
+struct ma_per_cpu {
+	int 			cpu;
+	struct sock		*sk;
+	struct timer_list 	timer ____cacheline_aligned_in_smp;
+	int			busy;
+	int			count;
+	atomic_t		steals;
+};
+
+/** multi_accept - 
  */
 struct multi_accept {
-	// read mostly
-	struct sock *ma_sks[NR_CPUS];
+	struct ma_per_cpu 	ma_per_cpu[NR_CPUS];
 
-	// read/write
- 	//struct timer_list ma_timer[NR_CPUS]; // AP: TODO false sharing
-
-	int		ma_core_busy[NR_CPUS];
-	atomic_t	ma_steals[NR_CPUS];
-
-	spinlock_t	ma_lock ____cacheline_aligned_in_smp;
-	struct ewma	ma_gewma;
-	int		ma_gewma_update[NR_CPUS];
+	spinlock_t		ma_lock ____cacheline_aligned_in_smp;
+	struct timer_list 	ma_gewma_timer;
+	struct ewma		ma_gewma;
+	struct ewma		ma_gewma_count;
 };
 
 extern int sysctl_multi_accept_lb;
 extern int sysctl_multi_accept_debug;
+extern int sysctl_multi_accept_c;
 
 extern int inet_csk_ma_init(struct sock *sk);
 
 struct multi_accept_ops {
-	void	(*balance) (struct sock *sk);
-	int	(*steal) (struct sock *sk);
+	void	(*balance) (struct sock *);
+	int	(*steal) (struct sock *);
+	unsigned long (*handler) (struct sock *);
+	unsigned long (*local_handler) (struct ma_per_cpu *);
 };
 
 void inet_csk_ma_register(struct multi_accept_ops *ops);
@@ -185,13 +188,24 @@ extern struct sock *inet_csk_clone(struct sock *sk,
 
 extern int inet_csk_reqsk_steal(struct sock *sk);
 
-static inline struct sock *icsk_get_local_listen(struct sock *sk)
+// AP: TODO this is a terrible function name.
+static inline struct sock *icsk_get_local_listen_for_accept(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct sock *tsk = sk;
 	if (icsk->icsk_ma) {
 		int cpu = inet_csk_reqsk_steal(sk);
-		tsk = icsk->icsk_ma->ma_sks[cpu];
+		tsk = icsk->icsk_ma->ma_per_cpu[cpu].sk;
+	}
+	return tsk;
+}
+
+static inline struct sock *icsk_get_local_listen(struct sock *sk)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct sock *tsk = sk;
+	if (icsk->icsk_ma) {
+		tsk = icsk->icsk_ma->ma_per_cpu[smp_processor_id()].sk;
 	}
 	return tsk;
 }

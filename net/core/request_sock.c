@@ -68,7 +68,8 @@ int reqsk_queue_alloc(struct request_sock_queue *queue,
 	     lopt->max_qlen_log++);
 
 	reqsk_hist_init(queue);
-	ewma_init(&queue->ewma);
+	ewma_init(&queue->queue_len_ewma);
+	ewma_init(&queue->conn_per_sec_ewma);
 
 	get_random_bytes(&lopt->hash_rnd, sizeof(lopt->hash_rnd));
 	rwlock_init(&queue->syn_wait_lock);

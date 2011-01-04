@@ -134,7 +134,8 @@ struct request_sock_queue {
 	struct Hist		histogram;
 	struct stat_data	stats;
 
-	struct ewma		ewma;
+	struct ewma		queue_len_ewma;
+	struct ewma		conn_per_sec_ewma;
 };
 
 extern int reqsk_queue_alloc(struct request_sock_queue *queue,
@@ -175,7 +176,7 @@ static inline void reqsk_queue_add(struct request_sock_queue *queue,
 				   struct sock *child)
 {
 	reqsk_hist_update(queue);
-	ewma_update(&queue->ewma, reqsk_queue_len(queue));
+	ewma_update(&queue->queue_len_ewma, reqsk_queue_len(queue));
 
 	req->sk = child;
 	sk_acceptq_added(parent);

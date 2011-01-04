@@ -2352,7 +2352,8 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		if (icsk->icsk_ma) {
 			int i;
 			for (i = 1; i < num_possible_cpus(); i++) {
-				inet_csk(icsk->icsk_ma->ma_sks[i])->icsk_accept_queue.rskq_defer_accept =
+				struct sock *tsk = icsk->icsk_ma->ma_per_cpu[i].sk;
+				inet_csk(tsk)->icsk_accept_queue.rskq_defer_accept =
 					icsk->icsk_accept_queue.rskq_defer_accept;
 			}
 		}

@@ -665,7 +665,7 @@ EXPORT_SYMBOL(inet_stream_connect);
 
 int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 {
-	struct sock *sk1 = icsk_get_local_listen(sock->sk);
+	struct sock *sk1 = icsk_get_local_listen_for_accept(sock->sk);
 	int err = -EINVAL;
 	struct sock *sk2 = sk1->sk_prot->accept(sk1, flags, &err);
 
