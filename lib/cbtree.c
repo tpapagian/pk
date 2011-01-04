@@ -10,6 +10,7 @@
 #else
 #include <linux/kernel.h>
 #include <linux/slab.h>
+#include <linux/rcupdate.h>
 #include <linux/cbtree.h>
 
 #define assert(s) do{if (!(s)) panic(#s);} while(0);
@@ -20,9 +21,6 @@
 #if RCU
 void rcu_init(void);
 void rcu_gc(void);
-void rcu_delayed(void *e, void (*dofree)(void *));
-void rcu_begin_read(int tid);
-void rcu_end_read(int tid);
 void rcu_begin_write(int tid);
 void rcu_end_write(int tid);
 #endif
@@ -36,13 +34,13 @@ void *dfreeList[MAX_DFREE];
 int dfreePos;
 int totalFreed;
 
+void kernel_dfree(void *ptr);
+
 static inline void
 dfree(void *ptr)
 {
 #if KERNEL
-        // XXX Not implemented
-#elif RCU
-        rcu_delayed(ptr, free);
+  kernel_dfree(ptr);
 #else
         int i;
 
@@ -88,6 +86,8 @@ struct TreeBB_Node
         SHARED(unsigned int, size);
 
         kv_t kv;
+
+  struct rcu_head rcu;
 };
 
 typedef struct TreeBB_Node node_t;
@@ -103,6 +103,21 @@ TreeBB_Init(void)
 }
 
 core_initcall(TreeBB_Init);
+
+
+// rcu_dereference(p)  to read shared p's value
+// rcu_assign_pointer(old, new) to update shared old to new
+void dfree_reclaim(struct rcu_head *rp)
+{
+  node_t *n = container_of(rp, node_t, rcu);
+  kmem_cache_free(node_cache, n);
+}
+
+void kernel_dfree(void *ptr)
+{
+  node_t *n = ptr;
+  call_rcu(&n->rcu, dfree_reclaim);
+}
 
 enum { WEIGHT = 4 };
 
@@ -358,11 +373,8 @@ bool
 TreeBB_Contains(struct cb_root *tree, uintptr_t key)
 {
         node_t *node;
-#if KERNEL
-        // XXX Not implemented
-#elif RCU
-        rcu_begin_read(getCPU());
-#endif
+
+        rcu_read_lock();
         node = GET(tree->root);
         while (node) {
                 if (node->kv.key == key)
@@ -372,11 +384,7 @@ TreeBB_Contains(struct cb_root *tree, uintptr_t key)
                 else
                         node = GET(node->right);
         }
-#if KERNEL
-        // XXX Not implemented
-#elif RCU
-        rcu_end_read(getCPU());
-#endif
+        rcu_read_unlock();
         return !!node;
 }
 
