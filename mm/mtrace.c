@@ -19,6 +19,16 @@ static DEFINE_PER_CPU_ALIGNED(atomic64_t, mtrace_call_tag);
 static DEFINE_PER_CPU_ALIGNED(struct mtrace_call_stack, 
 			      mtrace_irq_call_stack) = { .curr = -1 };
 
+/* 16 CPUs maximum */
+#define MTRACE_CPUS_SHIFT     4UL
+#define MTRACE_CPUS_MAX	      (1 << MTRACE_CPUS_SHIFT)
+#define MTRACE_TAG_SHIFT      (64UL - MTRACE_CPUS_SHIFT)
+#define MTRACE_TAG_MASK       (~((1UL << MTRACE_TAG_SHIFT) - 1UL))
+
+#if MTRACE_CPUS_MAX < NR_CPUS
+#error MTRACE_CPUS_MAX < NR_CPUS
+#endif
+
 static inline struct kmem_cache *page_get_cache(struct page *page)
 {
 	page = compound_head(page);
@@ -130,36 +140,42 @@ static void mtrace_mm_page_alloc_extfrag(void *unused,
 
 }
 
-static void __mtrace_fcall_start(struct mtrace_call_stack *stack)
+static void __mtrace_stack_state(struct mtrace_call_stack *stack, 
+				 mtrace_call_state_t state)
 {
 	int i = stack->curr;
 	mtrace_fcall_register(0, stack->stack[i].pc, 
-			      stack->stack[i].tag, i, mtrace_start);
-}
-
-static void __mtrace_fcall_stop(struct mtrace_call_stack *stack)
-{
-	int i = stack->curr;
-	mtrace_fcall_register(0, stack->stack[i].pc, 
-			      stack->stack[i].tag, i, mtrace_done);
+			      stack->stack[i].tag, i, state);
 }
 
 static void __mtrace_push_call(struct mtrace_call_stack *stack, unsigned long pc)
 {
 	atomic64_t *counter;
+	unsigned long flags;
+	int cpu;
 	u64 tag;
 	int i;
+
+	local_irq_save(flags);
 	
+	cpu = smp_processor_id();
+
 	if (stack->curr + 1 == MTRACE_CALL_STACK_DEPTH)
 		panic("__mtrace_push_call: max depth exceeded");
 
 	i = ++stack->curr;
-	counter = &per_cpu(mtrace_call_tag, smp_processor_id());
+	counter = &per_cpu(mtrace_call_tag, cpu);
 	tag = atomic64_add_return(1, counter);
+
+	if (tag & MTRACE_TAG_MASK)
+		panic("__mtrace_push_call: out of tags");
+	tag |= (u64)cpu << MTRACE_TAG_SHIFT;
 
 	stack->stack[i].pc = pc;
 	stack->stack[i].tag = tag;
-	__mtrace_fcall_start(stack);
+	__mtrace_stack_state(stack, mtrace_start);
+
+	local_irq_restore(flags);
 }
 
 static void __mtrace_pop_call(struct mtrace_call_stack *stack)
@@ -167,7 +183,7 @@ static void __mtrace_pop_call(struct mtrace_call_stack *stack)
 	int i;
 
 	BUG_ON(stack->curr <= -1);
-	__mtrace_fcall_stop(stack);
+	__mtrace_stack_state(stack, mtrace_done);
 	i = stack->curr--;
 	stack->stack[i].pc = 0;
 	stack->stack[i].tag = 0;
@@ -207,9 +223,9 @@ void mtrace_start_do_irq(unsigned long pc)
 	stack = &per_cpu(mtrace_irq_call_stack, smp_processor_id());
 
 	if (stack->curr > -1)
-		__mtrace_fcall_stop(stack);
+		__mtrace_stack_state(stack, mtrace_pause);
 	else if (current && current->mtrace_stack.curr > -1)
-		__mtrace_fcall_stop(&current->mtrace_stack);
+		__mtrace_stack_state(&current->mtrace_stack, mtrace_pause);
 
 	__mtrace_push_call(stack, pc);
 }
@@ -222,9 +238,9 @@ void mtrace_end_do_irq(void)
 	__mtrace_pop_call(stack);
 
 	if (stack->curr > -1)
-		__mtrace_fcall_start(stack);
+		__mtrace_stack_state(stack, mtrace_resume);
 	else if (current && current->mtrace_stack.curr > -1)
-		__mtrace_fcall_start(&current->mtrace_stack);
+		__mtrace_stack_state(&current->mtrace_stack, mtrace_resume);
 }
 
 void mtrace_start_entry(unsigned long pc)
@@ -259,10 +275,10 @@ static void mtrace_sched_switch(void *unused, struct task_struct *prev,
 				struct task_struct *next)
 {
 	if (prev->mtrace_stack.curr >= 0)
-		__mtrace_fcall_stop(&prev->mtrace_stack);
+		__mtrace_stack_state(&prev->mtrace_stack, mtrace_pause);
 
 	if (next->mtrace_stack.curr >= 0)
-		__mtrace_fcall_start(&next->mtrace_stack);
+		__mtrace_stack_state(&next->mtrace_stack, mtrace_resume);
 }
 
 void __init mtrace_init(void)
