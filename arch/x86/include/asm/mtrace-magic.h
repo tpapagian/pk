@@ -127,6 +127,7 @@ struct mtrace_lock_entry {
     struct mtrace_entry_header h;
 
     uint64_t pc;
+    uint64_t lock;
     char str[32];
     uint8_t release;
     uint8_t read;
@@ -219,19 +220,21 @@ static inline void mtrace_fcall_register(unsigned long tid,
 }
 
 static inline void mtrace_lock_register(unsigned long pc,
+                                        void *lock,
 					const char *str,
 					unsigned long release,
 					unsigned long is_read)
 {
-    volatile struct mtrace_lock_entry lock;
-    lock.pc = pc;
-    strncpy((char*)lock.str, str, sizeof(lock.str);
-    lock.str[sizeof(lock.str)-1] = 0;
-    lock.release = release;
-    lock.read = is_read;
+    volatile struct mtrace_lock_entry entry;
+    entry.pc = pc;
+    entry.lock = (unsigned long)lock;
+    strncpy((char*)entry.str, str, sizeof(entry.str));
+    entry.str[sizeof(entry.str)-1] = 0;
+    entry.release = release;
+    entry.read = is_read;
 
-    mtrace_magic(MTRACE_ENTRY_REGISTER, (unsigned long)&lock,
-		 mtrace_entry_lock, sizeof(lock) ~0, 0);
+    mtrace_magic(MTRACE_ENTRY_REGISTER, (unsigned long)&entry,
+		 mtrace_entry_lock, sizeof(entry), ~0, 0);
 }
 
 #endif /* QEMU_MTRACE */
