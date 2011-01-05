@@ -7,6 +7,7 @@
 #include <trace/events/kmem.h>
 #include <trace/events/syscalls.h>
 #include <trace/events/sched.h>
+#include <trace/events/lock.h>
 
 #include <linux/kprobes.h>
 #include <linux/ptrace.h>
@@ -281,6 +282,28 @@ static void mtrace_sched_switch(void *unused, struct task_struct *prev,
 		__mtrace_stack_state(&next->mtrace_stack, mtrace_resume);
 }
 
+#ifdef CONFIG_LOCKDEP
+static void mtrace_lock_acquire(void *unused, struct lockdep_map *lock,
+                                unsigned int subclass, int trylock, int read,
+                                int check, struct lockdep_map *next_lock,
+                                unsigned long ip)
+{
+	mtrace_lock_register(ip, lock->name, 0, read);
+	/* 
+	 * static int i;
+	 * if (++i % 1000 == 0)
+	 * printk(KERN_INFO "lock_acquire(%s, %lu)\n",
+	 *	  lock->name, ip);
+	 */
+}
+
+static void mtrace_lock_release(void *unused, struct lockdep_map *lock,
+				unsigned long ip)
+{
+	mtrace_lock_register(ip, lock->name, 1, 0);
+}
+#endif
+
 void __init mtrace_init(void)
 {
 #define REG(name) BUG_ON(register_trace_##name(mtrace_##name, NULL))
@@ -310,5 +333,12 @@ void __init mtrace_init(void)
 
 	REG(sched_switch);
 
+#ifdef CONFIG_LOCKDEP
+	REG(lock_acquire);
+	REG(lock_release);
+#endif
+
 #undef REG
+
+	mtrace_enable_set(1, "all", 3);
 }
