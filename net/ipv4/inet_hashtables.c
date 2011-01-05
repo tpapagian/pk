@@ -22,6 +22,7 @@
 #include <net/inet_connection_sock.h>
 #include <net/inet_hashtables.h>
 #include <net/ip.h>
+#include <net/multi_accept.h>
 
 /*
  * Allocate and initialize a new local port bind bucket.
@@ -182,7 +183,7 @@ begin:
 	if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
 		goto begin;
 	if (result) {
-		result = icsk_get_local_listen(result);
+		result = ma_get_local_sk(result);
 		if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
 			result = NULL;
 		else if (unlikely(compute_score(result, net, hnum, daddr,

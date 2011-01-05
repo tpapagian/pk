@@ -69,6 +69,7 @@
 #include <net/transp_v6.h>
 #include <net/ipv6.h>
 #include <net/inet_common.h>
+#include <net/multi_accept.h>
 #include <net/timewait_sock.h>
 #include <net/xfrm.h>
 #include <net/netdma.h>
@@ -2443,14 +2444,6 @@ static struct tcp_seq_afinfo tcp4_seq_afinfo = {
 	},
 };
 
-static inline void print_ewma(struct ewma *e, struct seq_file *f)
-{
-	uint64_t ewma = ewma_scaled_average(e);
-	uint64_t bits = ewma_scale(e);
-	uint64_t bits_mask = (1 << bits) - 1;
-	seq_printf(f, "%llu %llu/%llu\n", ewma >> bits, ewma & bits_mask, bits_mask+1);
-}
-
 static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
 {
 	int i;
@@ -2458,35 +2451,18 @@ static void get_tcp4_accept_hist(struct sock *sk, struct seq_file *f)
 
 	if (icsk->icsk_ma) {
 		for (i = 0; i < num_possible_cpus(); i++) {
-			struct ma_per_cpu *ma_pc = &icsk->icsk_ma->ma_per_cpu[i];
-			struct inet_connection_sock *ticsk = inet_csk(ma_pc->sk);
-
-			seq_printf(f, "ewma: ");
-			print_ewma(&ticsk->icsk_accept_queue.queue_len_ewma, f);
-			seq_printf(f, "conn: ");
-			print_ewma(&ticsk->icsk_accept_queue.conn_per_sec_ewma, f);
-			seq_printf(f, "gewma: ");
-			print_ewma(&ticsk->icsk_ma->ma_gewma, f);
-			seq_printf(f, "gewma_count: ");
-			print_ewma(&ticsk->icsk_ma->ma_gewma_count, f);
-
-			seq_printf(f, "busy: %s\n", ma_pc->busy ? "true" : "false");
-
-			seq_printf(f, "steals: %d\n", atomic_read(&ma_pc->steals));
-
+			struct inet_connection_sock *ticsk = inet_csk(ma_get_sk(sk, i));
+			ma_lb_print(sk, i, f);
 			reqsk_queue_hash_print(&ticsk->icsk_accept_queue, f);
 		}
-	} else {
-		seq_printf(f, "ewma: ");
-		print_ewma(&icsk->icsk_accept_queue.queue_len_ewma, f);
-		reqsk_queue_hash_print(&icsk->icsk_accept_queue, f);
 	}
 }
 
 static void tcp4_seq_hist_stop(struct seq_file *seq, void *v)
 {
 	int i;
-	struct inet_connection_sock *icsk = inet_csk((struct sock *)v);
+	struct sock *sk = (struct sock *)v;
+	struct inet_connection_sock *icsk = inet_csk(sk);
 
 	// Check to make sure that buffer did not overflow.
 	if (seq_printf(seq, "\n") != 0)
@@ -2494,13 +2470,10 @@ static void tcp4_seq_hist_stop(struct seq_file *seq, void *v)
 
 	if (icsk->icsk_ma) {
 		for (i = 0; i < num_possible_cpus(); i++) {
-			struct ma_per_cpu *ma_pc = &icsk->icsk_ma->ma_per_cpu[i];
-			struct inet_connection_sock *ticsk = inet_csk(ma_pc->sk);
+			struct inet_connection_sock *ticsk = inet_csk(ma_get_sk(sk, i));
+			ma_lb_reset(sk, i);
 			reqsk_hist_clear(&ticsk->icsk_accept_queue);
-			atomic_set(&ma_pc->steals, 0);
 		}
-	} else {
-		reqsk_hist_clear(&icsk->icsk_accept_queue);
 	}
 }
 

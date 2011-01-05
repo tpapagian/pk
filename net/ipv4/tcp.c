@@ -271,6 +271,7 @@
 #include <net/tcp.h>
 #include <net/xfrm.h>
 #include <net/ip.h>
+#include <net/multi_accept.h>
 #include <net/netdma.h>
 #include <net/sock.h>
 
@@ -2232,7 +2233,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			break;
 		}
 
-		err = inet_csk_ma_init(sk);
+		err = ma_init(sk);
 		break;
 	case TCP_MAXSEG:
 		/* Values greater than interface MTU won't take effect. However
@@ -2352,7 +2353,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		if (icsk->icsk_ma) {
 			int i;
 			for (i = 1; i < num_possible_cpus(); i++) {
-				struct sock *tsk = icsk->icsk_ma->ma_per_cpu[i].sk;
+				struct sock *tsk = icsk->icsk_ma->ma_pc[i].mapc_sk;
 				inet_csk(tsk)->icsk_accept_queue.rskq_defer_accept =
 					icsk->icsk_accept_queue.rskq_defer_accept;
 			}
@@ -3193,8 +3194,6 @@ void tcp_done(struct sock *sk)
 		inet_csk_destroy_sock(sk);
 }
 EXPORT_SYMBOL_GPL(tcp_done);
-
-extern struct tcp_congestion_ops tcp_reno;
 
 static __initdata unsigned long thash_entries;
 static int __init set_thash_entries(char *str)

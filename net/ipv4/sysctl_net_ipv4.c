@@ -16,6 +16,7 @@
 #include <net/snmp.h>
 #include <net/icmp.h>
 #include <net/ip.h>
+#include <net/multi_accept.h>
 #include <net/route.h>
 #include <net/tcp.h>
 #include <net/udp.h>

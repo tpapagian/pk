@@ -102,6 +102,7 @@
 #include <net/route.h>
 #include <net/ip_fib.h>
 #include <net/inet_connection_sock.h>
+#include <net/multi_accept.h>
 #include <net/tcp.h>
 #include <net/udp.h>
 #include <net/udplite.h>
@@ -665,7 +666,7 @@ EXPORT_SYMBOL(inet_stream_connect);
 
 int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 {
-	struct sock *sk1 = icsk_get_local_listen_for_accept(sock->sk);
+	struct sock *sk1 = ma_get_local_or_steal_sk(sock->sk);
 	int err = -EINVAL;
 	struct sock *sk2 = sk1->sk_prot->accept(sk1, flags, &err);
 

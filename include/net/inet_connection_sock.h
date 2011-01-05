@@ -63,41 +63,7 @@ struct inet_connection_sock_af_ops {
 				     const struct inet_bind_bucket *tb);
 };
 
-struct ma_per_cpu {
-	int 			cpu;
-	struct sock		*sk;
-	struct timer_list 	timer ____cacheline_aligned_in_smp;
-	int			busy;
-	int			count;
-	atomic_t		steals;
-};
-
-/** multi_accept - 
- */
-struct multi_accept {
-	struct ma_per_cpu 	ma_per_cpu[NR_CPUS];
-
-	spinlock_t		ma_lock ____cacheline_aligned_in_smp;
-	struct timer_list 	ma_gewma_timer;
-	struct ewma		ma_gewma;
-	struct ewma		ma_gewma_count;
-};
-
-extern int sysctl_multi_accept_lb;
-extern int sysctl_multi_accept_debug;
-extern int sysctl_multi_accept_c;
-
-extern int inet_csk_ma_init(struct sock *sk);
-
-struct multi_accept_ops {
-	void	(*balance) (struct sock *);
-	int	(*steal) (struct sock *);
-	unsigned long (*handler) (struct sock *);
-	unsigned long (*local_handler) (struct ma_per_cpu *);
-};
-
-void inet_csk_ma_register(struct multi_accept_ops *ops);
-void inet_csk_ma_unregister(void);
+struct multi_accept;
 
 /** inet_connection_sock - INET connection oriented sock
  *
@@ -185,30 +151,6 @@ static inline void *inet_csk_ca(const struct sock *sk)
 extern struct sock *inet_csk_clone(struct sock *sk,
 				   const struct request_sock *req,
 				   const gfp_t priority);
-
-extern int inet_csk_reqsk_steal(struct sock *sk);
-
-// AP: TODO this is a terrible function name.
-static inline struct sock *icsk_get_local_listen_for_accept(struct sock *sk)
-{
-	struct inet_connection_sock *icsk = inet_csk(sk);
-	struct sock *tsk = sk;
-	if (icsk->icsk_ma) {
-		int cpu = inet_csk_reqsk_steal(sk);
-		tsk = icsk->icsk_ma->ma_per_cpu[cpu].sk;
-	}
-	return tsk;
-}
-
-static inline struct sock *icsk_get_local_listen(struct sock *sk)
-{
-	struct inet_connection_sock *icsk = inet_csk(sk);
-	struct sock *tsk = sk;
-	if (icsk->icsk_ma) {
-		tsk = icsk->icsk_ma->ma_per_cpu[smp_processor_id()].sk;
-	}
-	return tsk;
-}
 
 enum inet_csk_ack_state_t {
 	ICSK_ACK_SCHED	= 1,
@@ -314,14 +256,14 @@ extern int inet_csk_get_port(struct sock *sk, unsigned short snum);
 extern struct dst_entry* inet_csk_route_req(struct sock *sk,
 					    const struct request_sock *req);
 
-extern void inet_csk_reqsk_balance(struct sock *sk);
+extern void ma_lb_balance(struct sock *sk);
 
 static inline void inet_csk_reqsk_queue_add(struct sock *sk,
 					    struct request_sock *req,
 					    struct sock *child)
 {
 	reqsk_queue_add(&inet_csk(sk)->icsk_accept_queue, req, sk, child);
-	inet_csk_reqsk_balance(sk);
+	ma_lb_balance(sk);
 }
 
 extern void inet_csk_reqsk_queue_hash_add(struct sock *sk,
