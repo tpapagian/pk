@@ -15,10 +15,12 @@ inline uint64_t ewma_scale(const struct ewma *e)
 {
 	return EWMA_SCALE;
 }
+EXPORT_SYMBOL_GPL(ewma_scale);
 
 inline void ewma_init(struct ewma *e) {
 	e->avg = 0;
 }
+EXPORT_SYMBOL_GPL(ewma_init);
 
 /* Return the current scaled moving average.
  * The returned value has scale() bits of fraction.
