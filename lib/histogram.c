@@ -21,6 +21,7 @@
 #include <linux/kernel.h>
 #include <linux/seq_file.h>
 #include <linux/types.h>
+#include <linux/module.h>
 
 #include <asm/div64.h>
 
@@ -31,6 +32,7 @@ int _stp_stat_calc_buckets(int stop, int start, int interval)
 	buckets = (stop - start) / interval + 3;
 	return buckets;
 }
+EXPORT_SYMBOL_GPL(_stp_stat_calc_buckets);
 
 static int needed_space(int64_t v)
 {
@@ -281,11 +283,13 @@ void _stp_stat_print_histogram_seq(struct Hist *st, struct stat_data *sd, struct
 {
 	__stp_stat_print_histogram_seq(st, sd, f);
 }
+EXPORT_SYMBOL_GPL(_stp_stat_print_histogram_seq);
 
 void _stp_stat_print_histogram_buf(struct Hist *st, struct stat_data *sd)
 {
 	__stp_stat_print_histogram_seq(st, sd, NULL);
 }
+EXPORT_SYMBOL_GPL(_stp_stat_print_histogram_buf);
 
 void _stp_stat_add(struct Hist *st, struct stat_data *sd, int64_t val)
 {
@@ -333,3 +337,4 @@ void _stp_stat_add(struct Hist *st, struct stat_data *sd, int64_t val)
 		break;
 	}
 }
+EXPORT_SYMBOL_GPL(_stp_stat_add);
