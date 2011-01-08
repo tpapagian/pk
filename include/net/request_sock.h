@@ -169,6 +169,7 @@ static inline void reqsk_queue_unlink(struct request_sock_queue *queue,
 
 static inline void reqsk_hist_update(struct request_sock_queue *queue);
 static inline int reqsk_queue_len(const struct request_sock_queue *queue);
+extern void ma_lb_add_queue(struct sock *sk, int);
 
 static inline void reqsk_queue_add(struct request_sock_queue *queue,
 				   struct request_sock *req,
@@ -176,7 +177,7 @@ static inline void reqsk_queue_add(struct request_sock_queue *queue,
 				   struct sock *child)
 {
 	reqsk_hist_update(queue);
-	ewma_update(&queue->queue_len_ewma, reqsk_queue_len(queue));
+	ma_lb_add_queue(parent, reqsk_queue_len(queue));
 
 	req->sk = child;
 	sk_acceptq_added(parent);

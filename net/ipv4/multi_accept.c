@@ -58,6 +58,16 @@ int ma_lb_steal(struct sock *sk)
 	return r;
 }
 
+void ma_lb_add_queue(struct sock *sk, int len)
+{
+	if (!inet_csk(sk)->icsk_ma)
+		return;
+
+	rcu_read_lock();
+	if (ma_ops) ma_ops->add_queue(sk, len);
+	rcu_read_unlock();
+}
+
 void ma_lb_print(struct sock *sk, int cpu, struct seq_file *f)
 {
 	rcu_read_lock();
