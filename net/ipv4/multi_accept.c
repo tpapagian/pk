@@ -44,15 +44,15 @@ void ma_lb_balance(struct sock *sk)
 	rcu_read_unlock();
 }
 
-int ma_lb_steal(struct sock *sk)
+int ma_lb_accept(struct sock *sk, int flags, int *err, struct sock **newsk)
 {
-	int r;
+	int r = -EINVAL;
 
 	rcu_read_lock();
-	if (ma_ops)
-		r = ma_ops->steal(sk);
-	else
-		r = smp_processor_id();
+	if (ma_ops) {
+		*newsk = ma_ops->accept(sk, flags, err);
+		r = 0;
+	}
 	rcu_read_unlock();
 
 	return r;

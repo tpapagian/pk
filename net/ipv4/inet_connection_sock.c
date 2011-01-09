@@ -222,7 +222,7 @@ EXPORT_SYMBOL_GPL(inet_csk_get_port);
  * Wait for an incoming connection, avoid race conditions. This must be called
  * with the socket locked.
  */
-static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
+int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	DEFINE_WAIT(wait);
@@ -265,15 +265,25 @@ static int inet_csk_wait_for_connect(struct sock *sk, long timeo)
 	finish_wait(sk_sleep(sk), &wait);
 	return err;
 }
+EXPORT_SYMBOL_GPL(inet_csk_wait_for_connect);
 
 /*
  * This will accept the next outstanding connection.
  */
 struct sock *inet_csk_accept(struct sock *sk, int flags, int *err)
 {
-	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct inet_connection_sock *icsk;
 	struct sock *newsk;
 	int error;
+
+	if (ma_sk(sk)) {
+		if (ma_lb_accept(sk, flags, err, &newsk) == 0)
+			return newsk;
+
+		sk = ma_get_sk(sk, smp_processor_id());
+	}
+
+	icsk = inet_csk(sk);
 
 	lock_sock(sk);
 

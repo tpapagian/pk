@@ -22,8 +22,8 @@ struct multi_accept {
 
 struct multi_accept_lb_ops {
 	void		(*balance) (struct sock *);
-	int		(*steal) (struct sock *);
-	void		(*add_queue) (struct sock *, int);
+	struct sock 	*(*accept)(struct sock *, int flags, int *err);
+	void		(*add_queue) (struct sock *, int len);
 	unsigned long	(*handler) (struct sock *);
 	unsigned long	(*local_handler) (struct ma_per_cpu *);
 
@@ -41,7 +41,7 @@ void ma_stop_per_cpu_timer(struct sock *sk, int cpu);
 void ma_lb_register(struct multi_accept_lb_ops *ops);
 void ma_lb_unregister(void);
 
-int  ma_lb_steal(struct sock *sk);
+int  ma_lb_accept(struct sock *sk, int flags, int *err, struct sock **newsk);
 void ma_lb_balance(struct sock *sk);
 void ma_lb_add_queue(struct sock *sk, int);
 void ma_lb_print(struct sock *sk, int, struct seq_file *f);
@@ -55,14 +55,6 @@ static inline struct multi_accept *ma_sk(struct sock *sk)
 static inline struct sock *ma_get_sk(struct sock *sk, int cpu)
 {
 	return ma_sk(sk)->ma_pc[cpu].mapc_sk;
-}
-
-static inline struct sock *ma_get_local_or_steal_sk(struct sock *sk)
-{
-	if (ma_sk(sk))
-		return ma_get_sk(sk, ma_lb_steal(sk));
-	else
-		return sk;
 }
 
 static inline struct sock *ma_get_local_sk(struct sock *sk)
