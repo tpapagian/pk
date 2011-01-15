@@ -31,49 +31,6 @@
 #include "i915_drv.h"
 #include "i915_drm.h"
 
-static struct drm_i915_gem_object *
-i915_gem_next_active_object(struct drm_device *dev,
-			    struct list_head **render_iter,
-			    struct list_head **bsd_iter)
-{
-	drm_i915_private_t *dev_priv = dev->dev_private;
-	struct drm_i915_gem_object *render_obj = NULL, *bsd_obj = NULL;
-
-	if (*render_iter != &dev_priv->render_ring.active_list)
-		render_obj = list_entry(*render_iter,
-					struct drm_i915_gem_object,
-					list);
-
-	if (HAS_BSD(dev)) {
-		if (*bsd_iter != &dev_priv->bsd_ring.active_list)
-			bsd_obj = list_entry(*bsd_iter,
-					     struct drm_i915_gem_object,
-					     list);
-
-		if (render_obj == NULL) {
-			*bsd_iter = (*bsd_iter)->next;
-			return bsd_obj;
-		}
-
-		if (bsd_obj == NULL) {
-			*render_iter = (*render_iter)->next;
-			return render_obj;
-		}
-
-		/* XXX can we handle seqno wrapping? */
-		if (render_obj->last_rendering_seqno < bsd_obj->last_rendering_seqno) {
-			*render_iter = (*render_iter)->next;
-			return render_obj;
-		} else {
-			*bsd_iter = (*bsd_iter)->next;
-			return bsd_obj;
-		}
-	} else {
-		*render_iter = (*render_iter)->next;
-		return render_obj;
-	}
-}
-
 static bool
 mark_free(struct drm_i915_gem_object *obj_priv,
 	   struct list_head *unwind)
@@ -83,18 +40,12 @@ mark_free(struct drm_i915_gem_object *obj_priv,
 	return drm_mm_scan_add_block(obj_priv->gtt_space);
 }
 
-#define i915_for_each_active_object(OBJ, R, B) \
-	*(R) = dev_priv->render_ring.active_list.next; \
-	*(B) = dev_priv->bsd_ring.active_list.next; \
-	while (((OBJ) = i915_gem_next_active_object(dev, (R), (B))) != NULL)
-
 int
 i915_gem_evict_something(struct drm_device *dev, int min_size, unsigned alignment)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	struct list_head eviction_list, unwind_list;
-	struct drm_i915_gem_object *obj_priv, *tmp_obj_priv;
-	struct list_head *render_iter, *bsd_iter;
+	struct drm_i915_gem_object *obj_priv;
 	int ret = 0;
 
 	i915_gem_retire_requests(dev);
@@ -131,13 +82,13 @@ i915_gem_evict_something(struct drm_device *dev, int min_size, unsigned alignmen
 	drm_mm_init_scan(&dev_priv->mm.gtt_space, min_size, alignment);
 
 	/* First see if there is a large enough contiguous idle region... */
-	list_for_each_entry(obj_priv, &dev_priv->mm.inactive_list, list) {
+	list_for_each_entry(obj_priv, &dev_priv->mm.inactive_list, mm_list) {
 		if (mark_free(obj_priv, &unwind_list))
 			goto found;
 	}
 
 	/* Now merge in the soon-to-be-expired objects... */
-	i915_for_each_active_object(obj_priv, &render_iter, &bsd_iter) {
+	list_for_each_entry(obj_priv, &dev_priv->mm.active_list, mm_list) {
 		/* Does the object require an outstanding flush? */
 		if (obj_priv->base.write_domain || obj_priv->pin_count)
 			continue;
@@ -147,14 +98,14 @@ i915_gem_evict_something(struct drm_device *dev, int min_size, unsigned alignmen
 	}
 
 	/* Finally add anything with a pending flush (in order of retirement) */
-	list_for_each_entry(obj_priv, &dev_priv->mm.flushing_list, list) {
+	list_for_each_entry(obj_priv, &dev_priv->mm.flushing_list, mm_list) {
 		if (obj_priv->pin_count)
 			continue;
 
 		if (mark_free(obj_priv, &unwind_list))
 			goto found;
 	}
-	i915_for_each_active_object(obj_priv, &render_iter, &bsd_iter) {
+	list_for_each_entry(obj_priv, &dev_priv->mm.active_list, mm_list) {
 		if (! obj_priv->base.write_domain || obj_priv->pin_count)
 			continue;
 
@@ -175,39 +126,34 @@ i915_gem_evict_something(struct drm_device *dev, int min_size, unsigned alignmen
 	return -ENOSPC;
 
 found:
+	/* drm_mm doesn't allow any other other operations while
+	 * scanning, therefore store to be evicted objects on a
+	 * temporary list. */
 	INIT_LIST_HEAD(&eviction_list);
-	list_for_each_entry_safe(obj_priv, tmp_obj_priv,
-				 &unwind_list, evict_list) {
+	while (!list_empty(&unwind_list)) {
+		obj_priv = list_first_entry(&unwind_list,
+					    struct drm_i915_gem_object,
+					    evict_list);
 		if (drm_mm_scan_remove_block(obj_priv->gtt_space)) {
-			/* drm_mm doesn't allow any other other operations while
-			 * scanning, therefore store to be evicted objects on a
-			 * temporary list. */
 			list_move(&obj_priv->evict_list, &eviction_list);
-		} else
-			drm_gem_object_unreference(&obj_priv->base);
-	}
-
-	/* Unbinding will emit any required flushes */
-	list_for_each_entry_safe(obj_priv, tmp_obj_priv,
-				 &eviction_list, evict_list) {
-#if WATCH_LRU
-		DRM_INFO("%s: evicting %p\n", __func__, &obj_priv->base);
-#endif
-		ret = i915_gem_object_unbind(&obj_priv->base);
-		if (ret)
-			return ret;
-
+			continue;
+		}
+		list_del(&obj_priv->evict_list);
 		drm_gem_object_unreference(&obj_priv->base);
 	}
 
-	/* The just created free hole should be on the top of the free stack
-	 * maintained by drm_mm, so this BUG_ON actually executes in O(1).
-	 * Furthermore all accessed data has just recently been used, so it
-	 * should be really fast, too. */
-	BUG_ON(!drm_mm_search_free(&dev_priv->mm.gtt_space, min_size,
-				   alignment, 0));
+	/* Unbinding will emit any required flushes */
+	while (!list_empty(&eviction_list)) {
+		obj_priv = list_first_entry(&eviction_list,
+					    struct drm_i915_gem_object,
+					    evict_list);
+		if (ret == 0)
+			ret = i915_gem_object_unbind(&obj_priv->base);
+		list_del(&obj_priv->evict_list);
+		drm_gem_object_unreference(&obj_priv->base);
+	}
 
-	return 0;
+	return ret;
 }
 
 int
@@ -217,14 +163,9 @@ i915_gem_evict_everything(struct drm_device *dev)
 	int ret;
 	bool lists_empty;
 
-	spin_lock(&dev_priv->mm.active_list_lock);
 	lists_empty = (list_empty(&dev_priv->mm.inactive_list) &&
 		       list_empty(&dev_priv->mm.flushing_list) &&
-		       list_empty(&dev_priv->render_ring.active_list) &&
-		       (!HAS_BSD(dev)
-			|| list_empty(&dev_priv->bsd_ring.active_list)));
-	spin_unlock(&dev_priv->mm.active_list_lock);
-
+		       list_empty(&dev_priv->mm.active_list));
 	if (lists_empty)
 		return -ENOSPC;
 
@@ -239,13 +180,9 @@ i915_gem_evict_everything(struct drm_device *dev)
 	if (ret)
 		return ret;
 
-	spin_lock(&dev_priv->mm.active_list_lock);
 	lists_empty = (list_empty(&dev_priv->mm.inactive_list) &&
 		       list_empty(&dev_priv->mm.flushing_list) &&
-		       list_empty(&dev_priv->render_ring.active_list) &&
-		       (!HAS_BSD(dev)
-			|| list_empty(&dev_priv->bsd_ring.active_list)));
-	spin_unlock(&dev_priv->mm.active_list_lock);
+		       list_empty(&dev_priv->mm.active_list));
 	BUG_ON(!lists_empty);
 
 	return 0;
@@ -263,7 +200,7 @@ i915_gem_evict_inactive(struct drm_device *dev)
 
 		obj = &list_first_entry(&dev_priv->mm.inactive_list,
 					struct drm_i915_gem_object,
-					list)->base;
+					mm_list)->base;
 
 		ret = i915_gem_object_unbind(obj);
 		if (ret != 0) {

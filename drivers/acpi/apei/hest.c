@@ -46,9 +46,9 @@ EXPORT_SYMBOL_GPL(hest_disable);
 
 /* HEST table parsing */
 
-static struct acpi_table_hest *hest_tab;
+static struct acpi_table_hest *__read_mostly hest_tab;
 
-static int hest_esrc_len_tab[ACPI_HEST_TYPE_RESERVED] = {
+static const int hest_esrc_len_tab[ACPI_HEST_TYPE_RESERVED] = {
 	[ACPI_HEST_TYPE_IA32_CHECK] = -1,	/* need further calculation */
 	[ACPI_HEST_TYPE_IA32_CORRECTED_CHECK] = -1,
 	[ACPI_HEST_TYPE_IA32_NMI] = sizeof(struct acpi_hest_ia_nmi),
@@ -126,7 +126,7 @@ struct ghes_arr {
 	unsigned int count;
 };
 
-static int hest_parse_ghes_count(struct acpi_hest_header *hest_hdr, void *data)
+static int __init hest_parse_ghes_count(struct acpi_hest_header *hest_hdr, void *data)
 {
 	int *count = data;
 
@@ -135,22 +135,25 @@ static int hest_parse_ghes_count(struct acpi_hest_header *hest_hdr, void *data)
 	return 0;
 }
 
-static int hest_parse_ghes(struct acpi_hest_header *hest_hdr, void *data)
+static int __init hest_parse_ghes(struct acpi_hest_header *hest_hdr, void *data)
 {
-	struct acpi_hest_generic *generic;
 	struct platform_device *ghes_dev;
 	struct ghes_arr *ghes_arr = data;
 	int rc;
 
 	if (hest_hdr->type != ACPI_HEST_TYPE_GENERIC_ERROR)
 		return 0;
-	generic = (struct acpi_hest_generic *)hest_hdr;
-	if (!generic->enabled)
+
+	if (!((struct acpi_hest_generic *)hest_hdr)->enabled)
 		return 0;
 	ghes_dev = platform_device_alloc("GHES", hest_hdr->source_id);
 	if (!ghes_dev)
 		return -ENOMEM;
-	ghes_dev->dev.platform_data = generic;
+
+	rc = platform_device_add_data(ghes_dev, &hest_hdr, sizeof(void *));
+	if (rc)
+		goto err;
+
 	rc = platform_device_add(ghes_dev);
 	if (rc)
 		goto err;
@@ -162,7 +165,7 @@ err:
 	return rc;
 }
 
-static int hest_ghes_dev_register(unsigned int ghes_count)
+static int __init hest_ghes_dev_register(unsigned int ghes_count)
 {
 	int rc, i;
 	struct ghes_arr ghes_arr;

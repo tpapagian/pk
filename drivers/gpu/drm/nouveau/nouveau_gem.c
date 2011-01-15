@@ -107,23 +107,29 @@ nouveau_gem_info(struct drm_gem_object *gem, struct drm_nouveau_gem_info *rep)
 }
 
 static bool
-nouveau_gem_tile_flags_valid(struct drm_device *dev, uint32_t tile_flags) {
-	switch (tile_flags) {
-	case 0x0000:
-	case 0x1800:
-	case 0x2800:
-	case 0x4800:
-	case 0x7000:
-	case 0x7400:
-	case 0x7a00:
-	case 0xe000:
-		break;
-	default:
-		NV_ERROR(dev, "bad page flags: 0x%08x\n", tile_flags);
-		return false;
+nouveau_gem_tile_flags_valid(struct drm_device *dev, uint32_t tile_flags)
+{
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
+
+	if (dev_priv->card_type >= NV_50) {
+		switch (tile_flags & NOUVEAU_GEM_TILE_LAYOUT_MASK) {
+		case 0x0000:
+		case 0x1800:
+		case 0x2800:
+		case 0x4800:
+		case 0x7000:
+		case 0x7400:
+		case 0x7a00:
+		case 0xe000:
+			return true;
+		}
+	} else {
+		if (!(tile_flags & NOUVEAU_GEM_TILE_LAYOUT_MASK))
+			return true;
 	}
 
-	return true;
+	NV_ERROR(dev, "bad page flags: 0x%08x\n", tile_flags);
+	return false;
 }
 
 int
@@ -167,11 +173,9 @@ nouveau_gem_ioctl_new(struct drm_device *dev, void *data,
 		goto out;
 
 	ret = drm_gem_handle_create(file_priv, nvbo->gem, &req->info.handle);
+	/* drop reference from allocate - handle holds it now */
+	drm_gem_object_unreference_unlocked(nvbo->gem);
 out:
-	drm_gem_object_handle_unreference_unlocked(nvbo->gem);
-
-	if (ret)
-		drm_gem_object_unreference_unlocked(nvbo->gem);
 	return ret;
 }
 
@@ -364,7 +368,7 @@ validate_list(struct nouveau_channel *chan, struct list_head *list,
 	list_for_each_entry(nvbo, list, entry) {
 		struct drm_nouveau_gem_pushbuf_bo *b = &pbbo[nvbo->pbbo_index];
 
-		ret = nouveau_bo_sync_gpu(nvbo, chan);
+		ret = nouveau_fence_sync(nvbo->bo.sync_obj, chan);
 		if (unlikely(ret)) {
 			NV_ERROR(dev, "fail pre-validate sync\n");
 			return ret;
@@ -387,7 +391,7 @@ validate_list(struct nouveau_channel *chan, struct list_head *list,
 			return ret;
 		}
 
-		ret = nouveau_bo_sync_gpu(nvbo, chan);
+		ret = nouveau_fence_sync(nvbo->bo.sync_obj, chan);
 		if (unlikely(ret)) {
 			NV_ERROR(dev, "fail post-validate sync\n");
 			return ret;

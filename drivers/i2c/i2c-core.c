@@ -32,7 +32,6 @@
 #include <linux/init.h>
 #include <linux/idr.h>
 #include <linux/mutex.h>
-#include <linux/of_i2c.h>
 #include <linux/of_device.h>
 #include <linux/completion.h>
 #include <linux/hardirq.h>
@@ -197,11 +196,12 @@ static int i2c_device_pm_suspend(struct device *dev)
 {
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
-	if (pm_runtime_suspended(dev))
-		return 0;
-
-	if (pm)
-		return pm->suspend ? pm->suspend(dev) : 0;
+	if (pm) {
+		if (pm_runtime_suspended(dev))
+			return 0;
+		else
+			return pm->suspend ? pm->suspend(dev) : 0;
+	}
 
 	return i2c_legacy_suspend(dev, PMSG_SUSPEND);
 }
@@ -216,12 +216,6 @@ static int i2c_device_pm_resume(struct device *dev)
 	else
 		ret = i2c_legacy_resume(dev);
 
-	if (!ret) {
-		pm_runtime_disable(dev);
-		pm_runtime_set_active(dev);
-		pm_runtime_enable(dev);
-	}
-
 	return ret;
 }
 
@@ -229,11 +223,12 @@ static int i2c_device_pm_freeze(struct device *dev)
 {
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
-	if (pm_runtime_suspended(dev))
-		return 0;
-
-	if (pm)
-		return pm->freeze ? pm->freeze(dev) : 0;
+	if (pm) {
+		if (pm_runtime_suspended(dev))
+			return 0;
+		else
+			return pm->freeze ? pm->freeze(dev) : 0;
+	}
 
 	return i2c_legacy_suspend(dev, PMSG_FREEZE);
 }
@@ -242,11 +237,12 @@ static int i2c_device_pm_thaw(struct device *dev)
 {
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
-	if (pm_runtime_suspended(dev))
-		return 0;
-
-	if (pm)
-		return pm->thaw ? pm->thaw(dev) : 0;
+	if (pm) {
+		if (pm_runtime_suspended(dev))
+			return 0;
+		else
+			return pm->thaw ? pm->thaw(dev) : 0;
+	}
 
 	return i2c_legacy_resume(dev);
 }
@@ -255,11 +251,12 @@ static int i2c_device_pm_poweroff(struct device *dev)
 {
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 
-	if (pm_runtime_suspended(dev))
-		return 0;
-
-	if (pm)
-		return pm->poweroff ? pm->poweroff(dev) : 0;
+	if (pm) {
+		if (pm_runtime_suspended(dev))
+			return 0;
+		else
+			return pm->poweroff ? pm->poweroff(dev) : 0;
+	}
 
 	return i2c_legacy_suspend(dev, PMSG_HIBERNATE);
 }
@@ -428,14 +425,14 @@ static int __i2c_check_addr_busy(struct device *dev, void *addrp)
 /* walk up mux tree */
 static int i2c_check_mux_parents(struct i2c_adapter *adapter, int addr)
 {
+	struct i2c_adapter *parent = i2c_parent_is_i2c_adapter(adapter);
 	int result;
 
 	result = device_for_each_child(&adapter->dev, &addr,
 					__i2c_check_addr_busy);
 
-	if (!result && i2c_parent_is_i2c_adapter(adapter))
-		result = i2c_check_mux_parents(
-				    to_i2c_adapter(adapter->dev.parent), addr);
+	if (!result && parent)
+		result = i2c_check_mux_parents(parent, addr);
 
 	return result;
 }
@@ -456,11 +453,11 @@ static int i2c_check_mux_children(struct device *dev, void *addrp)
 
 static int i2c_check_addr_busy(struct i2c_adapter *adapter, int addr)
 {
+	struct i2c_adapter *parent = i2c_parent_is_i2c_adapter(adapter);
 	int result = 0;
 
-	if (i2c_parent_is_i2c_adapter(adapter))
-		result = i2c_check_mux_parents(
-				    to_i2c_adapter(adapter->dev.parent), addr);
+	if (parent)
+		result = i2c_check_mux_parents(parent, addr);
 
 	if (!result)
 		result = device_for_each_child(&adapter->dev, &addr,
@@ -475,8 +472,10 @@ static int i2c_check_addr_busy(struct i2c_adapter *adapter, int addr)
  */
 void i2c_lock_adapter(struct i2c_adapter *adapter)
 {
-	if (i2c_parent_is_i2c_adapter(adapter))
-		i2c_lock_adapter(to_i2c_adapter(adapter->dev.parent));
+	struct i2c_adapter *parent = i2c_parent_is_i2c_adapter(adapter);
+
+	if (parent)
+		i2c_lock_adapter(parent);
 	else
 		rt_mutex_lock(&adapter->bus_lock);
 }
@@ -488,8 +487,10 @@ EXPORT_SYMBOL_GPL(i2c_lock_adapter);
  */
 static int i2c_trylock_adapter(struct i2c_adapter *adapter)
 {
-	if (i2c_parent_is_i2c_adapter(adapter))
-		return i2c_trylock_adapter(to_i2c_adapter(adapter->dev.parent));
+	struct i2c_adapter *parent = i2c_parent_is_i2c_adapter(adapter);
+
+	if (parent)
+		return i2c_trylock_adapter(parent);
 	else
 		return rt_mutex_trylock(&adapter->bus_lock);
 }
@@ -500,8 +501,10 @@ static int i2c_trylock_adapter(struct i2c_adapter *adapter)
  */
 void i2c_unlock_adapter(struct i2c_adapter *adapter)
 {
-	if (i2c_parent_is_i2c_adapter(adapter))
-		i2c_unlock_adapter(to_i2c_adapter(adapter->dev.parent));
+	struct i2c_adapter *parent = i2c_parent_is_i2c_adapter(adapter);
+
+	if (parent)
+		i2c_unlock_adapter(parent);
 	else
 		rt_mutex_unlock(&adapter->bus_lock);
 }
@@ -680,8 +683,6 @@ i2c_sysfs_new_device(struct device *dev, struct device_attribute *attr,
 	char *blank, end;
 	int res;
 
-	dev_warn(dev, "The new_device interface is still experimental "
-		 "and may change in a near future\n");
 	memset(&info, 0, sizeof(struct i2c_board_info));
 
 	blank = strchr(buf, ' ');
@@ -847,6 +848,18 @@ static int i2c_register_adapter(struct i2c_adapter *adap)
 		goto out_list;
 	}
 
+	/* Sanity checks */
+	if (unlikely(adap->name[0] == '\0')) {
+		pr_err("i2c-core: Attempt to register an adapter with "
+		       "no name!\n");
+		return -EINVAL;
+	}
+	if (unlikely(!adap->algo)) {
+		pr_err("i2c-core: Attempt to register adapter '%s' with "
+		       "no algo!\n", adap->name);
+		return -EINVAL;
+	}
+
 	rt_mutex_init(&adap->bus_lock);
 	mutex_init(&adap->userspace_clients_lock);
 	INIT_LIST_HEAD(&adap->userspace_clients);
@@ -875,9 +888,6 @@ static int i2c_register_adapter(struct i2c_adapter *adap)
 	/* create pre-declared device nodes */
 	if (adap->nr < __i2c_first_dynamic_bus_num)
 		i2c_scan_static_board_info(adap);
-
-	/* Register devices from the device tree */
-	of_i2c_register_devices(adap);
 
 	/* Notify drivers */
 	mutex_lock(&core_lock);
@@ -1510,26 +1520,25 @@ static int i2c_detect(struct i2c_adapter *adapter, struct i2c_driver *driver)
 	if (!driver->detect || !address_list)
 		return 0;
 
+	/* Stop here if the classes do not match */
+	if (!(adapter->class & driver->class))
+		return 0;
+
 	/* Set up a temporary client to help detect callback */
 	temp_client = kzalloc(sizeof(struct i2c_client), GFP_KERNEL);
 	if (!temp_client)
 		return -ENOMEM;
 	temp_client->adapter = adapter;
 
-	/* Stop here if the classes do not match */
-	if (!(adapter->class & driver->class))
-		goto exit_free;
-
 	for (i = 0; address_list[i] != I2C_CLIENT_END; i += 1) {
 		dev_dbg(&adapter->dev, "found normal entry for adapter %d, "
 			"addr 0x%02x\n", adap_id, address_list[i]);
 		temp_client->addr = address_list[i];
 		err = i2c_detect_address(temp_client, driver);
-		if (err)
-			goto exit_free;
+		if (unlikely(err))
+			break;
 	}
 
- exit_free:
 	kfree(temp_client);
 	return err;
 }
