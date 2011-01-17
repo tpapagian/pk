@@ -1175,9 +1175,8 @@ xfrm_tmpl_resolve_one(struct xfrm_policy *policy, struct flowi *fl,
 		    tmpl->mode == XFRM_MODE_BEET) {
 			remote = &tmpl->id.daddr;
 			local = &tmpl->saddr;
-			family = tmpl->encap_family;
-			if (xfrm_addr_any(local, family)) {
-				error = xfrm_get_saddr(net, &tmp, remote, family);
+			if (xfrm_addr_any(local, tmpl->encap_family)) {
+				error = xfrm_get_saddr(net, &tmp, remote, tmpl->encap_family);
 				if (error)
 					goto fail;
 				local = &tmp;
@@ -1594,8 +1593,8 @@ xfrm_resolve_and_create_bundle(struct xfrm_policy **pols, int num_pols,
 
 	/* Try to instantiate a bundle */
 	err = xfrm_tmpl_resolve(pols, num_pols, fl, xfrm, family);
-	if (err < 0) {
-		if (err != -EAGAIN)
+	if (err <= 0) {
+		if (err != 0 && err != -EAGAIN)
 			XFRM_INC_STATS(net, LINUX_MIB_XFRMOUTPOLERROR);
 		return ERR_PTR(err);
 	}
@@ -1676,6 +1675,13 @@ xfrm_bundle_lookup(struct net *net, struct flowi *fl, u16 family, u8 dir,
 			goto error;
 		if (oldflo == NULL)
 			goto make_dummy_bundle;
+		dst_hold(&xdst->u.dst);
+		return oldflo;
+	} else if (new_xdst == NULL) {
+		num_xfrms = 0;
+		if (oldflo == NULL)
+			goto make_dummy_bundle;
+		xdst->num_xfrms = 0;
 		dst_hold(&xdst->u.dst);
 		return oldflo;
 	}
@@ -1760,6 +1766,10 @@ restart:
 				xfrm_pols_put(pols, num_pols);
 				err = PTR_ERR(xdst);
 				goto dropdst;
+			} else if (xdst == NULL) {
+				num_xfrms = 0;
+				drop_pols = num_pols;
+				goto no_transform;
 			}
 
 			spin_lock_bh(&xfrm_policy_sk_bundle_lock);
@@ -2481,7 +2491,8 @@ static int __net_init xfrm_statistics_init(struct net *net)
 	int rv;
 
 	if (snmp_mib_init((void __percpu **)net->mib.xfrm_statistics,
-			  sizeof(struct linux_xfrm_mib)) < 0)
+			  sizeof(struct linux_xfrm_mib),
+			  __alignof__(struct linux_xfrm_mib)) < 0)
 		return -ENOMEM;
 	rv = xfrm_proc_init(net);
 	if (rv < 0)

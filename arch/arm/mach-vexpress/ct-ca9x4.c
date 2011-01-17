@@ -16,6 +16,7 @@
 #include <asm/hardware/gic.h>
 #include <asm/mach-types.h>
 #include <asm/pmu.h>
+#include <asm/smp_twd.h>
 
 #include <mach/clkdev.h>
 #include <mach/ct-ca9x4.h>
@@ -53,6 +54,7 @@ static struct map_desc ct_ca9x4_io_desc[] __initdata = {
 
 static void __init ct_ca9x4_map_io(void)
 {
+	twd_base = MMIO_P2V(A9_MPCORE_TWD);
 	v2m_map_io(ct_ca9x4_io_desc, ARRAY_SIZE(ct_ca9x4_io_desc));
 }
 
@@ -225,7 +227,13 @@ static void ct_ca9x4_init(void)
 	int i;
 
 #ifdef CONFIG_CACHE_L2X0
-	l2x0_init(MMIO_P2V(CT_CA9X4_L2CC), 0x00000000, 0xfe0fffff);
+	void __iomem *l2x0_base = MMIO_P2V(CT_CA9X4_L2CC);
+
+	/* set RAM latencies to 1 cycle for this core tile. */
+	writel(0, l2x0_base + L2X0_TAG_LATENCY_CTRL);
+	writel(0, l2x0_base + L2X0_DATA_LATENCY_CTRL);
+
+	l2x0_init(l2x0_base, 0x00400000, 0xfe0fffff);
 #endif
 
 	clkdev_add_table(lookups, ARRAY_SIZE(lookups));

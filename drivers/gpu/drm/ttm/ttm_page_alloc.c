@@ -40,11 +40,13 @@
 #include <linux/slab.h>
 
 #include <asm/atomic.h>
-#include <asm/agp.h>
 
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_page_alloc.h"
 
+#ifdef TTM_HAS_AGP
+#include <asm/agp.h>
+#endif
 
 #define NUM_PAGES_TO_ALLOC		(PAGE_SIZE/sizeof(struct page *))
 #define SMALL_ALLOCATION		16
@@ -67,7 +69,7 @@ struct ttm_page_pool {
 	spinlock_t		lock;
 	bool			fill_lock;
 	struct list_head	list;
-	int			gfp_flags;
+	gfp_t			gfp_flags;
 	unsigned		npages;
 	char			*name;
 	unsigned long		nfrees;
@@ -392,7 +394,7 @@ static int ttm_pool_get_num_unused_pages(void)
 /**
  * Callback for mm to request pool to reduce number of page held.
  */
-static int ttm_pool_mm_shrink(int shrink_pages, gfp_t gfp_mask)
+static int ttm_pool_mm_shrink(struct shrinker *shrink, int shrink_pages, gfp_t gfp_mask)
 {
 	static atomic_t start_pool = ATOMIC_INIT(0);
 	unsigned i;
@@ -473,7 +475,7 @@ static void ttm_handle_caching_state_failure(struct list_head *pages,
  * This function is reentrant if caller updates count depending on number of
  * pages returned in pages array.
  */
-static int ttm_alloc_new_pages(struct list_head *pages, int gfp_flags,
+static int ttm_alloc_new_pages(struct list_head *pages, gfp_t gfp_flags,
 		int ttm_flags, enum ttm_caching_state cstate, unsigned count)
 {
 	struct page **caching_array;
@@ -664,7 +666,7 @@ int ttm_get_pages(struct list_head *pages, int flags,
 {
 	struct ttm_page_pool *pool = ttm_get_pool(flags, cstate);
 	struct page *p = NULL;
-	int gfp_flags = GFP_USER;
+	gfp_t gfp_flags = GFP_USER;
 	int r;
 
 	/* set zero flag for page allocation if required */
@@ -816,7 +818,7 @@ int ttm_page_alloc_init(struct ttm_mem_global *glob, unsigned max_pages)
 	return 0;
 }
 
-void ttm_page_alloc_fini()
+void ttm_page_alloc_fini(void)
 {
 	int i;
 
