@@ -340,5 +340,4 @@ void __init mtrace_init(void)
 
 #undef REG
 
-	mtrace_enable_set(1, "all", 3);
 }
