@@ -348,6 +348,29 @@ void validate_mm(struct mm_struct *mm)
 #define validate_mm(mm) do { } while (0)
 #endif
 
+// amdragon
+//
+// This prepares an insertion, but doesn't actually perform it.  After
+// (or before) this, the caller creates the VMA to insert and then
+// "commit"s it to the RB tree with vma_link.
+//
+// Returns the VMA containing or following addr (if no VMA contains
+// addr), as well as the previous VMA.  rb_link and rb_parent appear
+// to only be used to pass information to vma_link.
+//
+// mmap_region - Only uses prev for vma_merge and vma_link.  Only uses
+// rb_link and rb_parent for vma_link.  The heart of mmap; called by
+// do_mmap_pgoff and sys_remap_flie_pages,
+//
+// do_brk - Like mmap_region.
+//
+// insert_vm_struct - Basic "insert vma into mm".  Only uses prev,
+// rb_link, and rb_parent for vma_link.  Uses???
+//
+// __insert_vm_struct - Like insert_vm_struct, but skips some steps.
+//
+// copy_vma - Only used by move_vma.  Only uses prev, rb_link, and
+// rb_parent for vma_link.
 static struct vm_area_struct *
 find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 		struct vm_area_struct **pprev, struct rb_node ***rb_link,
@@ -385,6 +408,11 @@ find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 	return vma;
 }
 
+// amdragon
+//
+// This doesn't really care about the RB tree except that it uses it
+// to get the successor when prev is NULL (when vma is the first vma,
+// its parent is the successor).
 static inline void
 __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vm_area_struct *prev, struct rb_node *rb_parent)
@@ -408,6 +436,10 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		next->vm_prev = vma;
 }
 
+// amdragon
+//
+// This is used in this file and in kernel/fork.c:dup_mmap, which is
+// why it's not static.
 void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct rb_node **rb_link, struct rb_node *rb_parent)
 {
@@ -446,6 +478,13 @@ __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 	__vma_link_rb(mm, vma, rb_link, rb_parent);
 }
 
+// amdragon
+//
+// vma_link
+// -> __vma_link
+//    -> __vma_link_list
+//    -> __vma_link_rb
+// -> __vma_link_file (Adds to i_mmap)
 static void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 			struct vm_area_struct *prev, struct rb_node **rb_link,
 			struct rb_node *rb_parent)
@@ -486,6 +525,7 @@ static void __insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 	mm->map_count++;
 }
 
+// amdragon
 static inline void
 __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vm_area_struct *prev)
@@ -1589,6 +1629,7 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 
 EXPORT_SYMBOL(get_unmapped_area);
 
+// amdragon
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
 struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 {
@@ -1626,6 +1667,16 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 }
 
 EXPORT_SYMBOL(find_vma);
+
+// amdragon
+//
+// Is there a reason this doesn't just follow the list pointer?
+//
+// It's hard to make a generic interface for goofy things like this.
+// We can't just do two lookups, since that would violate single read.
+// We could use an iterator that's smart about single read.
+// Curiously, such an iterator must be unidirectional in order to use
+// only O(log n) state.
 
 /* Same as find_vma, but also return a pointer to the previous VMA in *pprev. */
 struct vm_area_struct *
@@ -1911,6 +1962,11 @@ static void unmap_region(struct mm_struct *mm,
 	tlb_finish_mmu(tlb, start, end);
 }
 
+// amdragon
+//
+// This is another place where an iterator interface would be
+// helpful.  Does this need to remove all mappings atomically, or is
+// it fine to do it as separate operations?
 /*
  * Create a list of vma's touched by the unmap, removing them from the mm's
  * vma list as we go..
