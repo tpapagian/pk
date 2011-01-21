@@ -53,6 +53,7 @@ static void unmap_region(struct mm_struct *mm,
  * unless you know what you are doing.
  */
 #undef DEBUG_MM_RB
+//#define DEBUG_MM_RB
 
 /* description of effects of mapping type and prot in current implementation.
  * this is due to the limited x86 page protection hardware.  The expected
@@ -456,14 +457,6 @@ static void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
 }
 
-// XXX amdragon temporary
-void __vma_link_rb_fork(struct mm_struct *mm, struct vm_area_struct *vma,
-		struct rb_node **rb_link, struct rb_node *rb_parent)
-{
-	rb_link_node(&vma->vm_rb, rb_parent, rb_link);
-	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
-}
-
 static void __vma_link_file(struct vm_area_struct *vma)
 {
 	struct file *file;
@@ -540,7 +533,6 @@ static void __insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 
 	__vma = find_vma_prepare(mm, vma->vm_start, &insert);
 	BUG_ON(__vma && __vma->vm_start < vma->vm_end);
-	// IAMHERE Updating find_vma_perpare calls
 	__vma_link(mm, vma, &insert);
 	mm->map_count++;
 }

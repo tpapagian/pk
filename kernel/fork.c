@@ -423,10 +423,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		tmp->vm_prev = prev;
 		prev = tmp;
 
-extern void __vma_link_rb_fork(struct mm_struct *mm, struct vm_area_struct *vma,
-		struct rb_node **rb_link, struct rb_node *rb_parent);
-
-		__vma_link_rb_fork(mm, tmp, rb_link, rb_parent);
+		__vma_link_rb(mm, tmp, rb_link, rb_parent);
 		rb_link = &tmp->vm_rb.rb_right;
 		rb_parent = &tmp->vm_rb;
 
