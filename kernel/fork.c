@@ -14,7 +14,7 @@
 // If 1, use a simplified dup_mmap that inserts each VMA using the
 // generic insert_vm_struct, rather than optimizing for duplicating
 // the RB tree and prio tree linearly.
-#define AMDRAGON_SIMPLE_DUP_MMAP 0
+#define AMDRAGON_SIMPLE_DUP_MMAP 1
 
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -361,8 +361,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		if (IS_ERR(pol))
 			goto fail_nomem_policy;
 		vma_set_policy(tmp, pol);
-#if !AMDRAGON_SIMPLE_DUP_MMAP
 		tmp->vm_mm = mm;
+#if !AMDRAGON_SIMPLE_DUP_MMAP
 		if (anon_vma_fork(tmp, mpnt))
 			goto fail_nomem_anon_vma_fork;
 #endif
