@@ -370,10 +370,18 @@ void validate_mm(struct mm_struct *mm)
 //
 // copy_vma - Only used by move_vma.  Only uses prev, rb_link, and
 // rb_parent for vma_link.
+struct vma_insert
+{
+	struct vm_area_struct *prev;
+	struct rb_node **rb_link;
+	struct rb_node *rb_parent;
+};
+
 static struct vm_area_struct *
 find_vma_prepare(struct mm_struct *mm, unsigned long addr,
-		struct vm_area_struct **pprev, struct rb_node ***rb_link,
-		struct rb_node ** rb_parent)
+		 struct vma_insert *insert)
+//		struct vm_area_struct **pprev, struct rb_node ***rb_link,
+//		struct rb_node ** rb_parent)
 {
 	struct vm_area_struct * vma;
 	struct rb_node ** __rb_link, * __rb_parent, * rb_prev;
@@ -399,11 +407,11 @@ find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 		}
 	}
 
-	*pprev = NULL;
+	insert->prev = NULL;
 	if (rb_prev)
-		*pprev = rb_entry(rb_prev, struct vm_area_struct, vm_rb);
-	*rb_link = __rb_link;
-	*rb_parent = __rb_parent;
+		insert->prev = rb_entry(rb_prev, struct vm_area_struct, vm_rb);
+	insert->rb_link = __rb_link;
+	insert->rb_parent = __rb_parent;
 	return vma;
 }
 
@@ -414,18 +422,19 @@ find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 // its parent is the successor).
 static inline void
 __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
-		struct vm_area_struct *prev, struct rb_node *rb_parent)
+		struct vma_insert *insert)
+//		struct vm_area_struct *prev, struct rb_node *rb_parent)
 {
 	struct vm_area_struct *next;
 
-	vma->vm_prev = prev;
-	if (prev) {
-		next = prev->vm_next;
-		prev->vm_next = vma;
+	vma->vm_prev = insert->prev;
+	if (insert->prev) {
+		next = insert->prev->vm_next;
+		insert->prev->vm_next = vma;
 	} else {
 		mm->mmap = vma;
-		if (rb_parent)
-			next = rb_entry(rb_parent,
+		if (insert->rb_parent)
+			next = rb_entry(insert->rb_parent,
 					struct vm_area_struct, vm_rb);
 		else
 			next = NULL;
@@ -439,7 +448,16 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 //
 // This is used in this file and in kernel/fork.c:dup_mmap, which is
 // why it's not static.
-void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
+static void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
+		   struct vma_insert *insert)
+//		struct rb_node **rb_link, struct rb_node *rb_parent)
+{
+	rb_link_node(&vma->vm_rb, insert->rb_parent, insert->rb_link);
+	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
+}
+
+// XXX amdragon temporary
+void __vma_link_rb_fork(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct rb_node **rb_link, struct rb_node *rb_parent)
 {
 	rb_link_node(&vma->vm_rb, rb_parent, rb_link);
@@ -470,11 +488,12 @@ static void __vma_link_file(struct vm_area_struct *vma)
 
 static void
 __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
-	struct vm_area_struct *prev, struct rb_node **rb_link,
-	struct rb_node *rb_parent)
+	   struct vma_insert *insert)
+//	struct vm_area_struct *prev, struct rb_node **rb_link,
+//	struct rb_node *rb_parent)
 {
-	__vma_link_list(mm, vma, prev, rb_parent);
-	__vma_link_rb(mm, vma, rb_link, rb_parent);
+	__vma_link_list(mm, vma, insert); //prev, rb_parent);
+	__vma_link_rb(mm, vma, insert); //rb_link, rb_parent);
 }
 
 // amdragon
@@ -485,8 +504,9 @@ __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 //    -> __vma_link_rb
 // -> __vma_link_file (Adds to i_mmap)
 static void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
-			struct vm_area_struct *prev, struct rb_node **rb_link,
-			struct rb_node *rb_parent)
+		     struct vma_insert *insert)
+//			struct vm_area_struct *prev, struct rb_node **rb_link,
+//			struct rb_node *rb_parent)
 {
 	struct address_space *mapping = NULL;
 
@@ -498,7 +518,7 @@ static void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 		vma->vm_truncate_count = mapping->truncate_count;
 	}
 
-	__vma_link(mm, vma, prev, rb_link, rb_parent);
+	__vma_link(mm, vma, insert); //prev, rb_link, rb_parent);
 	__vma_link_file(vma);
 
 	if (mapping)
@@ -515,12 +535,13 @@ static void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
  */
 static void __insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 {
-	struct vm_area_struct *__vma, *prev;
-	struct rb_node **rb_link, *rb_parent;
+	struct vm_area_struct *__vma;
+	struct vma_insert insert;
 
-	__vma = find_vma_prepare(mm, vma->vm_start,&prev, &rb_link, &rb_parent);
+	__vma = find_vma_prepare(mm, vma->vm_start, &insert);
 	BUG_ON(__vma && __vma->vm_start < vma->vm_end);
-	__vma_link(mm, vma, prev, rb_link, rb_parent);
+	// IAMHERE Updating find_vma_perpare calls
+	__vma_link(mm, vma, &insert);
 	mm->map_count++;
 }
 
@@ -1257,17 +1278,18 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 			  unsigned int vm_flags, unsigned long pgoff)
 {
 	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma, *prev;
+	struct vm_area_struct *vma; //, *prev;
+	struct vma_insert insert;
 	int correct_wcount = 0;
 	int error;
-	struct rb_node **rb_link, *rb_parent;
+//	struct rb_node **rb_link, *rb_parent;
 	unsigned long charged = 0;
 	struct inode *inode =  file ? file->f_path.dentry->d_inode : NULL;
 
 	/* Clear old maps */
 	error = -ENOMEM;
 munmap_back:
-	vma = find_vma_prepare(mm, addr, &prev, &rb_link, &rb_parent);
+	vma = find_vma_prepare(mm, addr, &insert); //&prev, &rb_link, &rb_parent);
 	if (vma && vma->vm_start < addr + len) {
 		if (do_munmap(mm, addr, len))
 			return -ENOMEM;
@@ -1305,7 +1327,7 @@ munmap_back:
 	/*
 	 * Can we just expand an old mapping?
 	 */
-	vma = vma_merge(mm, prev, addr, addr + len, vm_flags, NULL, file, pgoff, NULL);
+	vma = vma_merge(mm, insert.prev, addr, addr + len, vm_flags, NULL, file, pgoff, NULL);
 	if (vma)
 		goto out;
 
@@ -1375,7 +1397,7 @@ munmap_back:
 			vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	}
 
-	vma_link(mm, vma, prev, rb_link, rb_parent);
+	vma_link(mm, vma, &insert); //prev, rb_link, rb_parent);
 	file = vma->vm_file;
 
 	/* Once vma denies write, undo our temporary denial count */
@@ -1400,7 +1422,7 @@ unmap_and_free_vma:
 	fput(file);
 
 	/* Undo any partial mapping done by a device driver. */
-	unmap_region(mm, vma, prev, vma->vm_start, vma->vm_end);
+	unmap_region(mm, vma, insert.prev, vma->vm_start, vma->vm_end);
 	charged = 0;
 free_vma:
 	kmem_cache_free(vm_area_cachep, vma);
@@ -2206,9 +2228,10 @@ static inline void verify_mm_writelocked(struct mm_struct *mm)
 unsigned long do_brk(unsigned long addr, unsigned long len)
 {
 	struct mm_struct * mm = current->mm;
-	struct vm_area_struct * vma, * prev;
+	struct vm_area_struct * vma; //, * prev;
+	struct vma_insert insert;
 	unsigned long flags;
-	struct rb_node ** rb_link, * rb_parent;
+//	struct rb_node ** rb_link, * rb_parent;
 	pgoff_t pgoff = addr >> PAGE_SHIFT;
 	int error;
 
@@ -2249,7 +2272,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	 * Clear old maps.  this also does some error checking for us
 	 */
  munmap_back:
-	vma = find_vma_prepare(mm, addr, &prev, &rb_link, &rb_parent);
+	vma = find_vma_prepare(mm, addr, &insert); // &prev, &rb_link, &rb_parent);
 	if (vma && vma->vm_start < addr + len) {
 		if (do_munmap(mm, addr, len))
 			return -ENOMEM;
@@ -2267,7 +2290,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 		return -ENOMEM;
 
 	/* Can we just expand an old private anonymous mapping? */
-	vma = vma_merge(mm, prev, addr, addr + len, flags,
+	vma = vma_merge(mm, insert.prev, addr, addr + len, flags,
 					NULL, NULL, pgoff, NULL);
 	if (vma)
 		goto out;
@@ -2288,7 +2311,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	vma->vm_pgoff = pgoff;
 	vma->vm_flags = flags;
 	vma->vm_page_prot = vm_get_page_prot(flags);
-	vma_link(mm, vma, prev, rb_link, rb_parent);
+	vma_link(mm, vma, &insert); // prev, rb_link, rb_parent);
 out:
 	perf_event_mmap(vma);
 	mm->total_vm += len >> PAGE_SHIFT;
@@ -2354,8 +2377,9 @@ void exit_mmap(struct mm_struct *mm)
  */
 int insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
 {
-	struct vm_area_struct * __vma, * prev;
-	struct rb_node ** rb_link, * rb_parent;
+	struct vm_area_struct * __vma; //, * prev;
+	struct vma_insert insert;
+//	struct rb_node ** rb_link, * rb_parent;
 
 	/*
 	 * The vm_pgoff of a purely anonymous vma should be irrelevant
@@ -2373,13 +2397,13 @@ int insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
 		BUG_ON(vma->anon_vma);
 		vma->vm_pgoff = vma->vm_start >> PAGE_SHIFT;
 	}
-	__vma = find_vma_prepare(mm,vma->vm_start,&prev,&rb_link,&rb_parent);
+	__vma = find_vma_prepare(mm, vma->vm_start, &insert); //&prev,&rb_link,&rb_parent);
 	if (__vma && __vma->vm_start < vma->vm_end)
 		return -ENOMEM;
 	if ((vma->vm_flags & VM_ACCOUNT) &&
 	     security_vm_enough_memory_mm(mm, vma_pages(vma)))
 		return -ENOMEM;
-	vma_link(mm, vma, prev, rb_link, rb_parent);
+	vma_link(mm, vma, &insert); //prev, rb_link, rb_parent);
 	return 0;
 }
 
@@ -2393,8 +2417,9 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	struct vm_area_struct *vma = *vmap;
 	unsigned long vma_start = vma->vm_start;
 	struct mm_struct *mm = vma->vm_mm;
-	struct vm_area_struct *new_vma, *prev;
-	struct rb_node **rb_link, *rb_parent;
+	struct vm_area_struct *new_vma; //, *prev;
+	struct vma_insert insert;
+//	struct rb_node **rb_link, *rb_parent;
 	struct mempolicy *pol;
 
 	/*
@@ -2404,8 +2429,8 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 	if (!vma->vm_file && !vma->anon_vma)
 		pgoff = addr >> PAGE_SHIFT;
 
-	find_vma_prepare(mm, addr, &prev, &rb_link, &rb_parent);
-	new_vma = vma_merge(mm, prev, addr, addr + len, vma->vm_flags,
+	find_vma_prepare(mm, addr, &insert); //&prev, &rb_link, &rb_parent);
+	new_vma = vma_merge(mm, insert.prev, addr, addr + len, vma->vm_flags,
 			vma->anon_vma, vma->vm_file, pgoff, vma_policy(vma));
 	if (new_vma) {
 		/*
@@ -2435,7 +2460,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 			}
 			if (new_vma->vm_ops && new_vma->vm_ops->open)
 				new_vma->vm_ops->open(new_vma);
-			vma_link(mm, new_vma, prev, rb_link, rb_parent);
+			vma_link(mm, new_vma, &insert); //prev, rb_link, rb_parent);
 		}
 	}
 	return new_vma;
