@@ -142,14 +142,20 @@ static void mtrace_mm_page_alloc_extfrag(void *unused,
 }
 
 static void __mtrace_stack_state(struct mtrace_call_stack *stack, 
+				 struct task_struct *task,
 				 mtrace_call_state_t state)
 {
+	unsigned long tid = 0;
 	int i = stack->curr;
-	mtrace_fcall_register(0, stack->stack[i].pc, 
+
+	if (task)
+		tid = task_pid_nr(task);
+	mtrace_fcall_register(tid, stack->stack[i].pc, 
 			      stack->stack[i].tag, i, state);
 }
 
-static void __mtrace_push_call(struct mtrace_call_stack *stack, unsigned long pc)
+static void __mtrace_push_call(struct mtrace_call_stack *stack, 
+			       struct task_struct *task, unsigned long pc)
 {
 	atomic64_t *counter;
 	unsigned long flags;
@@ -174,7 +180,7 @@ static void __mtrace_push_call(struct mtrace_call_stack *stack, unsigned long pc
 
 	stack->stack[i].pc = pc;
 	stack->stack[i].tag = tag;
-	__mtrace_stack_state(stack, mtrace_start);
+	__mtrace_stack_state(stack, task, mtrace_start);
 
 	local_irq_restore(flags);
 }
@@ -184,7 +190,7 @@ static void __mtrace_pop_call(struct mtrace_call_stack *stack)
 	int i;
 
 	BUG_ON(stack->curr <= -1);
-	__mtrace_stack_state(stack, mtrace_done);
+	__mtrace_stack_state(stack, NULL, mtrace_done);
 	i = stack->curr--;
 	stack->stack[i].pc = 0;
 	stack->stack[i].tag = 0;
@@ -202,7 +208,7 @@ void mtrace_start_do_page_fault(unsigned long pc)
 	if (current->mtrace_stack.curr != -1)
 		return;
 
-	__mtrace_push_call(&current->mtrace_stack, pc);
+	__mtrace_push_call(&current->mtrace_stack, current, pc);
 }
 
 void mtrace_end_do_page_fault(void)
@@ -224,11 +230,11 @@ void mtrace_start_do_irq(unsigned long pc)
 	stack = &per_cpu(mtrace_irq_call_stack, smp_processor_id());
 
 	if (stack->curr > -1)
-		__mtrace_stack_state(stack, mtrace_pause);
+		__mtrace_stack_state(stack, NULL, mtrace_pause);
 	else if (current && current->mtrace_stack.curr > -1)
-		__mtrace_stack_state(&current->mtrace_stack, mtrace_pause);
+		__mtrace_stack_state(&current->mtrace_stack, NULL, mtrace_pause);
 
-	__mtrace_push_call(stack, pc);
+	__mtrace_push_call(stack, NULL, pc);
 }
 
 void mtrace_end_do_irq(void)
@@ -239,16 +245,16 @@ void mtrace_end_do_irq(void)
 	__mtrace_pop_call(stack);
 
 	if (stack->curr > -1)
-		__mtrace_stack_state(stack, mtrace_resume);
+		__mtrace_stack_state(stack, NULL, mtrace_resume);
 	else if (current && current->mtrace_stack.curr > -1)
-		__mtrace_stack_state(&current->mtrace_stack, mtrace_resume);
+		__mtrace_stack_state(&current->mtrace_stack, current, mtrace_resume);
 }
 
 void mtrace_start_entry(unsigned long pc)
 {
 	if (!current)
 		return;
-	__mtrace_push_call(&current->mtrace_stack, pc);
+	__mtrace_push_call(&current->mtrace_stack, current, pc);
 }
 
 void mtrace_end_entry(void)
@@ -276,10 +282,10 @@ static void mtrace_sched_switch(void *unused, struct task_struct *prev,
 				struct task_struct *next)
 {
 	if (prev->mtrace_stack.curr >= 0)
-		__mtrace_stack_state(&prev->mtrace_stack, mtrace_pause);
+		__mtrace_stack_state(&prev->mtrace_stack, NULL, mtrace_pause);
 
 	if (next->mtrace_stack.curr >= 0)
-		__mtrace_stack_state(&next->mtrace_stack, mtrace_resume);
+		__mtrace_stack_state(&next->mtrace_stack, next, mtrace_resume);
 }
 
 #ifdef CONFIG_LOCKDEP
