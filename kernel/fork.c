@@ -11,6 +11,11 @@
  * management can be a bitch. See 'mm/memory.c': 'copy_page_range()'
  */
 
+// If 1, use a simplified dup_mmap that inserts each VMA using the
+// generic insert_vm_struct, rather than optimizing for duplicating
+// the RB tree and prio tree linearly.
+#define AMDRAGON_SIMPLE_DUP_MMAP 1
+
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/unistd.h>
@@ -359,12 +364,20 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 			goto fail_nomem_policy;
 		vma_set_policy(tmp, pol);
 		tmp->vm_mm = mm;
+#if !AMDRAGON_SIMPLE_DUP_MMAP
 		if (anon_vma_fork(tmp, mpnt))
 			goto fail_nomem_anon_vma_fork;
+#endif
 		tmp->vm_flags &= ~VM_LOCKED;
 		tmp->vm_next = tmp->vm_prev = NULL;
 		file = tmp->vm_file;
 		if (file) {
+#if AMDRAGON_SIMPLE_DUP_MMAP
+			// XXX The original code used
+			// vma_prio_tree_add, while the generic code
+			// uses the slower vma_prio_tree_insert.
+			get_file(file);
+#else
 			struct inode *inode = file->f_path.dentry->d_inode;
 			struct address_space *mapping = file->f_mapping;
 
@@ -380,6 +393,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 			vma_prio_tree_add(tmp, mpnt);
 			flush_dcache_mmap_unlock(mapping);
 			spin_unlock(&mapping->i_mmap_lock);
+#endif
 		}
 
 		/*
@@ -390,6 +404,19 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		if (is_vm_hugetlb_page(tmp))
 			reset_vma_resv_huge_pages(tmp);
 
+#if AMDRAGON_SIMPLE_DUP_MMAP
+		// We need to clear the anon_vma and anon_vma_fork
+		// later because insert_vm_struct requires that tmp
+		// not be linked to an anon_vma.
+		tmp->anon_vma = NULL;
+		// amdragon XXX Does it have to be inserted in the
+		// prio tree before reset_vma_resv_huge_pages?
+		insert_vm_struct(mm, tmp);
+		// ?  Set by vma_link from file->f_mapping->truncate_count
+		tmp->vm_truncate_count = mpnt->vm_truncate_count;
+		if (anon_vma_fork(tmp, mpnt))
+			goto fail_nomem_anon_vma_fork;
+#else
 		/*
 		 * Link in the new vma and copy the page table entries.
 		 */
@@ -403,6 +430,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		rb_parent = &tmp->vm_rb;
 
 		mm->map_count++;
+#endif
 		retval = copy_page_range(mm, oldmm, mpnt);
 
 		if (tmp->vm_ops && tmp->vm_ops->open)
