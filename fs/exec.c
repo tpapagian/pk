@@ -55,6 +55,7 @@
 #include <linux/fs_struct.h>
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
+#include <linux/mtrace.h>
 
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
@@ -1446,6 +1447,8 @@ int do_execve(const char * filename,
 	retval = search_binary_handler(bprm,regs);
 	if (retval < 0)
 		goto out;
+
+	mtrace_update_task(current);
 
 	/* execve succeeded */
 	current->fs->in_exec = 0;

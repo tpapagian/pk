@@ -1019,7 +1019,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		goto fork_out;
 
 	ftrace_graph_init_task(p);
-	mtrace_init_task(p);
 
 	rt_mutex_init_task(p);
 
@@ -1289,6 +1288,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		attach_pid(p, PIDTYPE_PID, pid);
 		nr_threads++;
 	}
+
+	mtrace_init_task(p);
 
 	total_forks++;
 	spin_unlock(&current->sighand->siglock);
