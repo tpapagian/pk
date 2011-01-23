@@ -42,6 +42,8 @@
 #include <linux/lockdep.h>
 #include <linux/idr.h>
 
+#include <linux/mtrace.h>
+
 #include "workqueue_sched.h"
 
 enum {
@@ -1877,6 +1879,8 @@ static int worker_thread(void *__worker)
 	struct worker *worker = __worker;
 	struct global_cwq *gcwq = worker->gcwq;
 
+	mtrace_start_entry((unsigned long)worker_thread);
+
 	/* tell the scheduler that this is a workqueue worker */
 	worker->task->flags |= PF_WQ_WORKER;
 woke_up:
@@ -1886,6 +1890,7 @@ woke_up:
 	if (worker->flags & WORKER_DIE) {
 		spin_unlock_irq(&gcwq->lock);
 		worker->task->flags &= ~PF_WQ_WORKER;
+		mtrace_end_entry();
 		return 0;
 	}
 

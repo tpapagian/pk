@@ -8,6 +8,9 @@ extern void mtrace_init_task(struct task_struct *t);
 extern void mtrace_exit_task(struct task_struct *t);
 extern void mtrace_update_task(struct task_struct *t);
 
+extern void mtrace_start_entry(unsigned long pc);
+extern void mtrace_end_entry(void);
+
 #define INIT_MTRACE .mtrace_stack = { .curr = -1 }
 #define MTRACE_CALL_STACK_DEPTH 50
 
