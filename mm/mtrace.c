@@ -278,6 +278,8 @@ static void mtrace_sched_switch(void *unused, struct task_struct *prev,
 	if (prev->mtrace_stack.curr >= 0)
 		__mtrace_stack_state(&prev->mtrace_stack, mtrace_pause);
 
+	mtrace_sched_record(next->pid);
+
 	if (next->mtrace_stack.curr >= 0)
 		__mtrace_stack_state(&next->mtrace_stack, mtrace_resume);
 }
@@ -331,6 +333,8 @@ void __init mtrace_init(void)
 	REG(mm_page_pcpu_drain);
 	REG(mm_page_alloc_extfrag);
 
+	if (current)
+		mtrace_sched_record(current->pid);
 	REG(sched_switch);
 
 #ifdef CONFIG_LOCKDEP
