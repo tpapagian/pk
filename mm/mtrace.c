@@ -145,6 +145,7 @@ static void __mtrace_stack_state(struct mtrace_call_stack *stack,
 				 struct task_struct *task,
 				 mtrace_call_state_t state)
 {
+	unsigned long call_enable;
 	unsigned long tid = 0;
 	int i = stack->curr;
 
@@ -152,6 +153,8 @@ static void __mtrace_stack_state(struct mtrace_call_stack *stack,
 		tid = task_pid_nr(task);
 	mtrace_fcall_register(tid, stack->stack[i].pc, 
 			      stack->stack[i].tag, i, state);
+	call_enable = (state == mtrace_start || state == mtrace_resume);
+	mtrace_call_set(call_enable, smp_processor_id());
 }
 
 static void __mtrace_push_call(struct mtrace_call_stack *stack, 
@@ -190,6 +193,8 @@ static void __mtrace_pop_call(struct mtrace_call_stack *stack)
 	int i;
 
 	BUG_ON(stack->curr <= -1);
+
+	/* NB in most cases the following must execute atomically. */
 	__mtrace_stack_state(stack, NULL, mtrace_done);
 	i = stack->curr--;
 	stack->stack[i].pc = 0;
@@ -213,19 +218,25 @@ void mtrace_start_do_page_fault(unsigned long pc)
 
 void mtrace_end_do_page_fault(void)
 {
+	unsigned long flags;
 	int i;
 
 	if (!current)
 		return;
-	
+
+	local_irq_save(flags);
 	i = current->mtrace_stack.curr;
 	if (current->mtrace_stack.stack[i].pc == (unsigned long)do_page_fault)
 		__mtrace_pop_call(&current->mtrace_stack);
+	local_irq_restore(flags);
 }
 
 void mtrace_start_do_irq(unsigned long pc)
 {
 	struct mtrace_call_stack *stack;
+	unsigned long flags;
+
+	local_irq_save(flags);
 
 	stack = &per_cpu(mtrace_irq_call_stack, smp_processor_id());
 
@@ -235,11 +246,15 @@ void mtrace_start_do_irq(unsigned long pc)
 		__mtrace_stack_state(&current->mtrace_stack, NULL, mtrace_pause);
 
 	__mtrace_push_call(stack, NULL, pc);
+	local_irq_restore(flags);
 }
 
 void mtrace_end_do_irq(void)
 {
 	struct mtrace_call_stack *stack;
+	unsigned long flags;
+
+	local_irq_save(flags);
 
 	stack = &per_cpu(mtrace_irq_call_stack, smp_processor_id());	
 	__mtrace_pop_call(stack);
@@ -248,20 +263,29 @@ void mtrace_end_do_irq(void)
 		__mtrace_stack_state(stack, NULL, mtrace_resume);
 	else if (current && current->mtrace_stack.curr > -1)
 		__mtrace_stack_state(&current->mtrace_stack, current, mtrace_resume);
+	local_irq_restore(flags);
 }
 
 void mtrace_start_entry(unsigned long pc)
 {
+	unsigned long flags;
 	if (!current)
 		return;
+
+	local_irq_save(flags);
 	__mtrace_push_call(&current->mtrace_stack, current, pc);
+	local_irq_restore(flags);
 }
 
 void mtrace_end_entry(void)
 {
+	unsigned long flags;
 	if (!current)
 		return;
+
+	local_irq_save(flags);
 	__mtrace_pop_call(&current->mtrace_stack);
+	local_irq_restore(flags);
 }
 
 static int mtrace_task_cmdline(struct task_struct *task, char *buffer, int n)
@@ -311,22 +335,30 @@ void mtrace_init_task(struct task_struct *tsk)
 
 void mtrace_exit_task(struct task_struct *t)
 {
+	unsigned long flags;
+
         if (t == NULL)
 		return;
-	
+
+	local_irq_save(flags);
         while (t->mtrace_stack.curr >= 0)
 		__mtrace_pop_call(&t->mtrace_stack);
+	local_irq_restore(flags);
 	__mtrace_register_task(t, mtrace_task_exit);
 }
 
 static void mtrace_sched_switch(void *unused, struct task_struct *prev, 
 				struct task_struct *next)
 {
+	unsigned long flags;
+
+	local_irq_save(flags);
 	if (prev->mtrace_stack.curr >= 0)
 		__mtrace_stack_state(&prev->mtrace_stack, NULL, mtrace_pause);
 
 	if (next->mtrace_stack.curr >= 0)
 		__mtrace_stack_state(&next->mtrace_stack, next, mtrace_resume);
+	local_irq_restore(flags);
 }
 
 #ifdef CONFIG_LOCKDEP
@@ -386,5 +418,4 @@ void __init mtrace_init(void)
 #endif
 
 #undef REG
-
 }
