@@ -373,7 +373,7 @@ void validate_mm(struct mm_struct *mm)
 // rb_parent for vma_link.
 struct vma_insert
 {
-	struct vm_area_struct *prev;
+	struct vm_area_struct *prev, *vma;
 	struct rb_node **rb_link;
 	struct rb_node *rb_parent;
 };
@@ -409,37 +409,38 @@ find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 	insert->prev = NULL;
 	if (rb_prev)
 		insert->prev = rb_entry(rb_prev, struct vm_area_struct, vm_rb);
+	insert->vma = vma;
 	insert->rb_link = __rb_link;
 	insert->rb_parent = __rb_parent;
 	return vma;
 }
 
 // amdragon
-//
-// This doesn't really care about the RB tree except that it uses it
-// to get the successor when prev is NULL (when vma is the first vma,
-// its parent is the successor).
 static inline void
 __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vma_insert *insert)
 {
-	struct vm_area_struct *next;
-
-	vma->vm_prev = insert->prev;
-	if (insert->prev) {
-		next = insert->prev->vm_next;
-		insert->prev->vm_next = vma;
-	} else {
-		mm->mmap = vma;
+	// amdragon: Sanity check against old RB-based approach, which
+	// used the RB parent as the successor when it couldn't use
+	// prev->vm_next because prev was NULL (that is, when vma was
+	// prev->the first vma).
+	if (!insert->prev) {
+		struct vm_area_struct *next = NULL;
 		if (insert->rb_parent)
 			next = rb_entry(insert->rb_parent,
 					struct vm_area_struct, vm_rb);
-		else
-			next = NULL;
+		BUG_ON(insert->vma != next);
 	}
-	vma->vm_next = next;
-	if (next)
-		next->vm_prev = vma;
+
+	vma->vm_prev = insert->prev;
+	if (insert->prev)
+		insert->prev->vm_next = vma;
+	else
+		mm->mmap = vma;
+
+	vma->vm_next = insert->vma;
+	if (insert->vma)
+		insert->vma->vm_prev = vma;
 }
 
 // amdragon
