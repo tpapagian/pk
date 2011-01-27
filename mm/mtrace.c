@@ -369,7 +369,7 @@ static void mtrace_lock_acquire(void *unused, struct lockdep_map *lock,
                                 int check, struct lockdep_map *next_lock,
                                 unsigned long ip)
 {
-	mtrace_lock_register(ip, lock, lock->name, 0, read);
+	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_acquire, read);
 	/* 
 	 * static int i;
 	 * if (++i % 1000 == 0)
@@ -381,7 +381,7 @@ static void mtrace_lock_acquire(void *unused, struct lockdep_map *lock,
 static void mtrace_lock_release(void *unused, struct lockdep_map *lock,
 				unsigned long ip)
 {
-	mtrace_lock_register(ip, lock, lock->name, 1, 0);
+	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_release, 0);
 }
 #endif
 
