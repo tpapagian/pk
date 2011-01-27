@@ -383,6 +383,11 @@ static void mtrace_lock_release(void *unused, struct lockdep_map *lock,
 {
 	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_release, 0);
 }
+
+void mtrace_lock_acquired(struct lockdep_map *lock, unsigned long ip)
+{
+	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_acquired, 0);	
+}
 #endif
 
 void __init mtrace_init(void)

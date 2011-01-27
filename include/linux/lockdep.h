@@ -408,7 +408,20 @@ do {								\
 	lock_acquired(&(_lock)->dep_map, _RET_IP_);			\
 } while (0)
 
-#else /* CONFIG_LOCK_STAT */
+#elif defined(CONFIG_MTRACE) && defined(CONFIG_LOCKDEP)
+
+extern void mtrace_lock_acquired(struct lockdep_map *lock, unsigned long ip);
+
+#define lock_contended(lockdep_map, ip) do {} while (0)
+#define lock_acquired(lockdep_map, ip) mtrace_lock_acquired(lockdep_map, ip)
+
+#define LOCK_CONTENDED(_lock, try, lock) 			\
+do {								\
+   	lock(_lock);						\
+	lock_acquired(&(_lock)->dep_map, _RET_IP_);		\
+} while (0)
+
+#else /* defined(CONFIG_MTRACE) && defined(CONFIG_LOCKDEP) */
 
 #define lock_contended(lockdep_map, ip) do {} while (0)
 #define lock_acquired(lockdep_map, ip) do {} while (0)
