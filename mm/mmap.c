@@ -2128,9 +2128,7 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 
 	profile_munmap(addr);
 
-	down_write(&mm->mmap_sem);
-	ret = do_munmap(mm, addr, len);
-	up_write(&mm->mmap_sem);
+	ret = do_munmap_locked(mm, addr, len);
 	return ret;
 }
 
