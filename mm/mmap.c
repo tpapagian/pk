@@ -230,6 +230,7 @@ static struct vm_area_struct *remove_vma(struct vm_area_struct *vma)
 {
 	struct vm_area_struct *next = vma->vm_next;
 
+	// XXX amdragon Delayed free around here?
 	might_sleep();
 	if (vma->vm_ops && vma->vm_ops->close)
 		vma->vm_ops->close(vma);
@@ -545,6 +546,7 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 		mm->mmap_cache = prev;
 }
 
+// amdragon: This adjusts the tree key.
 /*
  * We cannot adjust vm_start, vm_end, vm_pgoff fields of a vma that
  * is already present in an i_mmap tree without adjusting the tree.
