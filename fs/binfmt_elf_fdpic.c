@@ -957,10 +957,10 @@ static int elf_fdpic_map_file_constdisp_on_uclinux(
 	if (params->flags & ELF_FDPIC_FLAG_EXECUTABLE)
 		mflags |= MAP_EXECUTABLE;
 
-	down_write(&mm->mmap_sem);
-	maddr = do_mmap(NULL, load_addr, top - base,
+	// amdragon: Used to lock &mm->mmap_sem
+	BUG_ON(mm != current->mm);
+	maddr = do_mmap_locked(NULL, load_addr, top - base,
 			PROT_READ | PROT_WRITE | PROT_EXEC, mflags, 0);
-	up_write(&mm->mmap_sem);
 	if (IS_ERR_VALUE(maddr))
 		return (int) maddr;
 
@@ -1098,10 +1098,10 @@ static int elf_fdpic_map_file_by_direct_mmap(struct elf_fdpic_params *params,
 
 		/* create the mapping */
 		disp = phdr->p_vaddr & ~PAGE_MASK;
-		down_write(&mm->mmap_sem);
-		maddr = do_mmap(file, maddr, phdr->p_memsz + disp, prot, flags,
+		// amdragon: Used to lock &mm->mmap_sem
+		BUG_ON(mm != current->mm);
+		maddr = do_mmap_locked(file, maddr, phdr->p_memsz + disp, prot, flags,
 				phdr->p_offset - disp);
-		up_write(&mm->mmap_sem);
 
 		kdebug("mmap[%d] <file> sz=%lx pr=%x fl=%x of=%lx --> %08lx",
 		       loop, phdr->p_memsz + disp, prot, flags,
@@ -1145,10 +1145,10 @@ static int elf_fdpic_map_file_by_direct_mmap(struct elf_fdpic_params *params,
 			unsigned long xmaddr;
 
 			flags |= MAP_FIXED | MAP_ANONYMOUS;
-			down_write(&mm->mmap_sem);
-			xmaddr = do_mmap(NULL, xaddr, excess - excess1,
+			// amdragon: Used to lock &mm->mmap_sem
+			BUG_ON(mm != current->mm);
+			xmaddr = do_mmap_locked(NULL, xaddr, excess - excess1,
 					 prot, flags, 0);
-			up_write(&mm->mmap_sem);
 
 			kdebug("mmap[%d] <anon>"
 			       " ad=%lx sz=%lx pr=%x fl=%x of=0 --> %08lx",

@@ -14,6 +14,7 @@
 #include <linux/mm_types.h>
 #include <linux/range.h>
 #include <linux/pfn.h>
+#include <linux/sched.h>	/* amdragon: for struct task_struct */
 
 struct mempolicy;
 struct anon_vma;
@@ -1296,9 +1297,39 @@ out:
 	return ret;
 }
 
+static inline unsigned long do_mmap_locked(struct file *file,
+	unsigned long addr,
+	unsigned long len, unsigned long prot,
+	unsigned long flag, unsigned long offset) 
+{
+	unsigned long r;
+	down_write(&current->mm->mmap_sem);
+	r = do_mmap(file, addr, len, prot, flag, offset);
+	up_write(&current->mm->mmap_sem);
+	return r;
+}
+
 extern int do_munmap(struct mm_struct *, unsigned long, size_t);
 
+static inline int do_munmap_locked(struct mm_struct *mm, unsigned long start, size_t len)
+{
+	int r;
+	down_write(&mm->mmap_sem);
+	r = do_munmap(mm, start, len);
+	up_write(&mm->mmap_sem);
+	return r;
+}
+
 extern unsigned long do_brk(unsigned long, unsigned long);
+
+static inline unsigned long do_brk_locked(unsigned long addr, unsigned long len)
+{
+	unsigned long r;
+	down_write(&current->mm->mmap_sem);
+	r = do_brk(addr, len);
+	up_write(&current->mm->mmap_sem);
+	return r;
+}
 
 /* filemap.c */
 extern unsigned long page_unuse(struct page *);
