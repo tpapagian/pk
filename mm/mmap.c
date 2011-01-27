@@ -49,6 +49,8 @@ static void unmap_region(struct mm_struct *mm,
 		struct vm_area_struct *vma, struct vm_area_struct *prev,
 		unsigned long start, unsigned long end);
 
+static inline void verify_mm_writelocked(struct mm_struct *mm);
+
 /*
  * WARNING: the debugging will use recursive algorithms so never enable this
  * unless you know what you are doing.
@@ -972,6 +974,9 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned int vm_flags;
 	int error;
 	unsigned long reqprot = prot;
+
+	// amdragon
+	verify_mm_writelocked(mm);
 
 	/*
 	 * Does the application expect PROT_READ to imply PROT_EXEC?
@@ -2042,6 +2047,9 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 {
 	unsigned long end;
 	struct vm_area_struct *vma, *prev, *last;
+
+	// amdragon
+	verify_mm_writelocked(mm);
 
 	if ((start & ~PAGE_MASK) || start > TASK_SIZE || len > TASK_SIZE-start)
 		return -EINVAL;
