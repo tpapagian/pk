@@ -34,6 +34,8 @@
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
 
+#include <asm/mtrace-magic.h>
+
 #include "internal.h"
 
 #ifndef arch_mmap_check
@@ -390,6 +392,8 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 {
 	struct vm_area_struct *next;
 
+	mtrace_label_visible_record(vma, 1);
+
 	vma->vm_prev = prev;
 	if (prev) {
 		next = prev->vm_next;
@@ -410,6 +414,8 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct rb_node **rb_link, struct rb_node *rb_parent)
 {
+	mtrace_label_visible_record(vma, 1);
+
 	rb_link_node(&vma->vm_rb, rb_parent, rb_link);
 	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
 }
@@ -497,6 +503,8 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+
+	mtrace_label_visible_record(vma, 0);
 }
 
 /*
