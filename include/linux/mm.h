@@ -1279,6 +1279,36 @@ extern void exit_mmap(struct mm_struct *);
 extern int mm_take_all_locks(struct mm_struct *mm);
 extern void mm_drop_all_locks(struct mm_struct *mm);
 
+static inline void
+mm_lock(struct mm_struct *mm)
+{
+	down_write(&mm->mmap_sem);
+}
+
+static inline void
+mm_unlock(struct mm_struct *mm)
+{
+	up_write(&mm->mmap_sem);
+}
+
+static inline void
+mm_lock_read(struct mm_struct *mm)
+{
+	down_read(&mm->mmap_sem);
+}
+
+static inline int
+mm_lock_tryread(struct mm_struct *mm)
+{
+	return down_read_trylock(&mm->mmap_sem);
+}
+
+static inline void
+mm_unlock_read(struct mm_struct *mm)
+{
+	up_read(&mm->mmap_sem);
+}
+
 #ifdef CONFIG_PROC_FS
 /* From fs/proc/base.c. callers must _not_ hold the mm's exe_file_lock */
 extern void added_exe_file_vma(struct mm_struct *mm);
