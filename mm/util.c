@@ -288,10 +288,8 @@ int __attribute__((weak)) get_user_pages_fast(unsigned long start,
 	struct mm_struct *mm = current->mm;
 	int ret;
 
-	down_read(&mm->mmap_sem);
-	ret = get_user_pages(current, mm, start, nr_pages,
+	ret = get_user_pages_locked(current, mm, start, nr_pages,
 					write, 0, pages, NULL);
-	up_read(&mm->mmap_sem);
 
 	return ret;
 }

@@ -493,7 +493,7 @@ SYSCALL_DEFINE2(mlock, unsigned long, start, size_t, len)
 
 	lru_add_drain_all();	/* flush pagevec */
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	len = PAGE_ALIGN(len + (start & ~PAGE_MASK));
 	start &= PAGE_MASK;
 
@@ -506,7 +506,7 @@ SYSCALL_DEFINE2(mlock, unsigned long, start, size_t, len)
 	/* check against resource limits */
 	if ((locked <= lock_limit) || capable(CAP_IPC_LOCK))
 		error = do_mlock(start, len, 1);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 	return error;
 }
 
@@ -514,11 +514,11 @@ SYSCALL_DEFINE2(munlock, unsigned long, start, size_t, len)
 {
 	int ret;
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	len = PAGE_ALIGN(len + (start & ~PAGE_MASK));
 	start &= PAGE_MASK;
 	ret = do_mlock(start, len, 0);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 	return ret;
 }
 
@@ -561,7 +561,7 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 
 	lru_add_drain_all();	/* flush pagevec */
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 
 	lock_limit = rlimit(RLIMIT_MEMLOCK);
 	lock_limit >>= PAGE_SHIFT;
@@ -570,7 +570,7 @@ SYSCALL_DEFINE1(mlockall, int, flags)
 	if (!(flags & MCL_CURRENT) || (current->mm->total_vm <= lock_limit) ||
 	    capable(CAP_IPC_LOCK))
 		ret = do_mlockall(flags);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 out:
 	return ret;
 }
@@ -579,9 +579,9 @@ SYSCALL_DEFINE0(munlockall)
 {
 	int ret;
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	ret = do_mlockall(0);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 	return ret;
 }
 

@@ -3494,7 +3494,7 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, in
 	if (!mm)
 		return 0;
 
-	down_read(&mm->mmap_sem);
+	mm_lock_read(mm);
 	/* ignore errors, just check how much was successfully transferred */
 	while (len) {
 		int bytes, ret, offset;
@@ -3541,7 +3541,7 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr, void *buf, in
 		buf += bytes;
 		addr += bytes;
 	}
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 	mmput(mm);
 
 	return buf - old_buf;
@@ -3562,7 +3562,7 @@ void print_vma_addr(char *prefix, unsigned long ip)
 	if (preempt_count())
 		return;
 
-	down_read(&mm->mmap_sem);
+	mm_lock_read(mm);
 	vma = find_vma(mm, ip);
 	if (vma && vma->vm_file) {
 		struct file *f = vma->vm_file;
@@ -3582,7 +3582,7 @@ void print_vma_addr(char *prefix, unsigned long ip)
 			free_page((unsigned long)buf);
 		}
 	}
-	up_read(&current->mm->mmap_sem);
+	mm_unlock_read(current->mm);
 }
 
 #ifdef CONFIG_PROVE_LOCKING

@@ -1354,9 +1354,9 @@ static inline unsigned long do_mmap_locked(struct file *file,
 	unsigned long flag, unsigned long offset) 
 {
 	unsigned long r;
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	r = do_mmap(file, addr, len, prot, flag, offset);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 	return r;
 }
 
@@ -1365,9 +1365,9 @@ extern int do_munmap(struct mm_struct *, unsigned long, size_t);
 static inline int do_munmap_locked(struct mm_struct *mm, unsigned long start, size_t len)
 {
 	int r;
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 	r = do_munmap(mm, start, len);
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	return r;
 }
 
@@ -1376,9 +1376,20 @@ extern unsigned long do_brk(unsigned long, unsigned long);
 static inline unsigned long do_brk_locked(unsigned long addr, unsigned long len)
 {
 	unsigned long r;
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	r = do_brk(addr, len);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
+	return r;
+}
+
+static inline int get_user_pages_locked(struct task_struct *tsk, struct mm_struct *mm,
+			unsigned long start, int nr_pages, int write, int force,
+			struct page **pages, struct vm_area_struct **vmas)
+{
+	int r;
+	mm_lock(mm);
+	r = get_user_pages(tsk, mm, start, nr_pages, write, force, pages, vmas);
+	mm_unlock(mm);
 	return r;
 }
 

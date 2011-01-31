@@ -252,7 +252,7 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	struct mm_struct *mm = current->mm;
 	unsigned long min_brk;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 
 #ifdef CONFIG_COMPAT_BRK
 	min_brk = mm->end_code;
@@ -296,7 +296,7 @@ set_brk:
 	mm->brk = brk;
 out:
 	retval = mm->brk;
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	return retval;
 }
 
@@ -1137,9 +1137,9 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	retval = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 
 	if (file)
 		fput(file);
@@ -2143,9 +2143,9 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 static inline void verify_mm_writelocked(struct mm_struct *mm)
 {
 #ifdef CONFIG_DEBUG_VM
-	if (unlikely(down_read_trylock(&mm->mmap_sem))) {
+	if (unlikely(mm_lock_tryread(mm))) {
 		WARN_ON(1);
-		up_read(&mm->mmap_sem);
+		mm_unlock_read(mm);
 	}
 #endif
 }
@@ -2586,7 +2586,7 @@ int mm_take_all_locks(struct mm_struct *mm)
 	struct anon_vma_chain *avc;
 	int ret = -EINTR;
 
-	BUG_ON(down_read_trylock(&mm->mmap_sem));
+	BUG_ON(mm_lock_tryread(mm));
 
 	mutex_lock(&mm_all_locks_mutex);
 
@@ -2659,7 +2659,7 @@ void mm_drop_all_locks(struct mm_struct *mm)
 	struct vm_area_struct *vma;
 	struct anon_vma_chain *avc;
 
-	BUG_ON(down_read_trylock(&mm->mmap_sem));
+	BUG_ON(mm_lock_tryread(mm));
 	BUG_ON(!mutex_is_locked(&mm_all_locks_mutex));
 
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {

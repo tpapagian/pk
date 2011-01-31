@@ -1076,12 +1076,12 @@ out_mlock:
 	 * vmscan could retry to move the page to unevictable lru if the
 	 * page is actually mlocked.
 	 */
-	if (down_read_trylock(&vma->vm_mm->mmap_sem)) {
+	if (mm_lock_tryread(vma->vm_mm)) {
 		if (vma->vm_flags & VM_LOCKED) {
 			mlock_vma_page(page);
 			ret = SWAP_MLOCK;
 		}
-		up_read(&vma->vm_mm->mmap_sem);
+		mm_unlock_read(vma->vm_mm);
 	}
 	return ret;
 }
@@ -1152,10 +1152,10 @@ static int try_to_unmap_cluster(unsigned long cursor, unsigned int *mapcount,
 	 * If we can acquire the mmap_sem for read, and vma is VM_LOCKED,
 	 * keep the sem while scanning the cluster for mlocking pages.
 	 */
-	if (down_read_trylock(&vma->vm_mm->mmap_sem)) {
+	if (mm_lock_tryread(vma->vm_mm)) {
 		locked_vma = (vma->vm_flags & VM_LOCKED);
 		if (!locked_vma)
-			up_read(&vma->vm_mm->mmap_sem); /* don't need it */
+			mm_unlock_read(vma->vm_mm); /* don't need it */
 	}
 
 	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
@@ -1198,7 +1198,7 @@ static int try_to_unmap_cluster(unsigned long cursor, unsigned int *mapcount,
 	}
 	pte_unmap_unlock(pte - 1, ptl);
 	if (locked_vma)
-		up_read(&vma->vm_mm->mmap_sem);
+		mm_unlock_read(vma->vm_mm);
 	return ret;
 }
 

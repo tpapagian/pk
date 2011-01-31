@@ -756,7 +756,7 @@ __bad_area(struct pt_regs *regs, unsigned long error_code,
 	 * Something tried to access memory that isn't in our memory map..
 	 * Fix it, but check if it's kernel or user first..
 	 */
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 
 	__bad_area_nosemaphore(regs, error_code, address, si_code);
 }
@@ -783,7 +783,7 @@ out_of_memory(struct pt_regs *regs, unsigned long error_code,
 	 * We ran out of memory, call the OOM killer, and return the userspace
 	 * (which will retry the fault, or kill us if we got oom-killed):
 	 */
-	up_read(&current->mm->mmap_sem);
+	mm_unlock_read(current->mm);
 
 	pagefault_out_of_memory();
 }
@@ -796,7 +796,7 @@ do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 	struct mm_struct *mm = tsk->mm;
 	int code = BUS_ADRERR;
 
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 
 	/* Kernel mode? Handle exceptions or die: */
 	if (!(error_code & PF_USER)) {
@@ -1064,14 +1064,14 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 * validate the source. If this is invalid we can skip the address
 	 * space check, thus avoiding the deadlock:
 	 */
-	if (unlikely(!down_read_trylock(&mm->mmap_sem))) {
+	if (unlikely(!mm_lock_tryread(mm))) {
 		if ((error_code & PF_USER) == 0 &&
 		    !search_exception_tables(regs->ip)) {
 			bad_area_nosemaphore(regs, error_code, address);
 			return;
 		}
 retry:
-		down_read(&mm->mmap_sem);
+		mm_lock_read(mm);
 	} else {
 		/*
 		 * The above down_read_trylock() might have succeeded in
@@ -1156,5 +1156,5 @@ good_area:
 
 	check_v8086_mode(regs, address, tsk);
 
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 }

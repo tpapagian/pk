@@ -920,7 +920,7 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr)
 	sfd->file = shp->shm_file;
 	sfd->vm_ops = NULL;
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	if (addr && !(shmflg & SHM_REMAP)) {
 		err = -EINVAL;
 		if (find_vma_intersection(current->mm, addr, addr + size))
@@ -940,7 +940,7 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr)
 	if (IS_ERR_VALUE(user_addr))
 		err = (long)user_addr;
 invalid:
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 
 	fput(file);
 
@@ -1000,7 +1000,7 @@ SYSCALL_DEFINE1(shmdt, char __user *, shmaddr)
 	if (addr & ~PAGE_MASK)
 		return retval;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 
 	/*
 	 * This function tries to be smart and unmap shm segments that
@@ -1080,7 +1080,7 @@ SYSCALL_DEFINE1(shmdt, char __user *, shmaddr)
 
 #endif
 
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	return retval;
 }
 
