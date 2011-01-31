@@ -333,17 +333,10 @@ void mtrace_init_task(struct task_struct *tsk)
 	__mtrace_register_task(tsk, mtrace_task_init);
 }
 
-void mtrace_exit_task(struct task_struct *t)
+static void mtrace_exit_task(struct task_struct *t)
 {
-	unsigned long flags;
-
-        if (t == NULL)
-		return;
-
-	local_irq_save(flags);
         while (t->mtrace_stack.curr >= 0)
 		__mtrace_pop_call(&t->mtrace_stack);
-	local_irq_restore(flags);
 	__mtrace_register_task(t, mtrace_task_exit);
 }
 
@@ -353,7 +346,11 @@ static void mtrace_sched_switch(void *unused, struct task_struct *prev,
 	unsigned long flags;
 
 	local_irq_save(flags);
-	if (prev->mtrace_stack.curr >= 0)
+
+	if (prev->state == TASK_DEAD)
+		mtrace_exit_task(prev);
+	else
+	    if (prev->mtrace_stack.curr >= 0)
 		__mtrace_stack_state(&prev->mtrace_stack, NULL, mtrace_pause);
 
 	mtrace_sched_record(task_pid_nr(next));
@@ -386,6 +383,9 @@ static void mtrace_lock_release(void *unused, struct lockdep_map *lock,
 
 void mtrace_lock_acquired(struct lockdep_map *lock, unsigned long ip)
 {
+	if (unlikely(current->lockdep_recursion))
+		return;
+
 	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_acquired, 0);	
 }
 #endif

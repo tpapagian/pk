@@ -1012,7 +1012,6 @@ NORET_TYPE void do_exit(long code)
 	 * gets woken up by child-exit notifications.
 	 */
 	perf_event_exit_task(tsk);
-	mtrace_exit_task(tsk);
 
 	exit_notify(tsk, group_dead);
 #ifdef CONFIG_NUMA

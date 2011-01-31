@@ -5,7 +5,6 @@
 
 extern void mtrace_init(void);
 extern void mtrace_init_task(struct task_struct *t);
-extern void mtrace_exit_task(struct task_struct *t);
 extern void mtrace_update_task(struct task_struct *t);
 
 extern void mtrace_start_entry(unsigned long pc);
