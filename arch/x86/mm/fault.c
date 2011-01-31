@@ -973,7 +973,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 */
 	if (kmemcheck_active(regs))
 		kmemcheck_hide(regs);
-	prefetchw(&mm->mmap_sem);
+	mm_lock_prefetch(mm);
 
 	if (unlikely(kmmio_fault(regs, address)))
 		return;

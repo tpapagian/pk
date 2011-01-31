@@ -1286,6 +1286,12 @@ mm_lock(struct mm_struct *mm)
 }
 
 static inline void
+mm_lock_nested(struct mm_struct *mm, int subclass)
+{
+	down_write_nested(&mm->mmap_sem, subclass);
+}
+
+static inline void
 mm_unlock(struct mm_struct *mm)
 {
 	up_write(&mm->mmap_sem);
@@ -1308,6 +1314,39 @@ mm_unlock_read(struct mm_struct *mm)
 {
 	up_read(&mm->mmap_sem);
 }
+
+static inline void
+mm_lock_write_to_read(struct mm_struct *mm)
+{
+	downgrade_write(&mm->mmap_sem);
+}
+
+static inline void
+mm_lock_init(struct mm_struct *mm)
+{
+	init_rwsem(&mm->mmap_sem);
+}
+
+static inline int
+mm_is_locked(struct mm_struct *mm)
+{
+	return rwsem_is_locked(&mm->mmap_sem);
+}
+
+static inline void
+mm_lock_prefetch(struct mm_struct *mm)
+{
+	prefetchw(&mm->mmap_sem);
+}
+
+static inline void
+mm_nest_spin_lock(spinlock_t *s, struct mm_struct *mm)
+{
+	spin_lock_nest_lock(s, &mm->mmap_sem);
+}
+
+#define INIT_MM_LOCK(mmstruct)			\
+	.mmap_sem	= __RWSEM_INITIALIZER(mmstruct.mmap_sem)
 
 #ifdef CONFIG_PROC_FS
 /* From fs/proc/base.c. callers must _not_ hold the mm's exe_file_lock */

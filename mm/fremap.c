@@ -240,7 +240,7 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 			mlock_vma_pages_range(vma, start, start + size);
 		} else {
 			if (unlikely(has_write_lock)) {
-				downgrade_write(&mm->mmap_sem);
+				mm_lock_write_to_read(mm);
 				has_write_lock = 0;
 			}
 			make_pages_present(start, start+size);
