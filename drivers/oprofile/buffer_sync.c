@@ -22,6 +22,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/workqueue.h>
 #include <linux/notifier.h>
 #include <linux/dcookies.h>
