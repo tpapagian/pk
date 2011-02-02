@@ -4,6 +4,7 @@
  * Subject to the GPL, v.2
  */
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/err.h>
 #include <linux/sched.h>
 #include <linux/slab.h>

@@ -10,6 +10,7 @@
 #include <linux/time.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/mman.h>
 #include <linux/a.out.h>
 #include <linux/errno.h>

@@ -34,6 +34,7 @@
 #include <linux/syscalls.h>
 #include <linux/hugetlb.h>
 #include <linux/gfp.h>
+#include <linux/mm_lock.h>
 
 #include <asm/tlbflush.h>
 

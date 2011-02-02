@@ -45,6 +45,7 @@
 #include <linux/pagemap.h>
 #include <linux/kref.h>
 #include <linux/slab.h>
+#include <linux/mm_lock.h>
 
 #include <linux/nfs_fs.h>
 #include <linux/nfs_page.h>

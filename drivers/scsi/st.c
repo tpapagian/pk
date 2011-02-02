@@ -25,6 +25,7 @@ static const char *verstr = "20100829";
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/init.h>
 #include <linux/string.h>
 #include <linux/slab.h>

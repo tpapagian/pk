@@ -66,6 +66,7 @@
 #include <linux/posix-timers.h>
 #include <linux/user-return-notifier.h>
 #include <linux/oom.h>
+#include <linux/mm_lock.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>

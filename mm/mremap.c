@@ -8,6 +8,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/hugetlb.h>
 #include <linux/shm.h>
 #include <linux/ksm.h>

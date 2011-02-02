@@ -10,6 +10,7 @@
 #include <linux/pagemap.h>
 #include <linux/gfp.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/mman.h>
 #include <linux/syscalls.h>
 #include <linux/swap.h>

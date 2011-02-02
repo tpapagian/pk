@@ -1,4 +1,5 @@
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/module.h>

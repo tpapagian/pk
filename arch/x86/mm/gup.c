@@ -6,6 +6,7 @@
  */
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/vmstat.h>
 #include <linux/highmem.h>
 

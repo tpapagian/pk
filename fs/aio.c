@@ -24,6 +24,7 @@
 #include <linux/fs.h>
 #include <linux/file.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/mman.h>
 #include <linux/mmu_context.h>
 #include <linux/slab.h>

@@ -23,6 +23,7 @@
 
 #include <linux/slab.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/hugetlb.h>
 #include <linux/shm.h>
 #include <linux/init.h>

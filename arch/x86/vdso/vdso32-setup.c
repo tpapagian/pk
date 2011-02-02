@@ -14,6 +14,7 @@
 #include <linux/string.h>
 #include <linux/elf.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/err.h>
 #include <linux/module.h>
 

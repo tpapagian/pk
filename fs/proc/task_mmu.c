@@ -1,4 +1,5 @@
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/hugetlb.h>
 #include <linux/mount.h>
 #include <linux/seq_file.h>

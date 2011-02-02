@@ -44,6 +44,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/slab.h>
 #include <linux/acct.h>
 #include <linux/capability.h>

@@ -8,6 +8,8 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/ftrace.h>
+#include <linux/mm.h>
+#include <linux/mm_lock.h>
 
 #include "trace_output.h"
 
