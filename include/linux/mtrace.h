@@ -23,6 +23,10 @@ struct mtrace_call_stack {
 	struct mtrace_call stack[MTRACE_CALL_STACK_DEPTH];
 };
 
+extern int mtrace_atomic_dec_and_lock(atomic_t *atomic, 
+				      struct lockdep_map *dep_map, 
+				      spinlock_t *lock);
+
 #endif /* CONFIG_MTRACE */
 
 #endif

@@ -88,6 +88,10 @@ full_name_hash(const unsigned char *name, unsigned int len)
 
 struct dentry {
 	atomic_t d_count;
+#ifdef CONFIG_MTRACE
+	struct lockdep_map d_count_lock_dep;
+#endif
+
 	unsigned int d_flags;		/* protected by d_lock */
 	spinlock_t d_lock;		/* per dentry lock */
 	int d_mounted;

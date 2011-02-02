@@ -390,6 +390,55 @@ void mtrace_lock_acquired(struct lockdep_map *lock, unsigned long ip)
 }
 #endif
 
+static inline int mtrace_atomic_add_unless(atomic_t *v, int a, int u, 
+					   struct lockdep_map *dep_map)
+{
+	int c, old;
+
+	/* The first try should be part of the 'work' calculation */
+	spin_acquire(dep_map, 0, 0, _RET_IP_);
+	c = atomic_read(v);
+	if (unlikely(c == (u)))
+		goto done;
+	old = atomic_cmpxchg((v), c, c + (a));
+	if (likely(old == c))
+		goto done;
+	c = old;
+	spin_release(dep_map, 1, _RET_IP_);	
+
+	/* Subsequent tries should be deducted from the 'work' */
+	spin_acquire(dep_map, 0, 0, _RET_IP_);
+	for (;;) {
+		if (unlikely(c == (u)))
+			break;
+		old = atomic_cmpxchg((v), c, c + (a));
+		if (likely(old == c))
+			break;
+		c = old;
+	}
+	lock_acquired(dep_map, _RET_IP_);
+
+done:
+	spin_release(dep_map, 1, _RET_IP_);
+	return c != (u);
+}
+
+int mtrace_atomic_dec_and_lock(atomic_t *atomic, 
+			       struct lockdep_map *dep_map, 
+			       spinlock_t *lock)
+{
+	/* Subtract 1 from counter unless that drops it to 0 (ie. it was 1) */
+	if (mtrace_atomic_add_unless(atomic, -1, 1, dep_map))
+		return 0;
+
+	/* Otherwise do it the slow way */
+	spin_lock(lock);
+	if (atomic_dec_and_test(atomic))
+		return 1;
+	spin_unlock(lock);
+	return 0;
+}
+
 void __init mtrace_init(void)
 {
 #define REG(name) BUG_ON(register_trace_##name(mtrace_##name, NULL))

@@ -226,7 +226,13 @@ void dput(struct dentry *dentry)
 repeat:
 	if (atomic_read(&dentry->d_count) == 1)
 		might_sleep();
+#ifdef CONFIG_MTRACE
+	if (!mtrace_atomic_dec_and_lock(&dentry->d_count, 
+					&dentry->d_count_lock_dep, 
+					&dcache_lock))
+#else
 	if (!atomic_dec_and_lock(&dentry->d_count, &dcache_lock))
+#endif
 		return;
 
 	spin_lock(&dentry->d_lock);
@@ -937,6 +943,7 @@ static struct shrinker dcache_shrinker = {
  
 struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 {
+	static struct lock_class_key d_count_key;
 	struct dentry *dentry;
 	char *dname;
 
@@ -961,6 +968,9 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	dname[name->len] = 0;
 
 	atomic_set(&dentry->d_count, 1);
+#ifdef CONFIG_MTRACE
+	lockdep_init_map(&dentry->d_count_lock_dep, "d_count", &d_count_key, 0);
+#endif
 	dentry->d_flags = DCACHE_UNHASHED;
 	spin_lock_init(&dentry->d_lock);
 	dentry->d_inode = NULL;
