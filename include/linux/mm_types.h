@@ -238,6 +238,10 @@ struct mm_struct {
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
 	int map_count;				/* number of VMAs */
 	struct rw_semaphore mmap_sem;
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	struct rw_semaphore vma_sem;		/* protects RB tree and VMA's */
+	bool vma_sem_locked;			/* vma_sem held for write */
+#endif
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
 
 	struct list_head mmlist;		/* List of maybe swapped mm's.	These are globally strung

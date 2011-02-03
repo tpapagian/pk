@@ -9,18 +9,42 @@ static inline void
 mm_lock(struct mm_struct *mm)
 {
 	down_write(&mm->mmap_sem);
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	BUG_ON(mm->vma_sem_locked);
+#endif
 }
 
 static inline void
 mm_lock_nested(struct mm_struct *mm, int subclass)
 {
 	down_write_nested(&mm->mmap_sem, subclass);
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	BUG_ON(mm->vma_sem_locked);
+#endif
 }
 
 static inline void
 mm_unlock(struct mm_struct *mm)
 {
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	if (mm->vma_sem_locked) {
+		up_write(&mm->vma_sem);
+		mm->vma_sem_locked = 0;
+	}
+#endif
 	up_write(&mm->mmap_sem);
+}
+
+static inline void
+mm_vma_lock(struct mm_struct *mm)
+{
+	BUG_ON(!rwsem_is_locked(&mm->mmap_sem));
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	if (!mm->vma_sem_locked) {
+		down_write(&mm->vma_sem);
+		mm->vma_sem_locked = 1;
+	}
+#endif
 }
 
 static inline void
@@ -42,8 +66,41 @@ mm_unlock_read(struct mm_struct *mm)
 }
 
 static inline void
+mm_vma_lock_read(struct mm_struct *mm)
+{
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	down_read(&mm->vma_sem);
+#else
+	mm_lock_read(mm);
+#endif
+}
+
+static inline int
+mm_vma_lock_tryread(struct mm_struct *mm)
+{
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	return down_read_trylock(&mm->vma_sem);
+#else
+	return mm_lock_tryread(mm);
+#endif
+}
+
+static inline void
+mm_vma_unlock_read(struct mm_struct *mm)
+{
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	up_read(&mm->vma_sem);
+#else
+	mm_unlock_read(mm);
+#endif
+}
+
+static inline void
 mm_lock_write_to_read(struct mm_struct *mm)
 {
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	BUG_ON(mm->vma_sem_locked);
+#endif
 	downgrade_write(&mm->mmap_sem);
 }
 
@@ -51,12 +108,26 @@ static inline void
 mm_lock_init(struct mm_struct *mm)
 {
 	init_rwsem(&mm->mmap_sem);
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	init_rwsem(&mm->vma_sem);
+	mm->vma_sem_locked = 0;
+#endif
 }
 
 static inline int
 mm_is_locked(struct mm_struct *mm)
 {
 	return rwsem_is_locked(&mm->mmap_sem);
+}
+
+static inline int
+mm_vma_is_locked(struct mm_struct *mm)
+{
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	return mm->vma_sem_locked;
+#else
+	return mm_is_locked(mm);
+#endif
 }
 
 static inline void
@@ -71,9 +142,14 @@ mm_nest_spin_lock(spinlock_t *s, struct mm_struct *mm)
 	spin_lock_nest_lock(s, &mm->mmap_sem);
 }
 
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+#define INIT_MM_LOCK(mmstruct)			\
+	.mmap_sem	= __RWSEM_INITIALIZER(mmstruct.mmap_sem),	\
+	.vma_sem	= __RWSEM_INITIALIZER(mmstruct.vma_sem)
+#else
 #define INIT_MM_LOCK(mmstruct)			\
 	.mmap_sem	= __RWSEM_INITIALIZER(mmstruct.mmap_sem)
-
+#endif
 
 /* _locked variants */
 

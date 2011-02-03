@@ -414,6 +414,7 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct rb_node **rb_link, struct rb_node *rb_parent)
 {
+	BUG_ON(!mm_vma_is_locked(mm));
 	rb_link_node(&vma->vm_rb, rb_parent, rb_link);
 	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
 }
@@ -422,6 +423,8 @@ static void __vma_link_file(struct vm_area_struct *vma)
 {
 	struct file *file;
 
+	// amdragon: Don't need vma lock here because this is all
+	// protected by the i_mmap_lock
 	file = vma->vm_file;
 	if (file) {
 		struct address_space *mapping = file->f_mapping;
@@ -485,6 +488,7 @@ static void __insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 
 	__vma = find_vma_prepare(mm, vma->vm_start,&prev, &rb_link, &rb_parent);
 	BUG_ON(__vma && __vma->vm_start < vma->vm_end);
+	mm_vma_lock(mm);
 	__vma_link(mm, vma, prev, rb_link, rb_parent);
 	mm->map_count++;
 }
@@ -495,6 +499,7 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 {
 	struct vm_area_struct *next = vma->vm_next;
 
+	BUG_ON(!mm_vma_is_locked(mm));
 	prev->vm_next = next;
 	if (next)
 		next->vm_prev = prev;
@@ -570,6 +575,8 @@ again:			remove_next = 1 + (end > next->vm_end);
 		mapping = file->f_mapping;
 		if (!(vma->vm_flags & VM_NONLINEAR))
 			root = &mapping->i_mmap;
+		// amdragon: Need to take vma lock before i_mmap_lock
+		mm_vma_lock(mm);
 		spin_lock(&mapping->i_mmap_lock);
 		if (importer &&
 		    vma->vm_truncate_count != next->vm_truncate_count) {
@@ -598,6 +605,8 @@ again:			remove_next = 1 + (end > next->vm_end);
 	 * the lock for brk adjustments makes a difference sometimes.
 	 */
 	if (vma->anon_vma && (insert || importer || start != vma->vm_start)) {
+		// amdragon: Need to take vma lock before anon_vma_lock
+		mm_vma_lock(mm);
 		anon_vma = vma->anon_vma;
 		anon_vma_lock(anon_vma);
 	}
@@ -609,6 +618,7 @@ again:			remove_next = 1 + (end > next->vm_end);
 			vma_prio_tree_remove(next, root);
 	}
 
+	mm_vma_lock(mm);
 	vma->vm_start = start;
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
@@ -1343,6 +1353,7 @@ munmap_back:
 			vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	}
 
+	mm_vma_lock(mm);
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 	file = vma->vm_file;
 
@@ -1929,6 +1940,7 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *tail_vma = NULL;
 	unsigned long addr;
 
+	BUG_ON(!mm_vma_is_locked(mm));
 	insertion_point = (prev ? &prev->vm_next : &mm->mmap);
 	vma->vm_prev = NULL;
 	do {
@@ -2119,6 +2131,7 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 	/*
 	 * Remove the vma's, and unmap the actual pages
 	 */
+	mm_vma_lock(mm);
 	detach_vmas_to_be_unmapped(mm, vma, prev, end);
 	unmap_region(mm, vma, prev, start, end);
 
@@ -2241,6 +2254,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	vma->vm_pgoff = pgoff;
 	vma->vm_flags = flags;
 	vma->vm_page_prot = vm_get_page_prot(flags);
+	mm_vma_lock(mm);
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 out:
 	perf_event_mmap(vma);
@@ -2332,6 +2346,7 @@ int insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
 	if ((vma->vm_flags & VM_ACCOUNT) &&
 	     security_vm_enough_memory_mm(mm, vma_pages(vma)))
 		return -ENOMEM;
+	mm_vma_lock(mm);
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 	return 0;
 }
@@ -2388,6 +2403,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 			}
 			if (new_vma->vm_ops && new_vma->vm_ops->open)
 				new_vma->vm_ops->open(new_vma);
+			mm_vma_lock(mm);
 			vma_link(mm, new_vma, prev, rb_link, rb_parent);
 		}
 	}

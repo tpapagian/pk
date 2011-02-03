@@ -315,6 +315,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	 * Not linked in yet - no deadlock potential:
 	 */
 	mm_lock_nested(mm, SINGLE_DEPTH_NESTING);
+	// amdragon: No point in delaying this
+	mm_vma_lock(mm);
 
 	mm->locked_vm = 0;
 	mm->mmap = NULL;

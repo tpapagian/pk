@@ -309,3 +309,7 @@ config NEED_PER_CPU_KM
 	depends on !SMP
 	bool
 	default y
+
+config AMDRAGON_LATE_TREE_LOCK
+	bool "Take the VMA tree lock late in MM writers"
+	default n
