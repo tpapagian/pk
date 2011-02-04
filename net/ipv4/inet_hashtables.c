@@ -23,6 +23,61 @@
 #include <net/inet_hashtables.h>
 #include <net/ip.h>
 
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#define BIND_MAX_DEPTH 48
+static struct lock_class_key bind_class[BIND_MAX_DEPTH];
+static const char *bind_name[BIND_MAX_DEPTH] = {
+	"bind-00",
+	"bind-01",
+	"bind-02",
+	"bind-03",
+	"bind-04",
+	"bind-05",
+	"bind-06",
+	"bind-07",
+	"bind-08",
+	"bind-09",
+	"bind-10",
+	"bind-11",
+	"bind-12",
+	"bind-13",
+	"bind-14",
+	"bind-15",
+	"bind-16",
+	"bind-17",
+	"bind-18",
+	"bind-19",
+	"bind-20",
+	"bind-21",
+	"bind-22",
+	"bind-23",
+	"bind-24",
+	"bind-25",
+	"bind-26",
+	"bind-27",
+	"bind-28",
+	"bind-29",
+	"bind-30",
+	"bind-31",
+	"bind-32",
+	"bind-33",
+	"bind-34",
+	"bind-35",
+	"bind-36",
+	"bind-37",
+	"bind-38",
+	"bind-39",
+	"bind-40",
+	"bind-41",
+	"bind-42",
+	"bind-43",
+	"bind-44",
+	"bind-45",
+	"bind-46",
+	"bind-47",
+};
+#endif
+
 /* Chain lock must be held when calling. */
 void __inet_bind_bucket_per_cpu_flush(struct inet_bind_bucket *tb, int lock)
 {
@@ -74,6 +129,13 @@ struct inet_bind_bucket *inet_bind_bucket_create(struct kmem_cache *cachep,
 		for_each_possible_cpu(c) {
 			struct per_cpu_inet_bind_bucket *p = &tb->per_cpu[c];
 			spin_lock_init(&p->lock);
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+			lockdep_set_class_and_name(&p->lock,
+					&bind_class[c],
+					bind_name[c]);
+#endif
+
 			p->num_owners = 0;
 			INIT_HLIST_HEAD(&p->owners);
 		}
@@ -94,7 +156,7 @@ void inet_bind_bucket_destroy(struct kmem_cache *cachep, struct inet_bind_bucket
 		int c;
 		
 		for_each_possible_cpu(c)
-			spin_lock_nested(&tb->per_cpu[c].lock, c);
+			spin_lock(&tb->per_cpu[c].lock);
 
 		__inet_bind_bucket_per_cpu_flush(tb, 0);
 

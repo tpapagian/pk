@@ -67,7 +67,7 @@ int inet_csk_bind_conflict(const struct sock *sk,
 
 	// AP: TODO this is code here is ugly, would be best to hide such details
 	for_each_possible_cpu(c)
-		spin_lock_nested(&tb->per_cpu[c].lock, c);
+		spin_lock(&tb->per_cpu[c].lock);
 
 	__inet_bind_bucket_per_cpu_flush(tb, 0);
 
