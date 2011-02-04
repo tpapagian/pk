@@ -137,6 +137,16 @@ mm_lock_prefetch(struct mm_struct *mm)
 }
 
 static inline void
+mm_vma_lock_prefetch(struct mm_struct *mm)
+{
+#ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
+	prefetchw(&mm->vma_sem);
+#else
+	mm_lock_prefetch(mm);
+#endif
+}
+
+static inline void
 mm_nest_spin_lock(spinlock_t *s, struct mm_struct *mm)
 {
 	spin_lock_nest_lock(s, &mm->mmap_sem);
