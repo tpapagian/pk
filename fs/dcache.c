@@ -969,7 +969,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 
 	atomic_set(&dentry->d_count, 1);
 #ifdef CONFIG_MTRACE
-	lockdep_init_map(&dentry->d_count_lock_dep, "d_count", &d_count_key, 0);
+	lockdep_init_map(&dentry->d_count_lock_dep, "cmpxchg_d_count", &d_count_key, 0);
 #endif
 	dentry->d_flags = DCACHE_UNHASHED;
 	spin_lock_init(&dentry->d_lock);
