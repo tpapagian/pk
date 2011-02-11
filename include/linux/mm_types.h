@@ -12,6 +12,7 @@
 #include <linux/completion.h>
 #include <linux/cpumask.h>
 #include <linux/page-debug-flags.h>
+#include <linux/workqueue.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
 
@@ -140,6 +141,11 @@ struct vm_area_struct {
 	unsigned long vm_flags;		/* Flags, see mm.h. */
 
 	struct rb_node vm_rb;
+
+	// amdragon: Set when this VMA has been removed from the tree,
+	// but not yet freed.
+	int vm_unlinked;
+	struct work_struct vm_delayed_free;
 
 	/*
 	 * For areas with an address space and backing store,

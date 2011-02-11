@@ -18,6 +18,8 @@
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
 #include <asm/kmemcheck.h>		/* kmemcheck_*(), ...		*/
 
+extern struct srcu_struct mm_srcu;
+
 /*
  * Page fault error code bits:
  *
@@ -1049,6 +1051,8 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		return;
 	}
 
+	srcu_read_acquire(&mm_srcu);
+
 	/*
 	 * When running in the kernel we expect faults to occur only to
 	 * addresses in user space.  All other faults represent errors in
@@ -1069,7 +1073,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		if ((error_code & PF_USER) == 0 &&
 		    !search_exception_tables(regs->ip)) {
 			bad_area_nosemaphore(regs, error_code, address);
-			return;
+			goto done_srcu;
 		}
 retry:
 		mm_vma_lock_read(mm);
@@ -1085,13 +1089,13 @@ retry:
 	vma = find_vma(mm, address);
 	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address);
-		return;
+		goto done_srcu;
 	}
 	if (likely(vma->vm_start <= address))
 		goto good_area;
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
 		bad_area(regs, error_code, address);
-		return;
+		goto done_srcu;
 	}
 	if (error_code & PF_USER) {
 		/*
@@ -1102,12 +1106,12 @@ retry:
 		 */
 		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp)) {
 			bad_area(regs, error_code, address);
-			return;
+			goto done_srcu;
 		}
 	}
 	if (unlikely(expand_stack(vma, address))) {
 		bad_area(regs, error_code, address);
-		return;
+		goto done_srcu;
 	}
 
 	/*
@@ -1117,7 +1121,7 @@ retry:
 good_area:
 	if (unlikely(access_error(error_code, vma))) {
 		bad_area_access_error(regs, error_code, address);
-		return;
+		goto done_srcu;
 	}
 
 	/*
@@ -1129,7 +1133,7 @@ good_area:
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		mm_fault_error(regs, error_code, address, fault);
-		return;
+		goto done_srcu;
 	}
 
 	/*
@@ -1158,4 +1162,7 @@ good_area:
 	check_v8086_mode(regs, address, tsk);
 
 	mm_vma_unlock_read(mm);
+
+done_srcu:
+	srcu_read_release(&mm_srcu);
 }

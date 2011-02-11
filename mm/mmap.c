@@ -30,6 +30,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
 #include <linux/audit.h>
+#include <linux/srcu.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
@@ -90,6 +91,9 @@ int sysctl_overcommit_memory = OVERCOMMIT_GUESS;  /* heuristic overcommit */
 int sysctl_overcommit_ratio = 50;	/* default is 50% */
 int sysctl_max_map_count __read_mostly = DEFAULT_MAX_MAP_COUNT;
 struct percpu_counter vm_committed_as;
+
+struct srcu_struct mm_srcu;
+static struct workqueue_struct *mm_free_vma_list_wq;
 
 /*
  * Check that a process has enough memory to allocate a new virtual
@@ -229,7 +233,8 @@ void unlink_file_vma(struct vm_area_struct *vma)
 /*
  * Close a vm structure and free it, returning the next.
  */
-static struct vm_area_struct *remove_vma(struct vm_area_struct *vma)
+static struct vm_area_struct *remove_vma(struct vm_area_struct *vma,
+					 int free_now)
 {
 	struct vm_area_struct *next = vma->vm_next;
 
@@ -242,8 +247,34 @@ static struct vm_area_struct *remove_vma(struct vm_area_struct *vma)
 			removed_exe_file_vma(vma->vm_mm);
 	}
 	mpol_put(vma_policy(vma));
-	kmem_cache_free(vm_area_cachep, vma);
+	if (free_now)
+		kmem_cache_free(vm_area_cachep, vma);
 	return next;
+}
+
+// amdragon: Perform delayed free of a VMA list
+static void __free_vma_list(struct work_struct *work)
+{
+	struct vm_area_struct *vma =
+		container_of(work, struct vm_area_struct, vm_delayed_free);
+	// XXX amdragon: It would be nice if we could pull as much as
+	// possible off the workqueue before blocking instead of doing
+	// one thing at a time.
+	synchronize_srcu(&mm_srcu);
+	do {
+		struct vm_area_struct *next = vma->vm_next;
+		BUG_ON(!vma->vm_unlinked);
+		kmem_cache_free(vm_area_cachep, vma);
+		vma = next;
+	} while (vma);
+}
+
+static void free_vma_list(struct vm_area_struct *vma)
+{
+	// amdragon: A little weird to initialize the work here, but
+	// where else are we going to do it?
+	INIT_WORK(&vma->vm_delayed_free, __free_vma_list);
+	queue_work(mm_free_vma_list_wq, &vma->vm_delayed_free);
 }
 
 SYSCALL_DEFINE1(brk, unsigned long, brk)
@@ -500,6 +531,7 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *next = vma->vm_next;
 
 	BUG_ON(!mm_vma_is_locked(mm));
+	vma->vm_unlinked = 1;
 	prev->vm_next = next;
 	if (next)
 		next->vm_prev = prev;
@@ -666,7 +698,10 @@ again:			remove_next = 1 + (end > next->vm_end);
 			anon_vma_merge(vma, next);
 		mm->map_count--;
 		mpol_put(vma_policy(next));
-		kmem_cache_free(vm_area_cachep, next);
+		// amdragon: Delay free.  Since we delay free VMA
+		// lists, make next a list.
+		next->vm_next = NULL;
+		free_vma_list(next);
 		/*
 		 * In mprotect's case 6 (see comments on vma_merge),
 		 * we must remove another next too. It would clutter
@@ -1382,6 +1417,8 @@ unmap_and_free_vma:
 	unmap_region(mm, vma, prev, vma->vm_start, vma->vm_end);
 	charged = 0;
 free_vma:
+	// amdragon: No need to delay this since the VMA didn't make
+	// it into the tree.
 	kmem_cache_free(vm_area_cachep, vma);
 unacct_error:
 	if (charged)
@@ -1893,6 +1930,7 @@ find_extend_vma(struct mm_struct * mm, unsigned long addr)
  */
 static void remove_vma_list(struct mm_struct *mm, struct vm_area_struct *vma)
 {
+	struct vm_area_struct *start = vma;
 	/* Update high watermark before we lower total_vm */
 	update_hiwater_vm(mm);
 	do {
@@ -1900,8 +1938,12 @@ static void remove_vma_list(struct mm_struct *mm, struct vm_area_struct *vma)
 
 		mm->total_vm -= nrpages;
 		vm_stat_account(mm, vma->vm_flags, vma->vm_file, -nrpages);
-		vma = remove_vma(vma);
+		// amdragon: We delay freeing and put the whole vma
+		// list on the delayed-free worklist, so don't free
+		// here.
+		vma = remove_vma(vma, 0);
 	} while (vma);
+	free_vma_list(start);
 	validate_mm(mm);
 }
 
@@ -1944,6 +1986,7 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	insertion_point = (prev ? &prev->vm_next : &mm->mmap);
 	vma->vm_prev = NULL;
 	do {
+		vma->vm_unlinked = 1;
 		rb_erase(&vma->vm_rb, &mm->mm_rb);
 		mm->map_count--;
 		tail_vma = vma;
@@ -2033,6 +2076,8 @@ static int __split_vma(struct mm_struct * mm, struct vm_area_struct * vma,
  out_free_mpol:
 	mpol_put(pol);
  out_free_vma:
+	// amdragon: No need to delay since the VMA didn't make it
+	// into the tree.
 	kmem_cache_free(vm_area_cachep, new);
  out_err:
 	return err;
@@ -2310,7 +2355,9 @@ void exit_mmap(struct mm_struct *mm)
 	 * with preemption enabled, without holding any MM locks.
 	 */
 	while (vma)
-		vma = remove_vma(vma);
+		// amdragon: It's safe to immediately free VMA's here
+		// because no page fault handler can be racing.
+		vma = remove_vma(vma, 1);
 
 	BUG_ON(mm->nr_ptes > (FIRST_USER_ADDRESS+PMD_SIZE-1)>>PMD_SHIFT);
 }
@@ -2412,6 +2459,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
  out_free_mempol:
 	mpol_put(pol);
  out_free_vma:
+	// amdragon: No need to delay
 	kmem_cache_free(vm_area_cachep, new_vma);
 	return NULL;
 }
@@ -2518,6 +2566,7 @@ int install_special_mapping(struct mm_struct *mm,
 	return 0;
 
 out:
+	// amdragon: No need to delay
 	kmem_cache_free(vm_area_cachep, vma);
 	return ret;
 }
@@ -2699,4 +2748,19 @@ void __init mmap_init(void)
 
 	ret = percpu_counter_init(&vm_committed_as, 0);
 	VM_BUG_ON(ret);
+
+	ret = init_srcu_struct(&mm_srcu);
+	VM_BUG_ON(ret);
 }
+
+static int __init mmap_init_wq(void)
+{
+	// amdragon: We can't create a workqueue in mmap_init because
+	// we can't create kthread's that early.  This is late enough
+	// that we can create workqueue's, but that there's no danger
+	// of trying to free VMA's.
+	mm_free_vma_list_wq = create_workqueue("mm_free_vma_list");
+	VM_BUG_ON(!mm_free_vma_list_wq);
+	return 0;
+}
+__initcall(mmap_init_wq);
