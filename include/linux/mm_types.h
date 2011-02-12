@@ -241,7 +241,7 @@ struct mm_struct {
 #ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
 	struct rw_semaphore vma_sem;		/* protects RB tree and VMA's */
 	bool vma_sem_locked;			/* vma_sem held for write */
-	char _pad[64 - (1 + sizeof(struct rw_semaphore))];
+//	char _pad[64 - (1 + sizeof(struct rw_semaphore))];
 #endif
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
 
