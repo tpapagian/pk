@@ -31,6 +31,7 @@
 #include <linux/perf_event.h>
 #include <linux/audit.h>
 #include <linux/srcu.h>
+#include <linux/kthread.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
@@ -93,7 +94,8 @@ int sysctl_max_map_count __read_mostly = DEFAULT_MAX_MAP_COUNT;
 struct percpu_counter vm_committed_as;
 
 struct srcu_struct mm_srcu;
-static struct workqueue_struct *mm_free_vma_list_wq;
+static struct task_struct *mm_free_vma_task;
+static struct vm_area_struct *mm_free_vma_head;
 
 /*
  * Check that a process has enough memory to allocate a new virtual
@@ -252,29 +254,68 @@ static struct vm_area_struct *remove_vma(struct vm_area_struct *vma,
 	return next;
 }
 
-// amdragon: Perform delayed free of a VMA list
-static void __free_vma_list(struct work_struct *work)
+#ifdef DEBUG_PENDING_FREE
+static atomic_t pending_free;
+
+static void mm_free_vma_stats_show(unsigned long dummy);
+static DEFINE_TIMER(mm_free_vma_stats, mm_free_vma_stats_show, 0, 0);
+static void mm_free_vma_stats_show(unsigned long dummy)
 {
-	struct vm_area_struct *vma =
-		container_of(work, struct vm_area_struct, vm_delayed_free);
-	// XXX amdragon: It would be nice if we could pull as much as
-	// possible off the workqueue before blocking instead of doing
-	// one thing at a time.
-	synchronize_srcu(&mm_srcu);
-	do {
-		struct vm_area_struct *next = vma->vm_next;
-		BUG_ON(!vma->vm_unlinked);
-		kmem_cache_free(vm_area_cachep, vma);
-		vma = next;
-	} while (vma);
+	mod_timer(&mm_free_vma_stats, jiffies + HZ);
+	printk(KERN_INFO "pending_free: %d\n", atomic_read(&pending_free));
+}
+#endif
+
+static int mm_free_vma_thread(void *dummy)
+{
+	while (1) {
+		struct vm_area_struct *head;
+		set_current_state(TASK_INTERRUPTIBLE);
+		while (!(head = xchg(&mm_free_vma_head, NULL))) {
+			schedule();
+			set_current_state(TASK_INTERRUPTIBLE);
+		}
+		set_current_state(TASK_RUNNING);
+
+		// Wait until VMA's can no longer be in use
+		synchronize_srcu(&mm_srcu);
+
+		// Free each VMA list
+		do {
+			struct vm_area_struct *vma = head;
+			head = head->vm_next_free_list;
+#ifdef DEBUG_PENDING_FREE
+			atomic_dec(&pending_free);
+#endif
+			do {
+				struct vm_area_struct *next = vma->vm_next;
+				BUG_ON(!vma->vm_unlinked);
+				kmem_cache_free(vm_area_cachep, vma);
+				vma = next;
+			} while (vma);
+		} while (head);
+	}
+	BUG_ON(1);
+	return 0;
 }
 
 static void free_vma_list(struct vm_area_struct *vma)
 {
-	// amdragon: A little weird to initialize the work here, but
-	// where else are we going to do it?
-	INIT_WORK(&vma->vm_delayed_free, __free_vma_list);
-	queue_work(mm_free_vma_list_wq, &vma->vm_delayed_free);
+	struct vm_area_struct *head;
+#ifdef DEBUG_PENDING_FREE
+	atomic_inc(&pending_free);
+#endif
+
+	// Atomically add this list to the list of VMA lists to free
+retry:
+	head = mm_free_vma_head;
+	// Make sure the compiler reads mm_free_vma_head just once.
+	barrier();
+	vma->vm_next_free_list = head;
+	if (cmpxchg(&mm_free_vma_head, head, vma) != head)
+		goto retry;
+
+	wake_up_process(mm_free_vma_task);
 }
 
 SYSCALL_DEFINE1(brk, unsigned long, brk)
@@ -2747,20 +2788,25 @@ void __init mmap_init(void)
 	int ret;
 
 	ret = percpu_counter_init(&vm_committed_as, 0);
-	VM_BUG_ON(ret);
+	BUG_ON(ret);
 
 	ret = init_srcu_struct(&mm_srcu);
-	VM_BUG_ON(ret);
+	BUG_ON(ret);
 }
 
-static int __init mmap_init_wq(void)
+static int __init mmap_init_kthread(void)
 {
-	// amdragon: We can't create a workqueue in mmap_init because
-	// we can't create kthread's that early.  This is late enough
-	// that we can create workqueue's, but that there's no danger
-	// of trying to free VMA's.
-	mm_free_vma_list_wq = create_workqueue("mm_free_vma_list");
-	VM_BUG_ON(!mm_free_vma_list_wq);
+	// amdragon: We can't create a kthread in mmap_init because
+	// it's too early.  This is late enough that we can create
+	// kthread's, but that there's no danger of trying to free
+	// VMA's.
+	mm_free_vma_task = kthread_create(mm_free_vma_thread, NULL,
+					  "mm_free_vma");
+	BUG_ON(IS_ERR(mm_free_vma_task));
+
+#ifdef DEBUG_PENDING_FREE
+	mod_timer(&mm_free_vma_stats, jiffies);
+#endif
 	return 0;
 }
-__initcall(mmap_init_wq);
+__initcall(mmap_init_kthread);

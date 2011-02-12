@@ -12,7 +12,6 @@
 #include <linux/completion.h>
 #include <linux/cpumask.h>
 #include <linux/page-debug-flags.h>
-#include <linux/workqueue.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
 
@@ -145,7 +144,8 @@ struct vm_area_struct {
 	// amdragon: Set when this VMA has been removed from the tree,
 	// but not yet freed.
 	int vm_unlinked;
-	struct work_struct vm_delayed_free;
+	// amdragon: Link to the head of the next VMA *list* to free.
+	struct vm_area_struct *vm_next_free_list;
 
 	/*
 	 * For areas with an address space and backing store,
