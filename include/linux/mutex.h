@@ -57,7 +57,7 @@ struct mutex {
 	const char 		*name;
 	void			*magic;
 #endif
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map	dep_map;
 #endif
 };
@@ -74,6 +74,15 @@ struct mutex_waiter {
 #endif
 };
 
+
+// AP: XXX need to make this look similar to the spinlock case and the rwlock case.
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
+extern void debug_mutex_init(struct mutex *lock, const char *name,
+			     struct lock_class_key *key);
+#else
+#define debug_mutex_init(lock, name, key)		do { } while (0)
+#endif
+
 #ifdef CONFIG_DEBUG_MUTEXES
 # include <linux/mutex-debug.h>
 #else
@@ -87,7 +96,7 @@ do {							\
 # define mutex_destroy(mutex)				do { } while (0)
 #endif
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define __DEP_MAP_MUTEX_INITIALIZER(lockname) \
 		, .dep_map = { .name = #lockname }
 #else

@@ -31,7 +31,7 @@ struct attribute {
 	const char		*name;
 	struct module		*owner;
 	mode_t			mode;
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lock_class_key	*key;
 	struct lock_class_key	skey;
 #endif
@@ -47,7 +47,7 @@ struct attribute {
  *	Lockdep gives a nice error when your attribute is added to
  *	sysfs if you don't have this.
  */
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 #define sysfs_attr_init(attr)				\
 do {							\
 	static struct lock_class_key __key;		\

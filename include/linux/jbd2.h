@@ -436,7 +436,7 @@ struct handle_s
 	unsigned int	h_jdata:	1;	/* force data journaling */
 	unsigned int	h_aborted:	1;	/* fatal error on handle */
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map	h_lockdep_map;
 #endif
 };

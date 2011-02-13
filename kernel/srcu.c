@@ -49,8 +49,12 @@ int __init_srcu_struct(struct srcu_struct *sp, const char *name,
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 	/* Don't re-initialize a lock while it is held. */
 	debug_check_no_locks_freed((void *)sp, sizeof(*sp));
-	lockdep_init_map(&sp->dep_map, name, key, 0);
 #endif /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
+
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
+	lockdep_init_map(&sp->dep_map, name, key, 0);
+#endif
+
 	return init_srcu_struct_fields(sp);
 }
 EXPORT_SYMBOL_GPL(__init_srcu_struct);

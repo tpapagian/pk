@@ -17,14 +17,14 @@ typedef struct {
 	unsigned int magic, owner_cpu;
 	void *owner;
 #endif
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map dep_map;
 #endif
 } rwlock_t;
 
 #define RWLOCK_MAGIC		0xdeaf1eed
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define RW_DEP_MAP_INIT(lockname)	.dep_map = { .name = #lockname }
 #else
 # define RW_DEP_MAP_INIT(lockname)

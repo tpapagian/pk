@@ -28,14 +28,14 @@ struct timer_list {
 	char start_comm[16];
 	int start_pid;
 #endif
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map lockdep_map;
 #endif
 };
 
 extern struct tvec_base boot_tvec_bases;
 
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 /*
  * NB: because we have to copy the lockdep_map, setting the lockdep_map key
  * (second argument) here is required, otherwise it could be initialised to
@@ -69,7 +69,7 @@ void init_timer_deferrable_key(struct timer_list *timer,
 			       const char *name,
 			       struct lock_class_key *key);
 
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 #define init_timer(timer)						\
 	do {								\
 		static struct lock_class_key __key;			\

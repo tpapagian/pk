@@ -32,12 +32,12 @@ struct rw_semaphore {
 	__s32			activity;
 	spinlock_t		wait_lock;
 	struct list_head	wait_list;
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map dep_map;
 #endif
 };
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define __RWSEM_DEP_MAP_INIT(lockname) , .dep_map = { .name = #lockname }
 #else
 # define __RWSEM_DEP_MAP_INIT(lockname)

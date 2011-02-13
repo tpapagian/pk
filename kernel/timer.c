@@ -977,7 +977,7 @@ EXPORT_SYMBOL(try_to_del_timer_sync);
  */
 int del_timer_sync(struct timer_list *timer)
 {
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	unsigned long flags;
 
 	local_irq_save(flags);
@@ -1021,7 +1021,7 @@ static void call_timer_fn(struct timer_list *timer, void (*fn)(unsigned long),
 {
 	int preempt_count = preempt_count();
 
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	/*
 	 * It is permissible to free the timer from inside the
 	 * function that is called from it, this we need to take into

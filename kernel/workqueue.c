@@ -63,7 +63,7 @@ struct workqueue_struct {
 	int singlethread;
 	int freezeable;		/* Freeze threads during suspend */
 	int rt;
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map lockdep_map;
 #endif
 };
@@ -389,7 +389,7 @@ static void run_workqueue(struct cpu_workqueue_struct *cwq)
 		struct work_struct *work = list_entry(cwq->worklist.next,
 						struct work_struct, entry);
 		work_func_t f = work->func;
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 		/*
 		 * It is permissible to free the struct work_struct
 		 * from inside the function that is called from it,

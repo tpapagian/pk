@@ -7,7 +7,7 @@
 #include <linux/lockdep.h>
 #include <linux/tracepoint.h>
 
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 
 TRACE_EVENT(lock_acquire,
 
@@ -61,8 +61,6 @@ DEFINE_EVENT(lock, lock_release,
 	TP_ARGS(lock, ip)
 );
 
-#ifdef CONFIG_LOCK_STAT
-
 DEFINE_EVENT(lock, lock_contended,
 
 	TP_PROTO(struct lockdep_map *lock, unsigned long ip),
@@ -77,7 +75,6 @@ DEFINE_EVENT(lock, lock_acquired,
 	TP_ARGS(lock, ip)
 );
 
-#endif
 #endif
 
 #endif /* _TRACE_LOCK_H */

@@ -1105,7 +1105,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->hardirq_context = 0;
 	p->softirq_context = 0;
 #endif
-#ifdef CONFIG_LOCKDEP
+// AP: XXX some of this code may be defined out using CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	p->lockdep_depth = 0; /* no locks held yet */
 	p->curr_chain_key = 0;
 	p->lockdep_recursion = 0;

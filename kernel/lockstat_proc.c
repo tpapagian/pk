@@ -8,6 +8,9 @@
 #include <asm/uaccess.h>
 #include <asm/div64.h>
 
+#include <linux/lock_debug_hooks.h>
+#include <linux/lockstat2.h>
+
 #include "lockdep_internals.h"
 #include "lockstat_internals.h"
 
@@ -176,9 +179,31 @@ static void seq_stats(struct seq_file *m, struct lock_stat_data *data)
 	}
 }
 
+#ifdef CONFIG_DEBUG_LOCK_HOOKS
+extern atomic_t ls_acquire;
+extern atomic_t ls_release;
+extern atomic_t ls_contended;
+extern atomic_t ls_acquired;
+extern atomic_t ls_holdtime;
+
+extern atomic_t ls_non_nested;
+extern atomic_t ls_nested;
+#endif
+
 static void seq_header(struct seq_file *m)
 {
 	seq_printf(m, "lock_stat version 0.3\n");
+
+#ifdef CONFIG_DEBUG_LOCK_HOOKS
+	seq_printf(m, "ls_acquire: %d\n", atomic_read(&ls_acquire));
+	seq_printf(m, "ls_release: %d\n", atomic_read(&ls_release));
+	seq_printf(m, "ls_contended: %d\n", atomic_read(&ls_contended));
+	seq_printf(m, "ls_acquired: %d\n", atomic_read(&ls_acquired));
+	seq_printf(m, "ls_holdtime: %d\n", atomic_read(&ls_holdtime));
+
+	seq_printf(m, "ls_non_nested: %d\n", atomic_read(&ls_non_nested));
+	seq_printf(m, "ls_nested: %d\n", atomic_read(&ls_nested));
+#endif
 
 	if (unlikely(!debug_locks))
 		seq_printf(m, "*WARNING* lock debugging disabled!! - possibly due to a lockdep warning\n");
@@ -222,8 +247,7 @@ static void *ls_next(struct seq_file *m, void *v, loff_t *pos)
 	return ls_start(m, pos);
 }
 
-static void ls_stop(struct seq_file *m, void *v)
-{
+static void ls_stop(struct seq_file *m, void *v) {
 }
 
 static int ls_show(struct seq_file *m, void *v)
@@ -258,6 +282,7 @@ static int lock_stat_open(struct inode *inode, struct file *file)
 		struct seq_file *m = file->private_data;
 
 		list_for_each_entry(class, &all_lock_classes, lock_entry) {
+			printk("%s\n", class->name);
 			iter->class = class;
 			iter->stats = lock_stats(class);
 			iter++;
@@ -315,3 +340,5 @@ void __init lockstat_proc_init(void)
 	proc_create("lock_stat", S_IRUSR | S_IWUSR, NULL,
 		    &proc_lock_stat_operations);
 }
+
+__initcall(lockstat_proc_init);

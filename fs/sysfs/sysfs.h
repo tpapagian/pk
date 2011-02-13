@@ -51,7 +51,7 @@ struct sysfs_inode_attrs {
 struct sysfs_dirent {
 	atomic_t		s_count;
 	atomic_t		s_active;
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map	dep_map;
 #endif
 	struct sysfs_dirent	*s_parent;
@@ -103,7 +103,7 @@ static inline enum kobj_ns_type sysfs_ns_type(struct sysfs_dirent *sd)
 	return (sd->s_flags & SYSFS_NS_TYPE_MASK) >> SYSFS_NS_TYPE_SHIFT;
 }
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 #define sysfs_dirent_init_lockdep(sd)				\
 do {								\
 	struct attribute *attr = sd->s_attr.attr;		\

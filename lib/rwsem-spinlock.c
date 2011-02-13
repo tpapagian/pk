@@ -41,8 +41,12 @@ void __init_rwsem(struct rw_semaphore *sem, const char *name,
 	 * Make sure we are not reinitializing a held semaphore:
 	 */
 	debug_check_no_locks_freed((void *)sem, sizeof(*sem));
+#endif
+
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	lockdep_init_map(&sem->dep_map, name, key, 0);
 #endif
+
 	sem->activity = 0;
 	spin_lock_init(&sem->wait_lock);
 	INIT_LIST_HEAD(&sem->wait_list);

@@ -94,7 +94,7 @@ typedef struct {
 	 * the slock as a lock variant (in addition to
 	 * the slock itself):
 	 */
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map dep_map;
 #endif
 } socket_lock_t;

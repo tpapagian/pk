@@ -30,7 +30,7 @@ struct work_struct {
 #define WORK_STRUCT_WQ_DATA_MASK (~WORK_STRUCT_FLAG_MASK)
 	struct list_head entry;
 	work_func_t func;
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map lockdep_map;
 #endif
 };
@@ -52,7 +52,7 @@ struct execute_work {
 	struct work_struct work;
 };
 
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 /*
  * NB: because we have to copy the lockdep_map, setting _key
  * here is required, otherwise it could get initialised to the
@@ -108,7 +108,7 @@ static inline void destroy_work_on_stack(struct work_struct *work) { }
  * assignment of the work data initializer allows the compiler
  * to generate better code.
  */
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 #define __INIT_WORK(_work, _func, _onstack)				\
 	do {								\
 		static struct lock_class_key __key;			\
@@ -185,7 +185,7 @@ __create_workqueue_key(const char *name, int singlethread,
 		       int freezeable, int rt, struct lock_class_key *key,
 		       const char *lock_name);
 
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 #define __create_workqueue(name, singlethread, freezeable, rt)	\
 ({								\
 	static struct lock_class_key __key;			\

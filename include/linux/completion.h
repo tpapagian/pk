@@ -56,7 +56,7 @@ struct completion {
  * This macro declares and initializes a completion structure on the kernel
  * stack.
  */
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define DECLARE_COMPLETION_ONSTACK(work) \
 	struct completion work = COMPLETION_INITIALIZER_ONSTACK(work)
 #else

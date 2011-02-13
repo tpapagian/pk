@@ -23,6 +23,7 @@
  * shut up after that.
  */
 int debug_locks = 1;
+//int debug_locks = 0; // AP: XXX made it 0 for debuging purposes.
 EXPORT_SYMBOL_GPL(debug_locks);
 
 /*

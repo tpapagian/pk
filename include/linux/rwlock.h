@@ -14,7 +14,8 @@
  * Released under the General Public License (GPL).
  */
 
-#ifdef CONFIG_DEBUG_SPINLOCK
+//#ifdef CONFIG_DEBUG_SPINLOCK //AP: XXX
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
   extern void __rwlock_init(rwlock_t *lock, const char *name,
 			    struct lock_class_key *key);
 # define rwlock_init(lock)					\

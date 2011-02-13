@@ -19,7 +19,10 @@ ifdef CONFIG_FUNCTION_TRACER
 CFLAGS_REMOVE_lockdep.o = -pg
 CFLAGS_REMOVE_lockdep_proc.o = -pg
 CFLAGS_REMOVE_lockstat.o = -pg
+CFLAGS_REMOVE_lockstat2.o = -pg
+CFLAGS_REMOVE_lock_debug_hooks.o = -pg
 CFLAGS_REMOVE_mutex-debug.o = -pg
+CFLAGS_REMOVE_mutex-debug_hooks.o = -pg
 CFLAGS_REMOVE_rtmutex-debug.o = -pg
 CFLAGS_REMOVE_cgroup-debug.o = -pg
 CFLAGS_REMOVE_sched_clock.o = -pg
@@ -32,11 +35,16 @@ obj-$(CONFIG_SYSCTL_SYSCALL_CHECK) += sysctl_check.o
 obj-$(CONFIG_STACKTRACE) += stacktrace.o
 obj-y += time/
 obj-$(CONFIG_DEBUG_MUTEXES) += mutex-debug.o
+obj-$(CONFIG_LOCK_DEBUG_HOOKS) += mutex-debug_hooks.o
 obj-$(CONFIG_LOCKDEP) += lockdep.o
 obj-$(CONFIG_LOCK_STAT) += lockstat.o
+obj-$(CONFIG_LOCK_STAT2) += lockstat2.o
+obj-$(CONFIG_LOCK_STAT2) += lockdep_share.o
+obj-$(CONFIG_LOCK_DEBUG_HOOKS) += lock_debug_hooks.o
 ifeq ($(CONFIG_PROC_FS),y)
 obj-$(CONFIG_LOCKDEP) += lockdep_proc.o
 obj-$(CONFIG_LOCK_STAT) += lockstat_proc.o
+obj-$(CONFIG_LOCK_STAT2) += lockstat_proc.o
 endif
 obj-$(CONFIG_FUTEX) += futex.o
 ifeq ($(CONFIG_COMPAT),y)

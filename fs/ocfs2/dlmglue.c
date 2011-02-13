@@ -522,7 +522,7 @@ static void ocfs2_lock_res_init_common(struct ocfs2_super *osb,
 	ocfs2_add_lockres_tracking(res, osb->osb_dlm_debug);
 
 	ocfs2_init_lock_stats(res);
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	if (type != OCFS2_LOCK_TYPE_OPEN)
 		lockdep_init_map(&res->l_lockdep_map, ocfs2_lock_type_strings[type],
 				 &lockdep_keys[type], 0);

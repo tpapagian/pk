@@ -15,7 +15,8 @@
 # include <linux/spinlock_types_up.h>
 #endif
 
-#include <linux/lockdep.h>
+#include <linux/lock_debug_hooks.h>
+//#include <linux/lockdep.h> // AP: XXX should get rid of this
 
 typedef struct raw_spinlock {
 	arch_spinlock_t raw_lock;
@@ -26,7 +27,7 @@ typedef struct raw_spinlock {
 	unsigned int magic, owner_cpu;
 	void *owner;
 #endif
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	struct lockdep_map dep_map;
 #endif
 } raw_spinlock_t;
@@ -35,7 +36,7 @@ typedef struct raw_spinlock {
 
 #define SPINLOCK_OWNER_INIT	((void *)-1L)
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define SPIN_DEP_MAP_INIT(lockname)	.dep_map = { .name = #lockname }
 #else
 # define SPIN_DEP_MAP_INIT(lockname)
@@ -65,7 +66,7 @@ typedef struct spinlock {
 	union {
 		struct raw_spinlock rlock;
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define LOCK_PADSIZE (offsetof(struct raw_spinlock, dep_map))
 		struct {
 			u8 __padding[LOCK_PADSIZE];

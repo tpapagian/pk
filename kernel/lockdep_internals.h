@@ -6,6 +6,8 @@
  * lockdep subsystem internal functions and variables.
  */
 
+#include "lockdep_share.h"
+
 /*
  * Lock-class usage-state bits:
  */
@@ -68,7 +70,6 @@ enum {
 #define MAX_STACK_TRACE_ENTRIES	262144UL
 
 extern struct list_head all_lock_classes;
-extern struct lock_chain lock_chains[];
 
 #define LOCK_USAGE_CHARS (1+LOCK_USAGE_STATES/2)
 
@@ -76,8 +77,6 @@ extern void get_usage_chars(struct lock_class *class,
 			    char usage[LOCK_USAGE_CHARS]);
 
 extern const char * __get_key_name(struct lockdep_subclass_key *key, char *str);
-
-struct lock_class *lock_chain_get_class(struct lock_chain *chain, int i);
 
 extern unsigned long nr_lock_classes;
 extern unsigned long nr_list_entries;

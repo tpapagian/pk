@@ -121,7 +121,7 @@ static struct inode * _ocfs2_get_system_file_inode(struct ocfs2_super *osb,
 		inode = NULL;
 		goto bail;
 	}
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	if (type == LOCAL_USER_QUOTA_SYSTEM_INODE ||
 	    type == LOCAL_GROUP_QUOTA_SYSTEM_INODE ||
 	    type == JOURNAL_SYSTEM_INODE) {

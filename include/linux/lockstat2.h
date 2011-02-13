@@ -1,10 +1,7 @@
-#ifndef __LINUX_LOCKSTAT_H
-#define __LINUX_LOCKSTAT_H
+#ifndef __LINUX_LOCKSTAT2_H
+#define __LINUX_LOCKSTAT2_H
 
-/* for sysctl */
-extern int lock_stat;
-
-#ifdef CONFIG_LOCK_STAT
+//#include <linux/lock_debug_hooks.h>
 
 struct lock_class;
 
@@ -26,9 +23,11 @@ enum bounce_type {
 	bounce_contended = bounce_contended_write,
 };
 
+#define LOCKSTAT_POINTS		4
+
 struct lock_class_stats {
-	unsigned long			contention_point[4];
-	unsigned long			contending_point[4];
+	unsigned long			contention_point[LOCKSTAT_POINTS];
+	unsigned long			contending_point[LOCKSTAT_POINTS];
 	struct lock_time		read_waittime;
 	struct lock_time		write_waittime;
 	struct lock_time		read_holdtime;
@@ -39,6 +38,4 @@ struct lock_class_stats {
 struct lock_class_stats lock_stats(struct lock_class *class);
 void clear_lock_stats(struct lock_class *class);
 
-#endif /* CONFIG_LOCK_STAT */
-
-#endif /* __LINUX_LOCKSTAT_H */
+#endif /* __LINUX_LOCKSTAT2_H */

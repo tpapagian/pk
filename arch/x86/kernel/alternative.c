@@ -356,7 +356,8 @@ void alternatives_smp_switch(int smp)
 {
 	struct smp_alt_module *mod;
 
-#ifdef CONFIG_LOCKDEP
+//#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	/*
 	 * Older binutils section handling bug prevented
 	 * alternatives-replacement from working reliably.

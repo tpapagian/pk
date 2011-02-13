@@ -200,7 +200,8 @@ extern void devm_free_irq(struct device *dev, unsigned int irq, void *dev_id);
  * places left. So the only effect should be slightly increased
  * irqs-off latencies.
  */
-#ifdef CONFIG_LOCKDEP
+//#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define local_irq_enable_in_hardirq()	do { } while (0)
 #else
 # define local_irq_enable_in_hardirq()	local_irq_enable()
@@ -270,7 +271,8 @@ static inline int irq_set_affinity_hint(unsigned int irq,
 static inline void disable_irq_nosync_lockdep(unsigned int irq)
 {
 	disable_irq_nosync(irq);
-#ifdef CONFIG_LOCKDEP
+//#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	local_irq_disable();
 #endif
 }
@@ -278,7 +280,8 @@ static inline void disable_irq_nosync_lockdep(unsigned int irq)
 static inline void disable_irq_nosync_lockdep_irqsave(unsigned int irq, unsigned long *flags)
 {
 	disable_irq_nosync(irq);
-#ifdef CONFIG_LOCKDEP
+//#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	local_irq_save(*flags);
 #endif
 }
@@ -286,14 +289,16 @@ static inline void disable_irq_nosync_lockdep_irqsave(unsigned int irq, unsigned
 static inline void disable_irq_lockdep(unsigned int irq)
 {
 	disable_irq(irq);
-#ifdef CONFIG_LOCKDEP
+//#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	local_irq_disable();
 #endif
 }
 
 static inline void enable_irq_lockdep(unsigned int irq)
 {
-#ifdef CONFIG_LOCKDEP
+//#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	local_irq_enable();
 #endif
 	enable_irq(irq);
@@ -301,7 +306,8 @@ static inline void enable_irq_lockdep(unsigned int irq)
 
 static inline void enable_irq_lockdep_irqrestore(unsigned int irq, unsigned long *flags)
 {
-#ifdef CONFIG_LOCKDEP
+//#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 	local_irq_restore(*flags);
 #endif
 	enable_irq(irq);
@@ -326,7 +332,8 @@ static inline int disable_irq_wake(unsigned int irq)
  * validator need to define the methods below in their asm/irq.h
  * files, under an #ifdef CONFIG_LOCKDEP section.
  */
-#ifndef CONFIG_LOCKDEP
+//#ifndef CONFIG_LOCKDEP
+#ifndef CONFIG_LOCK_DEBUG_HOOKS
 #  define disable_irq_nosync_lockdep(irq)	disable_irq_nosync(irq)
 #  define disable_irq_nosync_lockdep_irqsave(irq, flags) \
 						disable_irq_nosync(irq)

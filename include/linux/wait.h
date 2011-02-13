@@ -86,7 +86,7 @@ extern void __init_waitqueue_head(wait_queue_head_t *q, struct lock_class_key *)
 		__init_waitqueue_head((q), &__key);	\
 	} while (0)
 
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define __WAIT_QUEUE_HEAD_INIT_ONSTACK(name) \
 	({ init_waitqueue_head(&name); name; })
 # define DECLARE_WAIT_QUEUE_HEAD_ONSTACK(name) \

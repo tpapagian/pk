@@ -40,7 +40,6 @@ static inline void mutex_clear_owner(struct mutex *lock)
 #define debug_mutex_free_waiter(waiter)			do { } while (0)
 #define debug_mutex_add_waiter(lock, waiter, ti)	do { } while (0)
 #define debug_mutex_unlock(lock)			do { } while (0)
-#define debug_mutex_init(lock, name, key)		do { } while (0)
 
 static inline void
 debug_mutex_lock_common(struct mutex *lock, struct mutex_waiter *waiter)

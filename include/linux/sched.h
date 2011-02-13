@@ -1389,8 +1389,9 @@ struct task_struct {
 	int softirqs_enabled;
 	int softirq_context;
 #endif
-#ifdef CONFIG_LOCKDEP
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 # define MAX_LOCK_DEPTH 48UL
+	//AP: XXX not all of these need to present for lockstat only mode; need to add ifdefs.
 	u64 curr_chain_key;
 	int lockdep_depth;
 	unsigned int lockdep_recursion;
