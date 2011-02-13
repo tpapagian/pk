@@ -786,20 +786,15 @@ out_of_memory(struct pt_regs *regs, unsigned long error_code,
 	 * We ran out of memory, call the OOM killer, and return the userspace
 	 * (which will retry the fault, or kill us if we got oom-killed):
 	 */
-	mm_vma_unlock_read(current->mm);
-
 	pagefault_out_of_memory();
 }
 
 static void
 do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
-	  unsigned int fault)
+	  unsigned int fault, struct mm_struct *mm)
 {
 	struct task_struct *tsk = current;
-	struct mm_struct *mm = tsk->mm;
 	int code = BUS_ADRERR;
-
-	mm_vma_unlock_read(mm);
 
 	/* Kernel mode? Handle exceptions or die: */
 	if (!(error_code & PF_USER)) {
@@ -828,14 +823,15 @@ do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 
 static noinline void
 mm_fault_error(struct pt_regs *regs, unsigned long error_code,
-	       unsigned long address, unsigned int fault)
+	       unsigned long address, unsigned int fault,
+	       struct mm_struct *mm)
 {
 	if (fault & VM_FAULT_OOM) {
 		out_of_memory(regs, error_code, address);
 	} else {
 		if (fault & (VM_FAULT_SIGBUS|VM_FAULT_HWPOISON|
 			     VM_FAULT_HWPOISON_LARGE))
-			do_sigbus(regs, error_code, address, fault);
+			do_sigbus(regs, error_code, address, fault, mm);
 		else
 			BUG();
 	}
@@ -1132,7 +1128,8 @@ good_area:
 	fault = handle_mm_fault(mm, vma, address, flags);
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
-		mm_fault_error(regs, error_code, address, fault);
+		mm_vma_unlock_read(mm);
+		mm_fault_error(regs, error_code, address, fault, mm);
 		goto done_srcu;
 	}
 
