@@ -17,6 +17,12 @@
 #include <linux/sched.h>	/* amdragon: for struct task_struct */
 
 #define AMDRAGON_LF_STATS
+#ifdef AMDRAGON_LF_STATS
+#define AMDRAGON_LF_STAT_INC(var) \
+	do { extern int mm_lf_stat_##var; mm_lf_stat_##var++; } while (0)
+#else
+#define AMDRAGON_LF_STAT_INC(var) do { } while (0)
+#endif
 
 struct mempolicy;
 struct anon_vma;
