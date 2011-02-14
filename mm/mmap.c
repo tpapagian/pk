@@ -2810,3 +2810,27 @@ static int __init mmap_init_kthread(void)
 	return 0;
 }
 __initcall(mmap_init_kthread);
+
+#ifdef AMDRAGON_LF_STATS
+
+static struct ctl_table lf_stats_table[] = {
+	{ },
+};
+
+static struct ctl_path lf_stats_path[] = {
+	{ .procname = "vm" },
+	{ .procname = "lf_stats" },
+	{ }
+};
+
+static struct ctl_table_header *lf_stats_table_header;
+
+static int __init mmap_init_lf_stats(void)
+{
+	lf_stats_table_header = register_sysctl_paths(lf_stats_path, lf_stats_table);
+
+	return lf_stats_table_header ? 0 : -ENOMEM;
+}
+__initcall(mmap_init_lf_stats);
+
+#endif	/* AMDRAGON_LF_STATS */

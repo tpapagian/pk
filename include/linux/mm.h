@@ -16,6 +16,8 @@
 #include <linux/pfn.h>
 #include <linux/sched.h>	/* amdragon: for struct task_struct */
 
+#define AMDRAGON_LF_STATS
+
 struct mempolicy;
 struct anon_vma;
 struct file_ra_state;
