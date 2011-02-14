@@ -2813,8 +2813,17 @@ __initcall(mmap_init_kthread);
 
 #ifdef AMDRAGON_LF_STATS
 
+int mm_lf_stat_unmap_races;
+
 static struct ctl_table lf_stats_table[] = {
-	{ },
+	{
+		.procname	= "unmap_races",
+		.data		= &mm_lf_stat_unmap_races,
+		.maxlen		= sizeof(mm_lf_stat_unmap_races),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{ }
 };
 
 static struct ctl_path lf_stats_path[] = {

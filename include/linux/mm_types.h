@@ -142,7 +142,9 @@ struct vm_area_struct {
 	struct rb_node vm_rb;
 
 	// amdragon: Set when this VMA has been removed from the tree,
-	// but not yet freed.
+	// but not yet freed.  The page fault handler checks this just
+	// before actually inserting the new PTE to detect races with
+	// munmap.
 	int vm_unlinked;
 	// amdragon: Link to the head of the next VMA *list* to free.
 	struct vm_area_struct *vm_next_free_list;

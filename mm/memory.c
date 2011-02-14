@@ -1444,8 +1444,9 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				int ret;
 
 				ret = handle_mm_fault(mm, vma, start,
-					(foll_flags & FOLL_WRITE) ?
-					FAULT_FLAG_WRITE : 0);
+					((foll_flags & FOLL_WRITE) ?
+					FAULT_FLAG_WRITE : 0)
+					| FAULT_FLAG_KEEP_LOCK);
 
 				if (ret & VM_FAULT_ERROR) {
 					if (ret & VM_FAULT_OOM)
@@ -2844,6 +2845,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct page *page;
 	spinlock_t *ptl;
 	pte_t entry;
+	int ret = 0;
 
 	pte_unmap(page_table);
 
@@ -2864,6 +2866,12 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
+
+	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
+		mm_vma_unlock_read(mm);	/* amdragon */
+		ret = VM_FAULT_RELEASED;
+	}
+
 	page = alloc_zeroed_user_highpage_movable(vma, address);
 	if (!page)
 		goto oom;
@@ -2880,6 +2888,23 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (!pte_none(*page_table))
 		goto release;
 
+	// amdragon: Check that what we're doing is still sane and
+	// that we haven't raced with munmap or a shrinking
+	// vma_adjust.  Note that this is safe to check, since we hold
+	// the PTE lock and any unmap or VMA shrink must zap PTE's,
+	// which will also hold the PTE lock.  Races with VMA
+	// expansions are not an issue.
+	if (vma->vm_unlinked || address < vma->vm_start || address >= vma->vm_end) {
+		AMDRAGON_LF_STAT_INC(unmap_races);
+		// Have to retry.  This time we'll do it with the tree
+		// lock to ensure progress.
+		ret = VM_FAULT_RETRY;
+		// XXX amdragon: Use this once we're releasing the
+		// lock earlier.
+		// BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
+		goto release;
+	}
+
 	inc_mm_counter_fast(mm, MM_ANONPAGES);
 	page_add_new_anon_rmap(page, vma, address);
 setpte:
@@ -2889,7 +2914,7 @@ setpte:
 	update_mmu_cache(vma, address, page_table);
 unlock:
 	pte_unmap_unlock(page_table, ptl);
-	return 0;
+	return ret;
 release:
 	mem_cgroup_uncharge_page(page);
 	page_cache_release(page);

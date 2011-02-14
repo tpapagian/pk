@@ -155,6 +155,10 @@ extern pgprot_t protection_map[16];
 #define FAULT_FLAG_MKWRITE	0x04	/* Fault was mkwrite of existing pte */
 #define FAULT_FLAG_ALLOW_RETRY	0x08	/* Retry fault if blocking */
 
+// amdragon: XXX This is a hack for __get_user_pages that should go
+// away once we're dropping the VMA lock in do_page_fault.
+#define FAULT_FLAG_KEEP_LOCK	0x10	/* amdragon: Don't release the vma lock */
+
 /*
  * This interface is used by x86 PAT code to identify a pfn mapping that is
  * linear over entire vma. This is to optimize PAT code that deals with
@@ -734,6 +738,7 @@ static inline int page_mapped(struct page *page)
 #define VM_FAULT_NOPAGE	0x0100	/* ->fault installed the pte, not return page */
 #define VM_FAULT_LOCKED	0x0200	/* ->fault locked the returned page */
 #define VM_FAULT_RETRY	0x0400	/* ->fault blocked, must retry */
+#define VM_FAULT_RELEASED 0x0800 /* ->fault succeeded and released vma lock */
 
 #define VM_FAULT_HWPOISON_LARGE_MASK 0xf000 /* encodes hpage index for large hwpoison */
 

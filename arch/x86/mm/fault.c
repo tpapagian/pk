@@ -1128,7 +1128,8 @@ good_area:
 	fault = handle_mm_fault(mm, vma, address, flags);
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
-		mm_vma_unlock_read(mm);
+		if (!(fault & VM_FAULT_RELEASED))
+			mm_vma_unlock_read(mm);
 		mm_fault_error(regs, error_code, address, fault, mm);
 		goto done_srcu;
 	}
@@ -1152,13 +1153,19 @@ good_area:
 			/* Clear FAULT_FLAG_ALLOW_RETRY to avoid any risk
 			 * of starvation. */
 			flags &= ~FAULT_FLAG_ALLOW_RETRY;
+			// amdragon: XXX Hold on to the lock the
+			// second time around to avoid live lock.
+			// This should go away once we drop the lock
+			// in this function.
+			flags |= FAULT_FLAG_KEEP_LOCK;
 			goto retry;
 		}
 	}
 
 	check_v8086_mode(regs, address, tsk);
 
-	mm_vma_unlock_read(mm);
+	if (!(fault & VM_FAULT_RELEASED))
+		mm_vma_unlock_read(mm);
 
 done_srcu:
 	srcu_read_release(&mm_srcu);
