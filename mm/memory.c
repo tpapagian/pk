@@ -2845,7 +2845,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct page *page;
 	spinlock_t *ptl;
 	pte_t entry;
-	int ret = 0;
+	int ret = 0, r;
 
 	pte_unmap(page_table);
 
@@ -2863,13 +2863,19 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		goto setpte;
 	}
 
-	/* Allocate our own private page. */
-	if (unlikely(anon_vma_prepare(vma)))
-		goto oom;
-
 	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
 		mm_vma_unlock_read(mm);	/* amdragon */
 		ret = VM_FAULT_RELEASED;
+		flags |= FAULT_FLAG_NO_LOCK;
+	}
+
+	/* Allocate our own private page. */
+	r = __anon_vma_prepare(vma, flags);
+	if (unlikely(r == VM_FAULT_OOM))
+		goto oom;
+	if (unlikely(r == VM_FAULT_RETRY)) {
+		AMDRAGON_LF_STAT_INC(anon_vma_retries);
+		return VM_FAULT_RETRY;
 	}
 
 	page = alloc_zeroed_user_highpage_movable(vma, address);

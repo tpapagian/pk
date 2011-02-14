@@ -115,6 +115,16 @@ static void anon_vma_chain_free(struct anon_vma_chain *anon_vma_chain)
  */
 int anon_vma_prepare(struct vm_area_struct *vma)
 {
+	int ret = __anon_vma_prepare(vma, 0);
+	if (likely(ret == 0))
+		return 0;
+	if (ret == VM_FAULT_OOM)
+		return -ENOMEM;
+	BUG();
+}
+
+int __anon_vma_prepare(struct vm_area_struct *vma, int flags)
+{
 	struct anon_vma *anon_vma = vma->anon_vma;
 	struct anon_vma_chain *avc;
 
@@ -122,6 +132,12 @@ int anon_vma_prepare(struct vm_area_struct *vma)
 	if (unlikely(!anon_vma)) {
 		struct mm_struct *mm = vma->vm_mm;
 		struct anon_vma *allocated;
+
+		if (flags & FAULT_FLAG_NO_LOCK) {
+			// amdragon: This operation requires the lock,
+			// so retry with the lock.
+			return VM_FAULT_RETRY;
+		}
 
 		avc = anon_vma_chain_alloc();
 		if (!avc)

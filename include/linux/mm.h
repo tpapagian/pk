@@ -158,6 +158,10 @@ extern pgprot_t protection_map[16];
 // amdragon: XXX This is a hack for __get_user_pages that should go
 // away once we're dropping the VMA lock in do_page_fault.
 #define FAULT_FLAG_KEEP_LOCK	0x10	/* amdragon: Don't release the vma lock */
+// amdragon: The VMA lock is not being held.  If anything happens that
+// may require the VMA lock, return with VM_FAULT_RETRY and the page
+// fault will be retried with the lock held.
+#define FAULT_FLAG_NO_LOCK	0x20
 
 /*
  * This interface is used by x86 PAT code to identify a pfn mapping that is

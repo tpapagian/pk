@@ -2814,12 +2814,20 @@ __initcall(mmap_init_kthread);
 #ifdef AMDRAGON_LF_STATS
 
 int mm_lf_stat_unmap_races;
+int mm_lf_stat_anon_vma_retries;
 
 static struct ctl_table lf_stats_table[] = {
 	{
 		.procname	= "unmap_races",
 		.data		= &mm_lf_stat_unmap_races,
 		.maxlen		= sizeof(mm_lf_stat_unmap_races),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "anon_vma_retries",
+		.data		= &mm_lf_stat_anon_vma_retries,
+		.maxlen		= sizeof(mm_lf_stat_anon_vma_retries),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},
