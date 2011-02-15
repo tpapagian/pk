@@ -2816,6 +2816,7 @@ __initcall(mmap_init_kthread);
 int mm_lf_stat_unmap_races;
 int mm_lf_stat_anon_vma_retries;
 int mm_lf_stat_stack_guard_retries;
+int mm_lf_stat_type_retries;
 
 static struct ctl_table lf_stats_table[] = {
 	{
@@ -2836,6 +2837,13 @@ static struct ctl_table lf_stats_table[] = {
 		.procname	= "stack_guard_retries",
 		.data		= &mm_lf_stat_stack_guard_retries,
 		.maxlen		= sizeof(mm_lf_stat_stack_guard_retries),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "type_retries",
+		.data		= &mm_lf_stat_type_retries,
+		.maxlen		= sizeof(mm_lf_stat_type_retries),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},

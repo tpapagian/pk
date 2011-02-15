@@ -2869,12 +2869,6 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	pte_unmap(page_table);
 
-	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
-		mm_vma_unlock_read(mm);	/* amdragon */
-		ret = VM_FAULT_RELEASED;
-		flags |= FAULT_FLAG_NO_LOCK;
-	}
-
 	/* Check if we need to add a guard page to the stack */
 	r = check_stack_guard_page(vma, address, flags);
 	if (r)
@@ -2954,7 +2948,7 @@ release:
 oom_free_page:
 	page_cache_release(page);
 oom:
-	return ret | VM_FAULT_OOM;
+	return VM_FAULT_OOM;
 }
 
 /*
@@ -3211,18 +3205,37 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 {
 	pte_t entry;
 	spinlock_t *ptl;
+	int ret = 0;
+
+	// amdragon
+	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
+		mm_vma_unlock_read(mm);
+		flags |= FAULT_FLAG_NO_LOCK;
+		ret |= VM_FAULT_RELEASED;
+	}
+
+#define RETRY_IF_NO_LOCK()					\
+	do {							\
+		if (flags & FAULT_FLAG_NO_LOCK) {		\
+			AMDRAGON_LF_STAT_INC(type_retries);	\
+			return VM_FAULT_RETRY;			\
+		}						\
+	} while (0)
 
 	entry = *pte;
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
 			if (vma->vm_ops) {
-				if (likely(vma->vm_ops->fault))
+				if (likely(vma->vm_ops->fault)) {
+					RETRY_IF_NO_LOCK();
 					return do_linear_fault(mm, vma, address,
 						pte, pmd, flags, entry);
+				}
 			}
 			return do_anonymous_page(mm, vma, address,
-						 pte, pmd, flags);
+						 pte, pmd, flags) | ret;
 		}
+		RETRY_IF_NO_LOCK();
 		if (pte_file(entry))
 			return do_nonlinear_fault(mm, vma, address,
 					pte, pmd, flags, entry);
@@ -3230,6 +3243,7 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 					pte, pmd, flags, entry);
 	}
 
+	RETRY_IF_NO_LOCK();
 	ptl = pte_lockptr(mm, pmd);
 	spin_lock(ptl);
 	if (unlikely(!pte_same(*pte, entry)))
@@ -3256,6 +3270,8 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 unlock:
 	pte_unmap_unlock(pte, ptl);
 	return 0;
+
+#undef RETRY_IF_NO_LOCK
 }
 
 /*
