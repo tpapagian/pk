@@ -2853,6 +2853,12 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (check_stack_guard_page(vma, address) < 0)
 		return VM_FAULT_SIGBUS;
 
+	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
+		mm_vma_unlock_read(mm);	/* amdragon */
+		ret = VM_FAULT_RELEASED;
+		flags |= FAULT_FLAG_NO_LOCK;
+	}
+
 	/* Use the zero-page for reads */
 	if (!(flags & FAULT_FLAG_WRITE)) {
 		entry = pte_mkspecial(pfn_pte(my_zero_pfn(address),
@@ -2860,13 +2866,14 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
 		if (!pte_none(*page_table))
 			goto unlock;
+		// amdragon: Check for unmap race
+		if (vma->vm_unlinked || address < vma->vm_start || address >= vma->vm_end) {
+			AMDRAGON_LF_STAT_INC(unmap_races);
+			BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
+			ret = VM_FAULT_RETRY;
+			goto unlock;
+		}
 		goto setpte;
-	}
-
-	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
-		mm_vma_unlock_read(mm);	/* amdragon */
-		ret = VM_FAULT_RELEASED;
-		flags |= FAULT_FLAG_NO_LOCK;
 	}
 
 	/* Allocate our own private page. */
@@ -2902,12 +2909,10 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	// expansions are not an issue.
 	if (vma->vm_unlinked || address < vma->vm_start || address >= vma->vm_end) {
 		AMDRAGON_LF_STAT_INC(unmap_races);
+		BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
 		// Have to retry.  This time we'll do it with the tree
 		// lock to ensure progress.
 		ret = VM_FAULT_RETRY;
-		// XXX amdragon: Use this once we're releasing the
-		// lock earlier.
-		// BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
 		goto release;
 	}
 
