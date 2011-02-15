@@ -2877,7 +2877,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	/* Check if we need to add a guard page to the stack */
 	r = check_stack_guard_page(vma, address, flags);
-	if (r < 0)
+	if (r)
 		return r;
 
 	/* Use the zero-page for reads */
