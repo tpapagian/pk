@@ -226,7 +226,7 @@ void dput(struct dentry *dentry)
 repeat:
 	if (atomic_read(&dentry->d_count) == 1)
 		might_sleep();
-#ifdef CONFIG_MTRACE
+#if defined(CONFIG_MTRACE) && defined(CONFIG_LOCKDEP)
 	if (!mtrace_atomic_dec_and_lock(&dentry->d_count, 
 					&dentry->d_count_lock_dep, 
 					&dcache_lock))
@@ -968,7 +968,7 @@ struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 	dname[name->len] = 0;
 
 	atomic_set(&dentry->d_count, 1);
-#ifdef CONFIG_MTRACE
+#if defined(CONFIG_MTRACE) && defined(CONFIG_LOCKDEP)
 	lockdep_init_map(&dentry->d_count_lock_dep, "cmpxchg_d_count", &d_count_key, 0);
 #endif
 	dentry->d_flags = DCACHE_UNHASHED;

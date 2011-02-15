@@ -88,7 +88,7 @@ full_name_hash(const unsigned char *name, unsigned int len)
 
 struct dentry {
 	atomic_t d_count;
-#ifdef CONFIG_MTRACE
+#if defined(CONFIG_MTRACE) && defined(CONFIG_LOCKDEP)
 	struct lockdep_map d_count_lock_dep;
 #endif
 
