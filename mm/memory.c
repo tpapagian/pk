@@ -2804,11 +2804,26 @@ out_release:
  * except we must first make sure that 'address{-|+}PAGE_SIZE'
  * doesn't hit another vma.
  */
-static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned long address)
+static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned long address,
+					 unsigned int flags)
 {
+	// amdragon: It's safe to do these checks without the VMA
+	// lock.  The danger is that we'll pass the check (address not
+	// in the first page, etc), then there will be an unmap that
+	// causes address to be in the first page while we're still
+	// handling the page fault.  This is okay because the result
+	// will be the same as if the page fault happened entirely
+	// before the unmap.
 	address &= PAGE_MASK;
 	if ((vma->vm_flags & VM_GROWSDOWN) && address == vma->vm_start) {
 		struct vm_area_struct *prev = vma->vm_prev;
+
+		// amdragon: We need the lock to consistently check
+		// prev and, more importantly, to expand the stack.
+		if (flags & FAULT_FLAG_NO_LOCK) {
+			AMDRAGON_LF_STAT_INC(stack_guard_retries);
+			return VM_FAULT_RETRY;
+		}
 
 		/*
 		 * Is there a mapping abutting this one below?
@@ -2817,16 +2832,21 @@ static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned lo
 		 * that has gotten split..
 		 */
 		if (prev && prev->vm_end == address)
-			return prev->vm_flags & VM_GROWSDOWN ? 0 : -ENOMEM;
+			return prev->vm_flags & VM_GROWSDOWN ? 0 : VM_FAULT_SIGBUS;
 
 		expand_stack(vma, address - PAGE_SIZE);
 	}
 	if ((vma->vm_flags & VM_GROWSUP) && address + PAGE_SIZE == vma->vm_end) {
 		struct vm_area_struct *next = vma->vm_next;
 
+		if (flags & FAULT_FLAG_NO_LOCK) {
+			AMDRAGON_LF_STAT_INC(stack_guard_retries);
+			return VM_FAULT_RETRY;
+		}
+
 		/* As VM_GROWSDOWN but s/below/above/ */
 		if (next && next->vm_start == address + PAGE_SIZE)
-			return next->vm_flags & VM_GROWSUP ? 0 : -ENOMEM;
+			return next->vm_flags & VM_GROWSUP ? 0 : VM_FAULT_SIGBUS;
 
 		expand_upwards(vma, address + PAGE_SIZE);
 	}
@@ -2849,15 +2869,16 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	pte_unmap(page_table);
 
-	/* Check if we need to add a guard page to the stack */
-	if (check_stack_guard_page(vma, address) < 0)
-		return VM_FAULT_SIGBUS;
-
 	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
 		mm_vma_unlock_read(mm);	/* amdragon */
 		ret = VM_FAULT_RELEASED;
 		flags |= FAULT_FLAG_NO_LOCK;
 	}
+
+	/* Check if we need to add a guard page to the stack */
+	r = check_stack_guard_page(vma, address, flags);
+	if (r < 0)
+		return r;
 
 	/* Use the zero-page for reads */
 	if (!(flags & FAULT_FLAG_WRITE)) {
