@@ -3205,14 +3205,6 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 {
 	pte_t entry;
 	spinlock_t *ptl;
-	int ret = 0;
-
-	// amdragon
-	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
-		mm_vma_unlock_read(mm);
-		flags |= FAULT_FLAG_NO_LOCK;
-		ret |= VM_FAULT_RELEASED;
-	}
 
 #define RETRY_IF_NO_LOCK()					\
 	do {							\
@@ -3233,7 +3225,7 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 				}
 			}
 			return do_anonymous_page(mm, vma, address,
-						 pte, pmd, flags) | ret;
+						 pte, pmd, flags);
 		}
 		RETRY_IF_NO_LOCK();
 		if (pte_file(entry))
@@ -3270,8 +3262,6 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 unlock:
 	pte_unmap_unlock(pte, ptl);
 	return 0;
-
-#undef RETRY_IF_NO_LOCK
 }
 
 /*
@@ -3285,6 +3275,14 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pmd_t *pmd;
 	pte_t *pte;
 
+	// amdragon
+	int ret = 0;
+	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
+		mm_vma_unlock_read(mm);
+		flags |= FAULT_FLAG_NO_LOCK;
+		ret |= VM_FAULT_RELEASED;
+	}
+
 	__set_current_state(TASK_RUNNING);
 
 	count_vm_event(PGFAULT);
@@ -3292,21 +3290,23 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	/* do counter updates before entering really critical section. */
 	check_sync_rss_stat(current);
 
-	if (unlikely(is_vm_hugetlb_page(vma)))
+	if (unlikely(is_vm_hugetlb_page(vma))) {
+		RETRY_IF_NO_LOCK();
 		return hugetlb_fault(mm, vma, address, flags);
+	}
 
 	pgd = pgd_offset(mm, address);
 	pud = pud_alloc(mm, pgd, address);
 	if (!pud)
-		return VM_FAULT_OOM;
+		return VM_FAULT_OOM | ret;
 	pmd = pmd_alloc(mm, pud, address);
 	if (!pmd)
-		return VM_FAULT_OOM;
+		return VM_FAULT_OOM | ret;
 	pte = pte_alloc_map(mm, pmd, address);
 	if (!pte)
-		return VM_FAULT_OOM;
+		return VM_FAULT_OOM | ret;
 
-	return handle_pte_fault(mm, vma, address, pte, pmd, flags);
+	return handle_pte_fault(mm, vma, address, pte, pmd, flags) | ret;
 }
 
 #ifndef __PAGETABLE_PUD_FOLDED
