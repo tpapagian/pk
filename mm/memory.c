@@ -2933,7 +2933,7 @@ release:
 oom_free_page:
 	page_cache_release(page);
 oom:
-	return VM_FAULT_OOM;
+	return ret | VM_FAULT_OOM;
 }
 
 /*
