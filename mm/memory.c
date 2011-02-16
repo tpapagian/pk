@@ -2912,6 +2912,8 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (vma->vm_flags & VM_WRITE)
 		entry = pte_mkwrite(pte_mkdirty(entry));
 
+	// amdragon: XXX This is not safe!  The page table page could
+	// have been freed and reused for something else.
 	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
 	if (!pte_none(*page_table))
 		goto release;
@@ -2920,8 +2922,8 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	// that we haven't raced with munmap or a shrinking
 	// vma_adjust.  Note that this is safe to check, since we hold
 	// the PTE lock and any unmap or VMA shrink must zap PTE's,
-	// which will also hold the PTE lock.  Races with VMA
-	// expansions are not an issue.
+	// which will also hold the PTE lock (see zap_pte_range).
+	// Races with VMA expansions are not an issue.
 	if (vma->vm_unlinked || address < vma->vm_start || address >= vma->vm_end) {
 		AMDRAGON_LF_STAT_INC(unmap_races);
 		BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
@@ -3295,6 +3297,8 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		return hugetlb_fault(mm, vma, address, flags);
 	}
 
+	// amdragon: XXX This is not safe!  Could race with page table
+	// freeing in munmap.
 	pgd = pgd_offset(mm, address);
 	pud = pud_alloc(mm, pgd, address);
 	if (!pud)
