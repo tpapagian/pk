@@ -226,10 +226,9 @@ void pmd_clear_bad(pmd_t *pmd)
  * has been handled earlier when unmapping all the memory regions.
  */
 #if AMDRAGON_SPLIT_PTE
-static void __free_pte_range(struct mmu_gather *tlb, pmd_t pmd_val,
+static void __free_pte_range(struct mmu_gather *tlb, pgtable_t token,
 			     unsigned long addr)
 {
-	pgtable_t token = pmd_pgtable(pmd_val);
 	// Free the pte without marking the TLB dirty, since we've
 	// already flushed the detach.
 	__pte_free_tlb(tlb, token, addr);
@@ -254,11 +253,11 @@ static void __free_pte_range(struct mmu_gather *tlb, pmd_t pmd_val,
 static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
-	pmd_t pmd_val = *pmd;
+	pgtable_t token = pmd_pgtable(*pmd);
 	pmd_clear(pmd);
 	tlb_dirty(tlb);
 	// XXX Delay
-	__free_pte_range(tlb, pmd_val, addr);
+	__free_pte_range(tlb, token, addr);
 }
 #else
 static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
@@ -286,7 +285,7 @@ static void __free_pmd_range(struct mmu_gather *tlb,
 		if (pmd_none_or_clear_bad(pmd))
 			continue;
 #if AMDRAGON_SPLIT_PTE
-		__free_pte_range(tlb, *pmd, addr);
+		__free_pte_range(tlb, pmd_pgtable(*pmd), addr);
 #else
 		free_pte_range(tlb, pmd, addr);
 #endif
