@@ -145,4 +145,14 @@ static inline void tlb_remove_page(struct mmu_gather *tlb, struct page *page)
 
 #define tlb_migrate_finish(mm) do {} while (0)
 
+/**
+ * tlb_dirty - remember that a p?e was cleared.
+ *
+ * This is useful if the actual free of the page will be done later.
+ */
+static inline void tlb_dirty(struct mmu_gather *tlb)
+{
+	tlb->need_flush = 1;
+}
+
 #endif /* _ASM_GENERIC__TLB_H */
