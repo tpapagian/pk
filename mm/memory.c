@@ -217,10 +217,50 @@ void pmd_clear_bad(pmd_t *pmd)
 	pmd_clear(pmd);
 }
 
+#define AMDRAGON_SPLIT_PUD 1
+#define AMDRAGON_SPLIT_PMD 1
+#define AMDRAGON_SPLIT_PTE 1
+
 /*
  * Note: this doesn't free the actual pages themselves. That
  * has been handled earlier when unmapping all the memory regions.
  */
+#if AMDRAGON_SPLIT_PTE
+static void __free_pte_range(struct mmu_gather *tlb, pmd_t pmd_val,
+			     unsigned long addr)
+{
+	pgtable_t token = pmd_pgtable(pmd_val);
+	// Free the pte without marking the TLB dirty, since we've
+	// already flushed the detach.
+	__pte_free_tlb(tlb, token, addr);
+	// This has the curious affect that we can't do PTE accounting
+	// until RCU-free time because we don't walk enough of the
+	// tree to know how many PTE's we're going to free until now.
+	// Really, this makes deep sense, since we're RCU-ing the
+	// whole page tree free instead of each page table free
+	// precisely because a racing page fault could allocate new
+	// page tables on a detached page tree, and we would have to
+	// account for those.
+	// XXX Delayed accounting may screw up BUG_ON in exit_mmap.
+	// OTOH, exit_mmap has to wait until this is all done anyway
+	// because it can't toss the mm until the delay free is done
+	// with it.  Do we have to RCU-free mm_struct, just for this
+	// one stupid field?  No, we can bump mm_count when we delay
+	// an operation and mmdrop when we're done.  Move the
+	// exit_mmap BUG_ON to __mmdrop.  Alternatively, rcu_barrier.
+	atomic_dec(&tlb->mm->nr_ptes);
+}
+
+static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
+			   unsigned long addr)
+{
+	pmd_t pmd_val = *pmd;
+	pmd_clear(pmd);
+	tlb_dirty(tlb);
+	// XXX Delay
+	__free_pte_range(tlb, pmd_val, addr);
+}
+#else
 static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
@@ -229,6 +269,75 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	pte_free_tlb(tlb, token, addr);
 	tlb->mm->nr_ptes--;
 }
+#endif
+
+#if AMDRAGON_SPLIT_PMD
+// amdragon: Free an entire pmd_t[] page.  We still take addr and end
+// in order to skip over guaranteed-clear entries.
+static void __free_pmd_range(struct mmu_gather *tlb,
+			     pmd_t *pmd /* pmd of addr */,
+			     pmd_t pmd_start[] /* whole table */,
+			     unsigned long addr, unsigned long end)
+{
+	unsigned long start, next;
+	start = addr & PUD_MASK;
+	do {
+		next = pmd_addr_end(addr, end);
+		if (pmd_none_or_clear_bad(pmd))
+			continue;
+#if AMDRAGON_SPLIT_PTE
+		__free_pte_range(tlb, *pmd, addr);
+#else
+		free_pte_range(tlb, pmd, addr);
+#endif
+	} while (pmd++, addr = next, addr != end);
+
+	// Free the pmd without marking the TLB dirty, since we've
+	// already flushed the detach.
+	__pmd_free_tlb(tlb, pmd_start, start);
+}
+
+static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
+				unsigned long addr, unsigned long end,
+				unsigned long floor, unsigned long ceiling)
+{
+	pmd_t *pmd, *pmd_start;
+	unsigned long next;
+	unsigned long start, new_ceiling;
+
+	pmd = pmd_offset(pud, addr);
+
+	start = addr & PUD_MASK;
+	if (start < floor)
+		goto sub;
+	if (ceiling) {
+		new_ceiling &= PUD_MASK;
+		if (!new_ceiling)
+			goto sub;
+	} else
+		new_ceiling = ceiling;
+	if (end - 1 > new_ceiling - 1)
+		goto sub;
+
+	// We span the entire pmd_t[].  Detach it and remove
+	// everything rooted at pud.
+	pmd_start = pmd_offset(pud, start);
+	pud_clear(pud);
+	tlb_dirty(tlb);
+	// XXX Delay
+	__free_pmd_range(tlb, pmd, pmd_start, addr, end);
+	return;
+
+sub:
+	do {
+		next = pmd_addr_end(addr, end);
+		if (pmd_none_or_clear_bad(pmd))
+			continue;
+		free_pte_range(tlb, pmd, addr);
+	} while (pmd++, addr = next, addr != end);
+}
+
+#else
 
 static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 				unsigned long addr, unsigned long end,
@@ -262,6 +371,79 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	pud_clear(pud);
 	pmd_free_tlb(tlb, pmd, start);
 }
+#endif
+
+#if AMDRAGON_SPLIT_PUD
+// amdragon: Free an entire pud_t[] page.  We still take addr and end
+// in order to skip over guaranteed-clear entries.
+static void __free_pud_range(struct mmu_gather *tlb,
+			     pud_t *pud /* pud of addr */, 
+			     pud_t pud_start[] /* whole table */,
+			     unsigned long addr, unsigned long end)
+{
+	unsigned long start, next;
+	start = addr & PGDIR_MASK;
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_none_or_clear_bad(pud))
+			continue;
+#if AMDRAGON_SPLIT_PMD
+		__free_pmd_range(tlb, pmd_offset(pud, addr),
+				 pmd_offset(pud, addr & PUD_MASK),
+				 addr, next);
+#else
+		// We're freeing the whole range, so floor and ceiling
+		// don't matter.
+		free_pmd_range(tlb, pud, addr, next, 0, 0);
+#endif
+	} while (pud++, addr = next, addr != end);
+
+	// Free the pud without marking the TLB dirty, since we've
+	// already flushed the detach.
+	__pud_free_tlb(tlb, pud_start, start);
+}
+
+static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
+				unsigned long addr, unsigned long end,
+				unsigned long floor, unsigned long ceiling)
+{
+	pud_t *pud, *pud_start;
+	unsigned long next;
+	unsigned long start, new_ceiling;
+
+	pud = pud_offset(pgd, addr);
+
+	start = addr & PGDIR_MASK;
+	if (start < floor)
+		goto sub;
+	if (ceiling) {
+		new_ceiling &= PGDIR_MASK;
+		if (!new_ceiling)
+			goto sub;
+	} else
+		new_ceiling = ceiling;
+	if (end - 1 > new_ceiling - 1)
+		goto sub;
+
+	// We span the entire pud_t[].  Detach it and remove
+	// everything rooted at pgd.
+	pud_start = pud_offset(pgd, start);
+	pgd_clear(pgd);
+	tlb_dirty(tlb);
+	// XXX Delay
+	__free_pud_range(tlb, pud, pud_start, addr, end);
+	return;
+
+sub:
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_none_or_clear_bad(pud))
+			continue;
+		free_pmd_range(tlb, pud, addr, next, floor, ceiling);
+	} while (pud++, addr = next, addr != end);
+}
+
+#else
 
 static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
 				unsigned long addr, unsigned long end,
@@ -295,6 +477,7 @@ static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
 	pgd_clear(pgd);
 	pud_free_tlb(tlb, pud, start);
 }
+#endif
 
 /*
  * This function frees user-level page tables of a process.
