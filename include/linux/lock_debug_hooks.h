@@ -321,4 +321,10 @@ static inline void early_init_irq_lock_class(void)
 }
 #endif
 
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
+extern void lockdep_free_key_range(void *start, unsigned long size);
+#else
+# define lockdep_free_key_range(start, size)	do { } while (0)
+#endif
+
 #endif /* __LINUX_LOCK_DEBUG_HOOKS_H */

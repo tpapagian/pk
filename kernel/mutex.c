@@ -30,9 +30,13 @@
  */
 #ifdef CONFIG_DEBUG_MUTEXES
 # include "mutex-debug.h"
-# include <asm-generic/mutex-null.h>
 #else
 # include "mutex.h"
+#endif
+
+#if defined(CONFIG_DEBUG_MUTEXES) || defined(CONFIG_LOCK_DEBUG_HOOKS)
+# include <asm-generic/mutex-null.h>
+#else
 # include <asm/mutex.h>
 #endif
 
@@ -58,7 +62,8 @@ __mutex_init(struct mutex *lock, const char *name, struct lock_class_key *key)
 
 EXPORT_SYMBOL(__mutex_init);
 
-#ifndef CONFIG_DEBUG_LOCK_ALLOC
+//#ifndef CONFIG_DEBUG_LOCK_ALLOC // AP: XXX
+#ifndef CONFIG_LOCK_DEBUG_HOOKS
 /*
  * We split the mutex lock/unlock logic into separate fastpath and
  * slowpath functions, to reduce the register pressure on the fastpath.
@@ -280,7 +285,8 @@ done:
 	return 0;
 }
 
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
+//#ifdef CONFIG_DEBUG_LOCK_ALLOC // AP: XXX
+#ifdef CONFIG_LOCK_DEBUG_HOOKS
 void __sched
 mutex_lock_nested(struct mutex *lock, unsigned int subclass)
 {
@@ -353,7 +359,8 @@ __mutex_unlock_slowpath(atomic_t *lock_count)
 	__mutex_unlock_common_slowpath(lock_count, 1);
 }
 
-#ifndef CONFIG_DEBUG_LOCK_ALLOC
+//#ifndef CONFIG_DEBUG_LOCK_ALLOC // AP: XXX
+#ifndef CONFIG_LOCK_DEBUG_HOOKS
 /*
  * Here come the less common (and hence less performance-critical) APIs:
  * mutex_lock_interruptible() and mutex_trylock().

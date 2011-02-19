@@ -2645,63 +2645,6 @@ void lockdep_reset(void)
 	raw_local_irq_restore(flags);
 }
 
-static void zap_class(struct lock_class *class)
-{
-	int i;
-
-	/*
-	 * Remove all dependencies this lock is
-	 * involved in:
-	 */
-	for (i = 0; i < nr_list_entries; i++) {
-		if (list_entries[i].class == class)
-			list_del_rcu(&list_entries[i].entry);
-	}
-	/*
-	 * Unhash the class and remove it from the all_lock_classes list:
-	 */
-	list_del_rcu(&class->hash_entry);
-	list_del_rcu(&class->lock_entry);
-
-	class->key = NULL;
-}
-
-static inline int within(const void *addr, void *start, unsigned long size)
-{
-	return addr >= start && addr < start + size;
-}
-
-void lockdep_free_key_range(void *start, unsigned long size)
-{
-	struct lock_class *class, *next;
-	struct list_head *head;
-	unsigned long flags;
-	int i;
-	int locked;
-
-	raw_local_irq_save(flags);
-	locked = graph_lock();
-
-	/*
-	 * Unhash all classes that were created by this module:
-	 */
-	for (i = 0; i < CLASSHASH_SIZE; i++) {
-		head = classhash_table + i;
-		if (list_empty(head))
-			continue;
-		list_for_each_entry_safe(class, next, head, hash_entry) {
-			if (within(class->key, start, size))
-				zap_class(class);
-			else if (within(class->name, start, size))
-				zap_class(class);
-		}
-	}
-
-	if (locked)
-		graph_unlock();
-	raw_local_irq_restore(flags);
-}
-
 void lockdep_reset_lock(struct lockdep_map *lock)
 {
 	struct lock_class *class, *next;

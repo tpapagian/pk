@@ -282,7 +282,7 @@ static int lock_stat_open(struct inode *inode, struct file *file)
 		struct seq_file *m = file->private_data;
 
 		list_for_each_entry(class, &all_lock_classes, lock_entry) {
-			printk("%s\n", class->name);
+			//printk("%s\n", class->name);
 			iter->class = class;
 			iter->stats = lock_stats(class);
 			iter++;
@@ -335,10 +335,11 @@ static const struct file_operations proc_lock_stat_operations = {
 	.release	= lock_stat_release,
 };
 
-void __init lockstat_proc_init(void)
+static __init int lockstat_proc_init(void)
 {
 	proc_create("lock_stat", S_IRUSR | S_IWUSR, NULL,
 		    &proc_lock_stat_operations);
+	return 0;
 }
 
 __initcall(lockstat_proc_init);

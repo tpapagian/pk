@@ -50,7 +50,8 @@ atomic_t ls_holdtime;
 
 static inline u64 lockstat_clock(void)
 {
-	return cpu_clock(smp_processor_id());
+	//return cpu_clock(smp_processor_id());
+	return sched_clock();
 }
 
 static int lock_point(unsigned long points[], unsigned long ip)
@@ -404,9 +405,14 @@ lockstat_lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 #endif
 	if (unlikely(curr->lockdep_depth >= MAX_LOCK_DEPTH)) {
 		debug_locks_off();
+
+		printk("MAX_LOCK_DEPTH=%lu\n", MAX_LOCK_DEPTH);
+		printk("curr->lockdep_depth=%d\n", curr->lockdep_depth);
+
 		printk("BUG: MAX_LOCK_DEPTH too low!\n");
 		printk("turning off the locking correctness validator.\n");
 		dump_stack();
+		lockdep_print_held_locks(curr);
 		return 0;
 	}
 

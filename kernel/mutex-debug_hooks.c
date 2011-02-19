@@ -19,4 +19,3 @@ void debug_mutex_init(struct mutex *lock, const char *name,
 	lock->magic = lock;
 #endif
 }
-

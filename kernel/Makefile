@@ -39,7 +39,6 @@ obj-$(CONFIG_LOCK_DEBUG_HOOKS) += mutex-debug_hooks.o
 obj-$(CONFIG_LOCKDEP) += lockdep.o
 obj-$(CONFIG_LOCK_STAT) += lockstat.o
 obj-$(CONFIG_LOCK_STAT2) += lockstat2.o
-obj-$(CONFIG_LOCK_STAT2) += lockdep_share.o
 obj-$(CONFIG_LOCK_DEBUG_HOOKS) += lock_debug_hooks.o
 ifeq ($(CONFIG_PROC_FS),y)
 obj-$(CONFIG_LOCKDEP) += lockdep_proc.o
