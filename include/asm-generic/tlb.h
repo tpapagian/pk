@@ -85,7 +85,19 @@ tlb_flush_mmu(struct mmu_gather *tlb, unsigned long start, unsigned long end)
 static inline void
 tlb_finish_mmu(struct mmu_gather *tlb, unsigned long start, unsigned long end)
 {
+	extern void free_pgtable_finish(void);
+
 	tlb_flush_mmu(tlb, start, end);
+
+	// amdragon: Also finish the pgtable gatherer.  We do this
+	// here because there are multiple paths into the page table
+	// free code and they all have to finish the pgtable gatherer.
+	// Luckily, they also all have to manage a mmu_gather.  In
+	// some sense, the pgtable gatherer is an extension of
+	// mmu_gather, so perhaps this makes sense, but nevertheless,
+	// this feels kludgy.  Have to do this before the put_cpu_var
+	// enables preemption.
+	free_pgtable_finish();
 
 	/* keep the page table cache within bounds */
 	check_pgt_cache();
@@ -144,5 +156,15 @@ static inline void tlb_remove_page(struct mmu_gather *tlb, struct page *page)
 	} while (0)
 
 #define tlb_migrate_finish(mm) do {} while (0)
+
+/**
+ * tlb_dirty - remember that a p?e was cleared.
+ *
+ * This is useful if the actual free of the page will be done later.
+ */
+static inline void tlb_dirty(struct mmu_gather *tlb)
+{
+	tlb->need_flush = 1;
+}
 
 #endif /* _ASM_GENERIC__TLB_H */

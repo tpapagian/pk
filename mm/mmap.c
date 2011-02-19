@@ -2399,8 +2399,6 @@ void exit_mmap(struct mm_struct *mm)
 		// amdragon: It's safe to immediately free VMA's here
 		// because no page fault handler can be racing.
 		vma = remove_vma(vma, 1);
-
-	BUG_ON(mm->nr_ptes > (FIRST_USER_ADDRESS+PMD_SIZE-1)>>PMD_SHIFT);
 }
 
 /* Insert vm structure into process list sorted by address

@@ -486,7 +486,7 @@ static struct mm_struct * mm_init(struct mm_struct * mm, struct task_struct *p)
 	mm->flags = (current->mm) ?
 		(current->mm->flags & MMF_INIT_MASK) : default_dump_filter;
 	mm->core_state = NULL;
-	mm->nr_ptes = 0;
+	atomic_set(&mm->nr_ptes, 0);
 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
 	spin_lock_init(&mm->page_table_lock);
 	mm->free_area_cache = TASK_UNMAPPED_BASE;
@@ -528,6 +528,11 @@ struct mm_struct * mm_alloc(void)
 void __mmdrop(struct mm_struct *mm)
 {
 	BUG_ON(mm == &init_mm);
+	// amdragon: Used to be in exit_mm, but now that PTE freeing
+	// is delayed, there might be pending free's as of exit_mm.
+	// However, those pending free's will hold a reference to the
+	// mm, so by this point they should all be gone.
+	BUG_ON(atomic_read(&mm->nr_ptes) > (FIRST_USER_ADDRESS+PMD_SIZE-1)>>PMD_SHIFT);
 	mm_free_pgd(mm);
 	destroy_context(mm);
 	mmu_notifier_mm_destroy(mm);

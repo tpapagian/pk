@@ -218,10 +218,274 @@ void pmd_clear_bad(pmd_t *pmd)
 	pmd_clear(pmd);
 }
 
+#define AMDRAGON_SPLIT_PUD 1
+#define AMDRAGON_SPLIT_PMD 1
+#define AMDRAGON_SPLIT_PTE 1
+#define AMDRAGON_DELAY 1
+
+static void __free_pte_range(struct mm_struct *mm,
+			     struct mmu_gather *tlb, pgtable_t token,
+			     unsigned long addr);
+static void __free_pmd_range(struct mm_struct *mm,
+			     struct mmu_gather *tlb,
+			     pmd_t *pmd /* pmd of addr */,
+			     pmd_t pmd_start[] /* whole table */,
+			     unsigned long addr, unsigned long end);
+static void __free_pud_range(struct mm_struct *mm,
+			     struct mmu_gather *tlb,
+			     pud_t *pud /* pud of addr */, 
+			     pud_t pud_start[] /* whole table */,
+			     unsigned long addr, unsigned long end);
+
+#if AMDRAGON_DELAY
+
+// Delay free of page trees.  Inspired by arch/powerpc/mm/pgtable.c
+// and the TLB batching code.
+
+DEFINE_PER_CPU(struct free_pgtable_gather *, free_pgtable_gather);
+
+struct free_pgtable_entry
+{
+	enum {
+		PGTABLE_FREE_PTE,
+		PGTABLE_FREE_PMD,
+		PGTABLE_FREE_PUD,
+	} tag;
+	union {
+		struct {
+			pgtable_t token;
+		} free_pte;
+		struct {
+			pmd_t *pmd;
+			// XXX In principle, given pmd we don't need
+			// pmd_start (at least on x86), but the arch
+			// API's make it really hard to get rid of.
+			pmd_t *pmd_start;
+		} free_pmd;
+		struct {
+			pud_t *pud;
+			pud_t *pud_start;
+		} free_pud;
+	};
+	unsigned long addr, end;
+};
+
+struct free_pgtable_gather
+{
+	struct rcu_head rcu;
+	struct mm_struct *mm;
+	unsigned int index;
+	struct free_pgtable_entry entries[0];
+};
+
+#define FREE_PGTABLE_ENTRIES \
+	((PAGE_SIZE - sizeof(struct free_pgtable_gather)) \
+	 / sizeof(struct free_pgtable_entry))
+
+static void free_pgtable_rcu_callback(struct rcu_head *head)
+{
+	struct free_pgtable_gather *gather =
+		container_of(head, struct free_pgtable_gather, rcu);
+	unsigned int i;
+
+	// XXX The old code would batch page free operations via the
+	// mmu_gather, whereas now we free them individually.
+	// However, we can't just use an mmu_gather here because we're
+	// called in a softirq context, which means we can be called
+	// in the middle of someone else using this CPU's mmu_gather.
+	// Alas.
+
+	for (i = 0; i < gather->index; i++) {
+		struct free_pgtable_entry *entry = &gather->entries[i];
+		switch (entry->tag) {
+		case PGTABLE_FREE_PTE:
+			__free_pte_range(gather->mm, NULL,
+					 entry->free_pte.token, entry->addr);
+			break;
+		case PGTABLE_FREE_PMD:
+			__free_pmd_range(gather->mm, NULL,
+					 entry->free_pmd.pmd, entry->free_pmd.pmd_start,
+					 entry->addr, entry->end);
+			break;
+		case PGTABLE_FREE_PUD:
+			__free_pud_range(gather->mm, NULL,
+					 entry->free_pud.pud, entry->free_pud.pud_start,
+					 entry->addr, entry->end);
+			break;
+		default:
+			BUG();
+		}
+	}
+
+	mmdrop(gather->mm);
+	free_page((unsigned long)gather);
+}
+
+static void free_pgtable_submit(struct free_pgtable_gather *gather)
+{
+	call_rcu(&gather->rcu, free_pgtable_rcu_callback);
+}
+
+// Finish using the free_pgtable gatherer and submit any pending
+// delayed free operations.  This is called by tlb_finish_mmu so that
+// we don't have to worry about calling it on every path out of the
+// page table code.
+void free_pgtable_finish(void)
+{
+	/* This is safe since tlb_gather_mmu has disabled preemption */
+	struct free_pgtable_gather **gather = &__get_cpu_var(free_pgtable_gather);
+
+	if (*gather == NULL)
+		return;
+	free_pgtable_submit(*gather);
+	*gather = NULL;
+}
+
+// Allocation path of free_pgtable_get_delayed.  Separated to
+// encourage inlining of the fast path.
+static void __free_pgtable_get_delayed(struct mmu_gather *tlb,
+				       struct free_pgtable_gather **gather)
+{
+	*gather = (struct free_pgtable_gather*)__get_free_page(GFP_ATOMIC);
+	if (!*gather)
+		// XXX Obviously not ideal
+		panic("failed to allocate free_pgtable_gather");
+	(*gather)->mm = tlb->mm;
+	(*gather)->index = 0;
+	// We need to keep the mm around so we can update the nr_ptes
+	// field.  This also means nr_pte's may no longer drop to its
+	// base value at the end of exit_mm like before, so we have to
+	// move that sanity check to __mmdrop.
+	atomic_inc(&tlb->mm->mm_count);
+}
+
+// Get the next free_pgtable_entry.  Should be paired with a
+// free_pgtable_put_delayed once the entry is filled.
+static inline struct free_pgtable_entry *free_pgtable_get_delayed(struct mmu_gather *tlb)
+{
+	/* This is safe since tlb_gather_mmu has disabled preemption */
+	struct free_pgtable_gather **gather = &__get_cpu_var(free_pgtable_gather);	
+
+	if (*gather == NULL)
+		__free_pgtable_get_delayed(tlb, gather);
+
+	BUG_ON((*gather)->mm != tlb->mm);
+	return &(*gather)->entries[(*gather)->index++];
+}
+
+static inline void free_pgtable_put_delayed(void)
+{
+	struct free_pgtable_gather **gather = &__get_cpu_var(free_pgtable_gather);	
+
+	if ((*gather)->index == FREE_PGTABLE_ENTRIES) {
+		free_pgtable_submit(*gather);
+		*gather = NULL;
+	}
+}
+
+// Delay a __free_pte_range call.
+static void free_pte_delayed(struct mmu_gather *tlb, pgtable_t token,
+			     unsigned long addr)
+{
+	struct free_pgtable_entry *entry = free_pgtable_get_delayed(tlb);
+	entry->tag = PGTABLE_FREE_PTE;
+	entry->free_pte.token = token;
+	entry->addr = addr;
+	free_pgtable_put_delayed();
+}
+
+// Delay a __free_pmd_range call.
+static void free_pmd_delayed(struct mmu_gather *tlb,
+			     pmd_t *pmd, pmd_t pmd_start[],
+			     unsigned long addr, unsigned long end)
+{
+	struct free_pgtable_entry *entry = free_pgtable_get_delayed(tlb);
+	entry->tag = PGTABLE_FREE_PMD;
+	entry->free_pmd.pmd = pmd;
+	entry->free_pmd.pmd_start = pmd_start;
+	entry->addr = addr;
+	entry->end = end;
+	free_pgtable_put_delayed();
+}
+
+// Delay a __free_pud_range call.
+static void free_pud_delayed(struct mmu_gather *tlb,
+			     pud_t *pud, pud_t pud_start[],
+			     unsigned long addr, unsigned long end)
+{
+	struct free_pgtable_entry *entry = free_pgtable_get_delayed(tlb);
+	entry->tag = PGTABLE_FREE_PUD;
+	entry->free_pud.pud = pud;
+	entry->free_pud.pud_start = pud_start;
+	entry->addr = addr;
+	entry->end = end;
+	free_pgtable_put_delayed();
+}
+
+#else
+
+void free_pgtable_finish(void) { }
+
+static void free_pte_delayed(struct mmu_gather *tlb, pgtable_t token,
+			     unsigned long addr)
+{
+	__free_pte_range(NULL, tlb, token, addr);
+}
+
+static void free_pmd_delayed(struct mmu_gather *tlb,
+			     pmd_t *pmd, pmd_t pmd_start[],
+			     unsigned long addr, unsigned long end)
+{
+	__free_pmd_range(NULL, tlb, pmd, pmd_start, addr, end);
+}
+
+static void free_pud_delayed(struct mmu_gather *tlb,
+			     pud_t *pud, pud_t pud_start[],
+			     unsigned long addr, unsigned long end)
+{
+	__free_pud_range(NULL, tlb, pud, pud_start, addr, end);
+}
+
+#endif
+
 /*
  * Note: this doesn't free the actual pages themselves. That
  * has been handled earlier when unmapping all the memory regions.
  */
+#if AMDRAGON_SPLIT_PTE
+static void __free_pte_range(struct mm_struct *mm,
+			     struct mmu_gather *tlb, pgtable_t token,
+			     unsigned long addr)
+{
+#if AMDRAGON_DELAY
+	// XXX Arch
+	free_page_and_swap_cache(token);
+	atomic_dec(&mm->nr_ptes);
+#else
+	// Free the pte without marking the TLB dirty, since we've
+	// already flushed the detach.
+	__pte_free_tlb(tlb, token, addr);
+	// This has the curious affect that we can't do PTE accounting
+	// until RCU-free time because we don't walk enough of the
+	// tree to know how many PTE's we're going to free until now.
+	// Really, this makes deep sense, since we're RCU-ing the
+	// whole page tree free instead of each page table free
+	// precisely because a racing page fault could allocate new
+	// page tables on a detached page tree, and we would have to
+	// account for those.
+	atomic_dec(&tlb->mm->nr_ptes);
+#endif
+}
+
+static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
+			   unsigned long addr)
+{
+	pgtable_t token = pmd_pgtable(*pmd);
+	pmd_clear(pmd);
+	tlb_dirty(tlb);
+	free_pte_delayed(tlb, token, addr);
+}
+#else
 static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
@@ -230,6 +494,80 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	pte_free_tlb(tlb, token, addr);
 	tlb->mm->nr_ptes--;
 }
+#endif
+
+#if AMDRAGON_SPLIT_PMD
+// amdragon: Free an entire pmd_t[] page.  We still take addr and end
+// in order to skip over guaranteed-clear entries.
+static void __free_pmd_range(struct mm_struct *mm,
+			     struct mmu_gather *tlb,
+			     pmd_t *pmd /* pmd of addr */,
+			     pmd_t pmd_start[] /* whole table */,
+			     unsigned long addr, unsigned long end)
+{
+	unsigned long start, next;
+	start = addr & PUD_MASK;
+	do {
+		next = pmd_addr_end(addr, end);
+		if (pmd_none_or_clear_bad(pmd))
+			continue;
+#if AMDRAGON_SPLIT_PTE
+		__free_pte_range(mm, tlb, pmd_pgtable(*pmd), addr);
+#else
+		free_pte_range(tlb, pmd, addr);
+#endif
+	} while (pmd++, addr = next, addr != end);
+
+#if AMDRAGON_DELAY
+	// XXX Arch
+	free_page_and_swap_cache(virt_to_page(pmd_start));
+#else
+	// Free the pmd without marking the TLB dirty, since we've
+	// already flushed the detach.
+	__pmd_free_tlb(tlb, pmd_start, start);
+#endif
+}
+
+static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
+				unsigned long addr, unsigned long end,
+				unsigned long floor, unsigned long ceiling)
+{
+	pmd_t *pmd, *pmd_start;
+	unsigned long next;
+	unsigned long start, new_ceiling;
+
+	pmd = pmd_offset(pud, addr);
+
+	start = addr & PUD_MASK;
+	if (start < floor)
+		goto sub;
+	if (ceiling) {
+		new_ceiling &= PUD_MASK;
+		if (!new_ceiling)
+			goto sub;
+	} else
+		new_ceiling = ceiling;
+	if (end - 1 > new_ceiling - 1)
+		goto sub;
+
+	// We span the entire pmd_t[].  Detach it and remove
+	// everything rooted at pud.
+	pmd_start = pmd_offset(pud, start);
+	pud_clear(pud);
+	tlb_dirty(tlb);
+	free_pmd_delayed(tlb, pmd, pmd_start, addr, end);
+	return;
+
+sub:
+	do {
+		next = pmd_addr_end(addr, end);
+		if (pmd_none_or_clear_bad(pmd))
+			continue;
+		free_pte_range(tlb, pmd, addr);
+	} while (pmd++, addr = next, addr != end);
+}
+
+#else
 
 static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 				unsigned long addr, unsigned long end,
@@ -263,6 +601,84 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	pud_clear(pud);
 	pmd_free_tlb(tlb, pmd, start);
 }
+#endif
+
+#if AMDRAGON_SPLIT_PUD
+// amdragon: Free an entire pud_t[] page.  We still take addr and end
+// in order to skip over guaranteed-clear entries.
+static void __free_pud_range(struct mm_struct *mm,
+			     struct mmu_gather *tlb,
+			     pud_t *pud /* pud of addr */, 
+			     pud_t pud_start[] /* whole table */,
+			     unsigned long addr, unsigned long end)
+{
+	unsigned long start, next;
+	start = addr & PGDIR_MASK;
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_none_or_clear_bad(pud))
+			continue;
+#if AMDRAGON_SPLIT_PMD
+		__free_pmd_range(mm, tlb, pmd_offset(pud, addr),
+				 pmd_offset(pud, addr & PUD_MASK),
+				 addr, next);
+#else
+		// We're freeing the whole range, so floor and ceiling
+		// don't matter.
+		free_pmd_range(tlb, pud, addr, next, 0, 0);
+#endif
+	} while (pud++, addr = next, addr != end);
+
+#if AMDRAGON_DELAY
+	// XXX Arch
+	free_page_and_swap_cache(virt_to_page(pud_start));
+#else
+	// Free the pud without marking the TLB dirty, since we've
+	// already flushed the detach.
+	__pud_free_tlb(tlb, pud_start, start);
+#endif
+}
+
+static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
+				unsigned long addr, unsigned long end,
+				unsigned long floor, unsigned long ceiling)
+{
+	pud_t *pud, *pud_start;
+	unsigned long next;
+	unsigned long start, new_ceiling;
+
+	pud = pud_offset(pgd, addr);
+
+	start = addr & PGDIR_MASK;
+	if (start < floor)
+		goto sub;
+	if (ceiling) {
+		new_ceiling &= PGDIR_MASK;
+		if (!new_ceiling)
+			goto sub;
+	} else
+		new_ceiling = ceiling;
+	if (end - 1 > new_ceiling - 1)
+		goto sub;
+
+	// We span the entire pud_t[].  Detach it and remove
+	// everything rooted at pgd.
+	pud_start = pud_offset(pgd, start);
+	pgd_clear(pgd);
+	tlb_dirty(tlb);
+	free_pud_delayed(tlb, pud, pud_start, addr, end);
+	return;
+
+sub:
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_none_or_clear_bad(pud))
+			continue;
+		free_pmd_range(tlb, pud, addr, next, floor, ceiling);
+	} while (pud++, addr = next, addr != end);
+}
+
+#else
 
 static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
 				unsigned long addr, unsigned long end,
@@ -296,6 +712,7 @@ static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
 	pgd_clear(pgd);
 	pud_free_tlb(tlb, pud, start);
 }
+#endif
 
 /*
  * This function frees user-level page tables of a process.
@@ -418,7 +835,7 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 
 	spin_lock(&mm->page_table_lock);
 	if (!pmd_present(*pmd)) {	/* Has another populated it ? */
-		mm->nr_ptes++;
+		atomic_inc(&mm->nr_ptes);
 		pmd_populate(mm, pmd, new);
 		new = NULL;
 	}
@@ -2912,8 +3329,8 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (vma->vm_flags & VM_WRITE)
 		entry = pte_mkwrite(pte_mkdirty(entry));
 
-	// amdragon: XXX This is not safe!  The page table page could
-	// have been freed and reused for something else.
+	// amdragon: This is safe because handle_mm_fault pinned the
+	// page table page.
 	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
 	if (!pte_none(*page_table))
 		goto release;
@@ -3216,6 +3633,8 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 		}						\
 	} while (0)
 
+	// amdragon: The PTE is safe to reference here because
+	// handle_mm_fault pinned the PTE page.
 	entry = *pte;
 	if (!pte_present(entry)) {
 		if (pte_none(entry)) {
@@ -3276,6 +3695,7 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
+	struct page *pte_page;
 
 	// amdragon
 	int ret = 0;
@@ -3297,20 +3717,43 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		return hugetlb_fault(mm, vma, address, flags);
 	}
 
-	// amdragon: XXX This is not safe!  Could race with page table
-	// freeing in munmap.
+	// amdragon: Protect against page directory free
+	rcu_read_lock();
+
 	pgd = pgd_offset(mm, address);
 	pud = pud_alloc(mm, pgd, address);
 	if (!pud)
-		return VM_FAULT_OOM | ret;
+		goto oom;
 	pmd = pmd_alloc(mm, pud, address);
 	if (!pmd)
-		return VM_FAULT_OOM | ret;
+		goto oom;
 	pte = pte_alloc_map(mm, pmd, address);
 	if (!pte)
-		return VM_FAULT_OOM | ret;
+		goto oom;
 
-	return handle_pte_fault(mm, vma, address, pte, pmd, flags) | ret;
+	// amdragon: Protect against page table free.  We could use
+	// RCU to do this, except that we have to sleep all over the
+	// place.
+	pte_page = virt_to_page(pte);
+	get_page(pte_page);
+	// Ugh.  pmd gets used all over the place so we need to
+	// protect the PMD it points to somehow, too.  Turns on, at
+	// least on x86-64, that nobody cares about the pointer; they
+	// only care about the pointed-to value (which makes sense),
+	// so give them a pointer to the value.  Terrible, but the
+	// arch API's for this stuff are insane.
+	// XXX Arch
+	pmd_t pmd_snapshot = *pmd;
+	pmd = &pmd_snapshot;
+	rcu_read_unlock();
+
+	ret |= handle_pte_fault(mm, vma, address, pte, pmd, flags);
+	put_page(pte_page);
+	return ret;
+
+oom:
+	rcu_read_unlock();
+	return VM_FAULT_OOM | ret;
 }
 
 #ifndef __PAGETABLE_PUD_FOLDED
