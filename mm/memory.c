@@ -3627,6 +3627,8 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pud_t *pud;
 	pmd_t *pmd;
 	pte_t *pte;
+	struct page *pte_page;
+	int ret;
 
 	__set_current_state(TASK_RUNNING);
 
@@ -3638,18 +3640,43 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		return hugetlb_fault(mm, vma, address, flags);
 
+	// amdragon: Protect against page directory free
+	rcu_read_lock();
+
 	pgd = pgd_offset(mm, address);
 	pud = pud_alloc(mm, pgd, address);
 	if (!pud)
-		return VM_FAULT_OOM;
+		goto oom;
 	pmd = pmd_alloc(mm, pud, address);
 	if (!pmd)
-		return VM_FAULT_OOM;
+		goto oom;
 	pte = pte_alloc_map(mm, pmd, address);
 	if (!pte)
-		return VM_FAULT_OOM;
+		goto oom;
 
-	return handle_pte_fault(mm, vma, address, pte, pmd, flags);
+	// amdragon: Protect against page table free.  We could use
+	// RCU to do this, except that we have to sleep all over the
+	// place.
+	pte_page = virt_to_page(pte);
+	get_page(pte_page);
+	// Ugh.  pmd gets used all over the place so we need to
+	// protect the PMD it points to somehow, too.  Turns on, at
+	// least on x86-64, that nobody cares about the pointer; they
+	// only care about the pointed-to value (which makes sense),
+	// so give them a pointer to the value.  Terrible, but the
+	// arch API's for this stuff are insane.
+	// XXX Arch
+	pmd_t pmd_snapshot = *pmd;
+	pmd = &pmd_snapshot;
+	rcu_read_unlock();
+
+	ret = handle_pte_fault(mm, vma, address, pte, pmd, flags);
+	put_page(pte_page);
+	return ret;
+
+oom:
+	rcu_read_unlock();
+	return VM_FAULT_OOM;
 }
 
 #ifndef __PAGETABLE_PUD_FOLDED
