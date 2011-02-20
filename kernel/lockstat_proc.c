@@ -179,7 +179,7 @@ static void seq_stats(struct seq_file *m, struct lock_stat_data *data)
 	}
 }
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 extern atomic_t ls_acquire;
 extern atomic_t ls_release;
 extern atomic_t ls_contended;
@@ -194,7 +194,7 @@ static void seq_header(struct seq_file *m)
 {
 	seq_printf(m, "lock_stat version 0.3\n");
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	seq_printf(m, "ls_acquire: %d\n", atomic_read(&ls_acquire));
 	seq_printf(m, "ls_release: %d\n", atomic_read(&ls_release));
 	seq_printf(m, "ls_contended: %d\n", atomic_read(&ls_contended));

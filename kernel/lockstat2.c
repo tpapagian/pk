@@ -40,7 +40,7 @@ struct list_head classhash_table[CLASSHASH_SIZE];
 static DEFINE_PER_CPU(struct lock_class_stats[MAX_LOCKDEP_KEYS],
 		      cpu_lock_stats);
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 atomic_t ls_acquire;
 atomic_t ls_release;
 atomic_t ls_contended;
@@ -155,7 +155,7 @@ void lock_release_holdtime(struct held_lock *hlock)
 	struct lock_class_stats *stats;
 	u64 holdtime;
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	atomic_inc(&ls_holdtime);
 #endif
 
@@ -324,7 +324,7 @@ lockstat_lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 	unsigned int depth;
 	int class_idx;
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	atomic_inc(&ls_acquire);
 #endif
 
@@ -471,7 +471,7 @@ lockstat_lock_release(struct lockdep_map *lock, int nested, unsigned long ip)
 {
 	struct task_struct *curr = current;
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	atomic_inc(&ls_release);
 #endif
 
@@ -499,7 +499,7 @@ lockstat_lock_contended(struct lockdep_map *lock, unsigned long ip)
 	unsigned int depth;
 	int i, contention_point, contending_point;
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	atomic_inc(&ls_contended);
 #endif
 
@@ -555,7 +555,7 @@ lockstat_lock_acquired(struct lockdep_map *lock, unsigned long ip)
 	u64 now, waittime = 0;
 	int i, cpu;
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	atomic_inc(&ls_acquired);
 #endif
 
