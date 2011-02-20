@@ -1366,6 +1366,7 @@ errorentry general_protection do_general_protection
 errorentry page_fault mtrace_do_page_fault
 #else
 errorentry page_fault do_page_fault
+#endif
 #ifdef CONFIG_KVM_GUEST
 errorentry async_page_fault do_async_page_fault
 #endif
