@@ -2911,7 +2911,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	struct mm_struct *mm, *oldmm;
 
 	prepare_task_switch(rq, prev, next);
+#ifndef CONFIG_MTRACE
 	trace_sched_switch(prev, next);
+#endif
 	mm = next->mm;
 	oldmm = prev->active_mm;
 	/*
@@ -2940,6 +2942,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 */
 #ifndef __ARCH_WANT_UNLOCKED_CTXSW
 	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
+#endif
+#ifdef CONFIG_MTRACE
+	trace_sched_switch(prev, next);
 #endif
 
 	/* Here we just switch the register state and the stack. */
