@@ -239,7 +239,15 @@ struct mm_struct {
 	int map_count;				/* number of VMAs */
 	struct rw_semaphore mmap_sem;
 #ifdef CONFIG_AMDRAGON_LATE_TREE_LOCK
-	struct rw_semaphore vma_sem;		/* protects RB tree and VMA's */
+	/* amdragon: vma_sem protects the RB tree, the VMA's, and
+	 * anything the page fault handler can *modify*.  "vma_sem"
+	 * turns out to be a misnomer; what this really protects
+	 * against is a concurrent page fault and everything it can
+	 * do.  It turns out the original mmap_sem worked two ways;
+	 * it prevented the page fault handler from observing changes
+	 * made by writers, but it also prevented writers from
+	 * observing changes made by the page fault handler. */
+	struct rw_semaphore vma_sem;
 	bool vma_sem_locked;			/* vma_sem held for write */
 //	char _pad[64 - (1 + sizeof(struct rw_semaphore))];
 #endif
