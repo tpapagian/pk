@@ -41,7 +41,7 @@ extern struct list_head classhash_table[CLASSHASH_SIZE];
 extern inline struct lock_class *look_up_lock_class(struct lockdep_map *lock,
 		unsigned int subclass);
 
-extern inline struct lock_class *register_lock_class(struct lockdep_map *lock,
+extern struct lock_class *register_lock_class(struct lockdep_map *lock,
 		unsigned int subclass, int force);
 
 extern int lock_release_non_nested(struct task_struct *curr,
