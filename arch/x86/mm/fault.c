@@ -1133,6 +1133,12 @@ good_area:
 		goto done_srcu;
 	}
 
+	// amdragon
+	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
+		mm_vma_unlock_read(mm);
+		flags |= FAULT_FLAG_NO_LOCK;
+	}
+
 	/*
 	 * If for any reason at all we couldn't handle the fault,
 	 * make sure we exit gracefully rather than endlessly redo
@@ -1141,7 +1147,7 @@ good_area:
 	fault = handle_mm_fault(mm, vma, address, flags);
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
-		if (!(fault & VM_FAULT_RELEASED))
+		if (!(flags & FAULT_FLAG_NO_LOCK))
 			mm_vma_unlock_read(mm);
 		mm_fault_error(regs, error_code, address, fault, mm);
 		goto done_srcu;
@@ -1171,13 +1177,16 @@ good_area:
 			// This should go away once we drop the lock
 			// in this function.
 			flags |= FAULT_FLAG_KEEP_LOCK;
+			// amdragon: We'll reacquire the lock on the
+			// retry path, so clear the no-lock flag.
+			flags &= ~FAULT_FLAG_NO_LOCK;
 			goto retry;
 		}
 	}
 
 	check_v8086_mode(regs, address, tsk);
 
-	if (!(fault & VM_FAULT_RELEASED))
+	if (!(flags & FAULT_FLAG_NO_LOCK))
 		mm_vma_unlock_read(mm);
 
 done_srcu:

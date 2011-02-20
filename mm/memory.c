@@ -1861,9 +1861,8 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				int ret;
 
 				ret = handle_mm_fault(mm, vma, start,
-					((foll_flags & FOLL_WRITE) ?
-					FAULT_FLAG_WRITE : 0)
-					| FAULT_FLAG_KEEP_LOCK);
+					(foll_flags & FOLL_WRITE) ?
+					FAULT_FLAG_WRITE : 0);
 
 				if (ret & VM_FAULT_ERROR) {
 					if (ret & VM_FAULT_OOM)
@@ -3696,14 +3695,7 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pmd_t *pmd;
 	pte_t *pte;
 	struct page *pte_page;
-
-	// amdragon
-	int ret = 0;
-	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
-		mm_vma_unlock_read(mm);
-		flags |= FAULT_FLAG_NO_LOCK;
-		ret |= VM_FAULT_RELEASED;
-	}
+	int ret;
 
 	__set_current_state(TASK_RUNNING);
 
@@ -3747,13 +3739,13 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pmd = &pmd_snapshot;
 	rcu_read_unlock();
 
-	ret |= handle_pte_fault(mm, vma, address, pte, pmd, flags);
+	ret = handle_pte_fault(mm, vma, address, pte, pmd, flags);
 	put_page(pte_page);
 	return ret;
 
 oom:
 	rcu_read_unlock();
-	return VM_FAULT_OOM | ret;
+	return VM_FAULT_OOM;
 }
 
 #ifndef __PAGETABLE_PUD_FOLDED
