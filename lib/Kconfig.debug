@@ -450,7 +450,7 @@ config DEBUG_LOCK_ALLOC
 	select DEBUG_SPINLOCK
 	select DEBUG_MUTEXES
 	select LOCKDEP
-	select DEBUG_LOCK_HOOKS
+	select LOCK_DEBUG_HOOKS
 	help
 	 This feature will check whether any held lock (spinlock, rwlock,
 	 mutex or rwsem) is incorrectly freed by the kernel, via any of the
