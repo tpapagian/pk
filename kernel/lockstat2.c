@@ -352,7 +352,9 @@ lockstat_lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 		if (!class)
 			return 0;
 	}
-	atomic_inc((atomic_t *)&class->ops); // AP: XXX this is not per-cpu
+#ifdef CONFIG_DEBUG_LOCKDEP
+	atomic_inc((atomic_t *)&class->per_cpu[smp_processor_id()].ops);
+#endif
 	/*
 	if (very_verbose(class)) {
 		printk("\nacquire class [%p] %s", class->key, class->name);

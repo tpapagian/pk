@@ -27,6 +27,13 @@
 
 #define LOCKSTAT_POINTS		4
 
+struct lock_class_per_cpu {
+	/*
+	 * Statistics counter:
+	 */
+	unsigned long			ops ____cacheline_aligned_in_smp;
+};
+
 /*
  * The lock-class itself:
  */
@@ -64,11 +71,6 @@ struct lock_class {
 	 */
 	unsigned int			version;
 
-	/*
-	 * Statistics counter:
-	 */
-	unsigned long			ops;
-
 	const char			*name;
 	int				name_version;
 
@@ -76,6 +78,8 @@ struct lock_class {
 	unsigned long			contention_point[LOCKSTAT_POINTS];
 	unsigned long			contending_point[LOCKSTAT_POINTS];
 #endif
+
+	struct lock_class_per_cpu	per_cpu[NR_CPUS];
 };
 
 extern unsigned long nr_lock_classes;
