@@ -1096,6 +1096,12 @@ retry:
 	}
 
 	vma = find_vma(mm, address);
+	// amdragon
+	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
+		mm_vma_unlock_read(mm);
+		flags |= FAULT_FLAG_NO_LOCK;
+	}
+
 	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address, flags);
 		goto done_srcu;
@@ -1118,6 +1124,13 @@ retry:
 			goto done_srcu;
 		}
 	}
+	// amdragon: We need the lock to expand the stack.
+	if (flags & FAULT_FLAG_NO_LOCK) {
+		AMDRAGON_LF_STAT_INC(expand_stack_retries);
+		flags |= FAULT_FLAG_KEEP_LOCK;
+		flags &= ~FAULT_FLAG_NO_LOCK;
+		goto retry;
+	}
 	if (unlikely(expand_stack(vma, address))) {
 		bad_area(regs, error_code, address, flags);
 		goto done_srcu;
@@ -1128,12 +1141,6 @@ retry:
 	 * we can handle it..
 	 */
 good_area:
-	// amdragon
-	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
-		mm_vma_unlock_read(mm);
-		flags |= FAULT_FLAG_NO_LOCK;
-	}
-
 	if (unlikely(access_error(error_code, vma))) {
 		bad_area_access_error(regs, error_code, address, flags);
 		goto done_srcu;
