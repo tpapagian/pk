@@ -601,6 +601,13 @@ int vma_adjust(struct vm_area_struct *vma, unsigned long start,
 	long adjust_next = 0;
 	int remove_next = 0;
 
+	// amdragon: We could push this slightly later at the cost of
+	// having mm_vma_lock calls on most branches in this function.
+	// The added code and repeat checks probably aren't worth it,
+	// especially since the majority of cases (vma_merge calls),
+	// require this just a few instructions from now.
+	mm_vma_lock(mm);
+
 	if (next && !insert) {
 		struct vm_area_struct *exporter = NULL;
 
@@ -648,8 +655,6 @@ again:			remove_next = 1 + (end > next->vm_end);
 		mapping = file->f_mapping;
 		if (!(vma->vm_flags & VM_NONLINEAR))
 			root = &mapping->i_mmap;
-		// amdragon: Need to take vma lock before i_mmap_lock
-		mm_vma_lock(mm);
 		spin_lock(&mapping->i_mmap_lock);
 		if (importer &&
 		    vma->vm_truncate_count != next->vm_truncate_count) {
@@ -678,8 +683,6 @@ again:			remove_next = 1 + (end > next->vm_end);
 	 * the lock for brk adjustments makes a difference sometimes.
 	 */
 	if (vma->anon_vma && (insert || importer || start != vma->vm_start)) {
-		// amdragon: Need to take vma lock before anon_vma_lock
-		mm_vma_lock(mm);
 		anon_vma = vma->anon_vma;
 		anon_vma_lock(anon_vma);
 	}
@@ -691,7 +694,6 @@ again:			remove_next = 1 + (end > next->vm_end);
 			vma_prio_tree_remove(next, root);
 	}
 
-	mm_vma_lock(mm);
 	vma->vm_start = start;
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
@@ -776,9 +778,17 @@ static inline int is_mergeable_vma(struct vm_area_struct *vma,
 	return 1;
 }
 
-static inline int is_mergeable_anon_vma(struct anon_vma *anon_vma1,
+static inline int is_mergeable_anon_vma(struct mm_struct *mm,
+					struct anon_vma *anon_vma1,
 					struct anon_vma *anon_vma2)
 {
+	// amdragon: We have to take the vma lock now to prevent a
+	// concurrent page fault from filling in an anon_vma between
+	// now and when we finish the VMA merge.  However, once an
+	// anon_vma is assigned, it never changes, so we only need the
+	// lock now if either is NULL (and thus could change).
+	if (!anon_vma1 || !anon_vma2)
+		mm_vma_lock(mm);
 	return !anon_vma1 || !anon_vma2 || (anon_vma1 == anon_vma2);
 }
 
@@ -798,7 +808,7 @@ can_vma_merge_before(struct vm_area_struct *vma, unsigned long vm_flags,
 	struct anon_vma *anon_vma, struct file *file, pgoff_t vm_pgoff)
 {
 	if (is_mergeable_vma(vma, file, vm_flags) &&
-	    is_mergeable_anon_vma(anon_vma, vma->anon_vma)) {
+	    is_mergeable_anon_vma(vma->vm_mm, anon_vma, vma->anon_vma)) {
 		if (vma->vm_pgoff == vm_pgoff)
 			return 1;
 	}
@@ -817,7 +827,7 @@ can_vma_merge_after(struct vm_area_struct *vma, unsigned long vm_flags,
 	struct anon_vma *anon_vma, struct file *file, pgoff_t vm_pgoff)
 {
 	if (is_mergeable_vma(vma, file, vm_flags) &&
-	    is_mergeable_anon_vma(anon_vma, vma->anon_vma)) {
+	    is_mergeable_anon_vma(vma->vm_mm, anon_vma, vma->anon_vma)) {
 		pgoff_t vm_pglen;
 		vm_pglen = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 		if (vma->vm_pgoff + vm_pglen == vm_pgoff)
@@ -894,7 +904,7 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 				mpol_equal(policy, vma_policy(next)) &&
 				can_vma_merge_before(next, vm_flags,
 					anon_vma, file, pgoff+pglen) &&
-				is_mergeable_anon_vma(prev->anon_vma,
+				is_mergeable_anon_vma(mm, prev->anon_vma,
 						      next->anon_vma)) {
 							/* cases 1, 6 */
 			err = vma_adjust(prev, prev->vm_start,
