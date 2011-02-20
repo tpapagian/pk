@@ -951,7 +951,7 @@ static int fault_in_kernel_space(unsigned long address)
 dotraplinkage void __kprobes
 do_page_fault(struct pt_regs *regs, unsigned long error_code)
 {
-	struct vm_area_struct *vma;
+	struct vm_area_struct *vma = NULL;
 	struct task_struct *tsk;
 	unsigned long address;
 	struct mm_struct *mm;
@@ -1080,6 +1080,16 @@ retry:
 		 * down_read():
 		 */
 		might_sleep();
+	}
+
+	// amdragon: If this is our second time through (because of a
+	// retry), check if we can just use the VMA we found last time
+	// (that is, if find_vma would return the same VMA).  This is
+	// closely related to the mmap_cache check in find_vma, but
+	// won't be muddied by concurrent page faults.
+	if (vma && !vma->vm_unlinked && vma->vm_end > address && vma->vm_start <= address) {
+		AMDRAGON_LF_STAT_INC(reuse_vma);
+		goto good_area;
 	}
 
 	vma = find_vma(mm, address);
