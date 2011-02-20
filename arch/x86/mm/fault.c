@@ -751,30 +751,30 @@ bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 
 static void
 __bad_area(struct pt_regs *regs, unsigned long error_code,
-	   unsigned long address, int si_code)
+	   unsigned long address, unsigned int flags, int si_code)
 {
-	struct mm_struct *mm = current->mm;
-
 	/*
 	 * Something tried to access memory that isn't in our memory map..
 	 * Fix it, but check if it's kernel or user first..
 	 */
-	mm_vma_unlock_read(mm);
+	if (!(flags & FAULT_FLAG_NO_LOCK))
+		mm_vma_unlock_read(current->mm);
 
 	__bad_area_nosemaphore(regs, error_code, address, si_code);
 }
 
 static noinline void
-bad_area(struct pt_regs *regs, unsigned long error_code, unsigned long address)
+bad_area(struct pt_regs *regs, unsigned long error_code, unsigned long address,
+	 unsigned int flags)
 {
-	__bad_area(regs, error_code, address, SEGV_MAPERR);
+	__bad_area(regs, error_code, address, flags, SEGV_MAPERR);
 }
 
 static noinline void
 bad_area_access_error(struct pt_regs *regs, unsigned long error_code,
-		      unsigned long address)
+		      unsigned long address, unsigned int flags)
 {
-	__bad_area(regs, error_code, address, SEGV_ACCERR);
+	__bad_area(regs, error_code, address, flags, SEGV_ACCERR);
 }
 
 /* TODO: fixup for "mm-invoke-oom-killer-from-page-fault.patch" */
@@ -1097,13 +1097,13 @@ retry:
 
 	vma = find_vma(mm, address);
 	if (unlikely(!vma)) {
-		bad_area(regs, error_code, address);
+		bad_area(regs, error_code, address, flags);
 		goto done_srcu;
 	}
 	if (likely(vma->vm_start <= address))
 		goto good_area;
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
-		bad_area(regs, error_code, address);
+		bad_area(regs, error_code, address, flags);
 		goto done_srcu;
 	}
 	if (error_code & PF_USER) {
@@ -1114,12 +1114,12 @@ retry:
 		 * 32 pointers and then decrements %sp by 65535.)
 		 */
 		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp)) {
-			bad_area(regs, error_code, address);
+			bad_area(regs, error_code, address, flags);
 			goto done_srcu;
 		}
 	}
 	if (unlikely(expand_stack(vma, address))) {
-		bad_area(regs, error_code, address);
+		bad_area(regs, error_code, address, flags);
 		goto done_srcu;
 	}
 
@@ -1129,7 +1129,7 @@ retry:
 	 */
 good_area:
 	if (unlikely(access_error(error_code, vma))) {
-		bad_area_access_error(regs, error_code, address);
+		bad_area_access_error(regs, error_code, address, flags);
 		goto done_srcu;
 	}
 
