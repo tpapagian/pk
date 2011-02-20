@@ -1128,15 +1128,15 @@ retry:
 	 * we can handle it..
 	 */
 good_area:
-	if (unlikely(access_error(error_code, vma))) {
-		bad_area_access_error(regs, error_code, address, flags);
-		goto done_srcu;
-	}
-
 	// amdragon
 	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
 		mm_vma_unlock_read(mm);
 		flags |= FAULT_FLAG_NO_LOCK;
+	}
+
+	if (unlikely(access_error(error_code, vma))) {
+		bad_area_access_error(regs, error_code, address, flags);
+		goto done_srcu;
 	}
 
 	/*
