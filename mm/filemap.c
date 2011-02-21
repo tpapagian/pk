@@ -625,7 +625,7 @@ int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
 		__lock_page(page);
 		return 1;
 	} else {
-		mm_vma_unlock_read(mm);
+		mm_pf_unlock_read(mm);
 		wait_on_page_locked(page);
 		return 0;
 	}
