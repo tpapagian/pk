@@ -40,7 +40,7 @@ struct lock_class lock_classes[MAX_LOCKDEP_KEYS];
 
 extern struct list_head classhash_table[CLASSHASH_SIZE];
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 atomic_t ls_non_nested;
 atomic_t ls_nested;
 #endif
@@ -352,7 +352,7 @@ lock_release_non_nested(struct task_struct *curr,
 	unsigned int depth;
 	int i;
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	atomic_inc(&ls_non_nested);
 #endif
 
@@ -432,7 +432,7 @@ int lock_release_nested(struct task_struct *curr,
 	struct held_lock *hlock;
 	unsigned int depth;
 
-#ifdef CONFIG_DEBUG_LOCK_HOOKS
+#ifdef CONFIG_LOCK_DEBUG_HOOKS_DEBUG
 	atomic_inc(&ls_nested);
 #endif
 
