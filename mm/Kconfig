@@ -310,6 +310,6 @@ config NEED_PER_CPU_KM
 	bool
 	default y
 
-config AMDRAGON_LATE_TREE_LOCK
-	bool "Take the VMA tree lock late in MM writers"
+config AMDRAGON_SPLIT_PFLOCK
+	bool "Use a separate, more fine-grained lock during page faults"
 	default n

@@ -758,7 +758,7 @@ __bad_area(struct pt_regs *regs, unsigned long error_code,
 	 * Fix it, but check if it's kernel or user first..
 	 */
 	if (!(flags & FAULT_FLAG_NO_LOCK))
-		mm_vma_unlock_read(current->mm);
+		mm_pf_unlock_read(current->mm);
 
 	__bad_area_nosemaphore(regs, error_code, address, si_code);
 }
@@ -972,7 +972,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 */
 	if (kmemcheck_active(regs))
 		kmemcheck_hide(regs);
-	mm_vma_lock_prefetch(mm);
+	mm_pf_lock_prefetch(mm);
 
 	if (unlikely(kmmio_fault(regs, address)))
 		return;
@@ -1065,14 +1065,14 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 * validate the source. If this is invalid we can skip the address
 	 * space check, thus avoiding the deadlock:
 	 */
-	if (unlikely(!mm_vma_lock_tryread(mm))) {
+	if (unlikely(!mm_pf_lock_tryread(mm))) {
 		if ((error_code & PF_USER) == 0 &&
 		    !search_exception_tables(regs->ip)) {
 			bad_area_nosemaphore(regs, error_code, address);
 			goto done_srcu;
 		}
 retry:
-		mm_vma_lock_read(mm);
+		mm_pf_lock_read(mm);
 	} else {
 		/*
 		 * The above down_read_trylock() might have succeeded in
@@ -1101,7 +1101,7 @@ retry:
 	vma = find_vma(mm, address);
 	// amdragon
 	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
-		mm_vma_unlock_read(mm);
+		mm_pf_unlock_read(mm);
 		flags |= FAULT_FLAG_NO_LOCK;
 	}
 
@@ -1158,7 +1158,7 @@ good_area:
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (!(flags & FAULT_FLAG_NO_LOCK))
-			mm_vma_unlock_read(mm);
+			mm_pf_unlock_read(mm);
 		mm_fault_error(regs, error_code, address, fault, mm);
 		goto done_srcu;
 	}
@@ -1197,7 +1197,7 @@ good_area:
 	check_v8086_mode(regs, address, tsk);
 
 	if (!(flags & FAULT_FLAG_NO_LOCK))
-		mm_vma_unlock_read(mm);
+		mm_pf_unlock_read(mm);
 
 done_srcu:
 	srcu_read_release(&mm_srcu);
