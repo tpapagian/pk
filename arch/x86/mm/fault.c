@@ -1088,7 +1088,10 @@ retry:
 	// closely related to the mmap_cache check in find_vma, but
 	// won't be muddied by concurrent page faults.
 	if (vma) {
-		if (!vma->vm_unlinked && vma->vm_end > address && vma->vm_start <= address) {
+		if (!vma->vm_unlinked && vma->vm_end > address &&
+		    (vma->vm_start <= address || // Common case
+		     !vma->vm_prev ||
+		     vma->vm_prev->vm_end <= address)) {
 			AMDRAGON_LF_STAT_INC(reuse_vma);
 			goto good_area;
 		}
