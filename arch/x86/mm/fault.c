@@ -1096,12 +1096,19 @@ retry:
 	// closely related to the mmap_cache check in find_vma, but
 	// won't be muddied by concurrent page faults.
 	if (vma) {
-		if (!vma->vm_unlinked && vma->vm_end > address &&
-		    (vma->vm_start <= address || // Common case
-		     !vma->vm_prev ||
-		     vma->vm_prev->vm_end <= address)) {
-			AMDRAGON_LF_STAT_INC(reuse_vma);
-			goto good_area;
+		if (!vma->vm_unlinked && vma->vm_end > address) {
+			// Common case: Address lies in VMA
+			if(vma->vm_start <= address) {
+				AMDRAGON_LF_STAT_INC(reuse_vma);
+				goto good_area;
+			}
+			// Less common: Address lies between end of
+			// previous VMA and cached one
+			if (!vma->vm_prev ||
+			    vma->vm_prev->vm_end <= address) {
+				AMDRAGON_LF_STAT_INC(reuse_vma);
+				goto maybe_good_area;
+			}
 		}
 		AMDRAGON_LF_STAT_INC(reuse_vma_fail);
 	}
@@ -1133,6 +1140,7 @@ lookup:
 	}
 	if (likely(vma->vm_start <= address))
 		goto good_area;
+maybe_good_area:
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
 		bad_area(regs, error_code, address, flags);
 		goto done_srcu;
