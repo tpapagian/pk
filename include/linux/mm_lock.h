@@ -192,7 +192,7 @@ mm_tree_unlock_read(struct mm_struct *mm)
 
 #ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
 #define __INIT_MM_LOCK_TREE(mmstruct)		\
-	, .tree_sem		= __RWSEM_INITIALIZER(mmstruct.pf_sem)
+	, .tree_sem		= __RWSEM_INITIALIZER(mmstruct.tree_sem)
 #else
 #define __INIT_MM_LOCK_TREE(mmstruct)
 #endif
