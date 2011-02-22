@@ -313,3 +313,7 @@ config NEED_PER_CPU_KM
 config AMDRAGON_SPLIT_PFLOCK
 	bool "Use a separate, more fine-grained lock during page faults"
 	default n
+
+config AMDRAGON_SPLIT_TREE_LOCK
+	bool "Protect the VMA tree with a fine-grained lock"
+	default n

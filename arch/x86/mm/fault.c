@@ -1049,6 +1049,14 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 
 	srcu_read_acquire(&mm_srcu);
 
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	// In this case, the first VMA tree lookup is protected by the
+	// tree lock, so we needn't bother with the page fault lock.
+	// We'll still take the page fault lock if we retry.
+	flags |= FAULT_FLAG_NO_LOCK;
+	goto lookup;
+#endif
+
 	/*
 	 * When running in the kernel we expect faults to occur only to
 	 * addresses in user space.  All other faults represent errors in
@@ -1098,12 +1106,26 @@ retry:
 		AMDRAGON_LF_STAT_INC(reuse_vma_fail);
 	}
 
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+lookup:
+	// We only need the tree lock if we're not already holding the
+	// page fault lock
+	if (!(flags & FAULT_FLAG_NO_LOCK))
+		mm_tree_lock_read(mm);
+#endif
 	vma = find_vma(mm, address);
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	if (!(flags & FAULT_FLAG_NO_LOCK))
+		mm_tree_unlock_read(mm);
+#endif
+
+#ifndef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
 	// amdragon
 	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
 		mm_pf_unlock_read(mm);
 		flags |= FAULT_FLAG_NO_LOCK;
 	}
+#endif
 
 	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address, flags);

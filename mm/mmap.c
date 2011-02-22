@@ -521,7 +521,16 @@ __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct rb_node *rb_parent)
 {
 	__vma_link_list(mm, vma, prev, rb_parent);
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	// We do this here instead of in __vma_link_rb because the
+	// other user of __vma_link_rb is fork and that use doesn't
+	// need the lock.
+	mm_tree_lock(mm);
+#endif
 	__vma_link_rb(mm, vma, rb_link, rb_parent);
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	mm_tree_unlock(mm);
+#endif
 }
 
 static void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
@@ -576,9 +585,17 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	prev->vm_next = next;
 	if (next)
 		next->vm_prev = prev;
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	mm_tree_lock(mm);
+#endif
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	// amdragon: XXX The mmap_cache is also protected by the tree
+	// lock.  For lock-free we'll need to fix that for real.
+	mm_tree_unlock(mm);
+#endif
 }
 
 /*
@@ -2037,6 +2054,9 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	BUG_ON(!mm_pf_is_locked(mm));
 	insertion_point = (prev ? &prev->vm_next : &mm->mmap);
 	vma->vm_prev = NULL;
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	mm_tree_lock(mm);
+#endif
 	do {
 		vma->vm_unlinked = 1;
 		rb_erase(&vma->vm_rb, &mm->mm_rb);
@@ -2054,6 +2074,10 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 		addr = vma ?  vma->vm_start : mm->mmap_base;
 	mm->unmap_area(mm, addr);
 	mm->mmap_cache = NULL;		/* Kill the cache. */
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	// Have to release after we clear the mmap_cache
+	mm_tree_unlock(mm);
+#endif
 }
 
 /*

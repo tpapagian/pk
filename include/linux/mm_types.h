@@ -257,6 +257,10 @@ struct mm_struct {
 	struct rw_semaphore pf_sem;
 	bool pf_sem_locked;			/* pf_sem held for write */
 #endif
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	/* amdragon: tree_sem protects mm_rb and mmap_cache. */
+	struct rw_semaphore tree_sem;
+#endif
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
 
 	struct list_head mmlist;		/* List of maybe swapped mm's.	These are globally strung

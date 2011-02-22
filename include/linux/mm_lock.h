@@ -114,6 +114,9 @@ mm_lock_init(struct mm_struct *mm)
 	init_rwsem(&mm->pf_sem);
 	mm->pf_sem_locked = 0;
 #endif
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	init_rwsem(&mm->tree_sem);
+#endif
 }
 
 static inline int
@@ -154,14 +157,49 @@ mm_nest_spin_lock(spinlock_t *s, struct mm_struct *mm)
 	spin_lock_nest_lock(s, &mm->mmap_sem);
 }
 
-#ifdef CONFIG_AMDRAGON_SPLIT_PFLOCK
-#define INIT_MM_LOCK(mmstruct)			\
-	.mmap_sem	= __RWSEM_INITIALIZER(mmstruct.mmap_sem),	\
-	.pf_sem		= __RWSEM_INITIALIZER(mmstruct.pf_sem)
-#else
-#define INIT_MM_LOCK(mmstruct)			\
-	.mmap_sem	= __RWSEM_INITIALIZER(mmstruct.mmap_sem)
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+static inline void
+mm_tree_lock(struct mm_struct *mm)
+{
+	down_write(&mm->tree_sem);
+}
+
+static inline void
+mm_tree_unlock(struct mm_struct *mm)
+{
+	up_write(&mm->tree_sem);
+}
+
+static inline void
+mm_tree_lock_read(struct mm_struct *mm)
+{
+	down_read(&mm->tree_sem);
+}
+
+static inline void
+mm_tree_unlock_read(struct mm_struct *mm)
+{
+	up_read(&mm->tree_sem);
+}
 #endif
+
+#ifdef CONFIG_AMDRAGON_SPLIT_PFLOCK
+#define __INIT_MM_LOCK_PF(mmstruct)		\
+	, .pf_sem		= __RWSEM_INITIALIZER(mmstruct.pf_sem)
+#else
+#define __INIT_MM_LOCK_PF(mmstruct)
+#endif
+
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+#define __INIT_MM_LOCK_TREE(mmstruct)		\
+	, .tree_sem		= __RWSEM_INITIALIZER(mmstruct.pf_sem)
+#else
+#define __INIT_MM_LOCK_TREE(mmstruct)
+#endif
+
+#define INIT_MM_LOCK(mmstruct)			\
+	.mmap_sem	= __RWSEM_INITIALIZER(mmstruct.mmap_sem) \
+		__INIT_MM_LOCK_PF(mmstruct) __INIT_MM_LOCK_TREE(mmstruct)
 
 /* _locked variants */
 
