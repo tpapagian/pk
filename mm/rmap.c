@@ -806,7 +806,9 @@ void page_move_anon_rmap(struct page *page,
  * @exclusive:	the page is exclusively owned by the current process
  */
 static void __page_set_anon_rmap(struct page *page,
-	struct vm_area_struct *vma, unsigned long address, int exclusive)
+	struct vm_area_struct *vma, unsigned long address,
+	unsigned long start, unsigned long pgoff,
+	int exclusive)
 {
 	struct anon_vma *anon_vma = vma->anon_vma;
 
@@ -825,7 +827,7 @@ static void __page_set_anon_rmap(struct page *page,
 
 	anon_vma = (void *) anon_vma + PAGE_MAPPING_ANON;
 	page->mapping = (struct address_space *) anon_vma;
-	page->index = linear_page_index(vma, address);
+	page->index = __linear_page_index(vma, address, start, pgoff);
 }
 
 /**
@@ -889,7 +891,8 @@ void do_page_add_anon_rmap(struct page *page,
 	VM_BUG_ON(!PageLocked(page));
 	VM_BUG_ON(address < vma->vm_start || address >= vma->vm_end);
 	if (first)
-		__page_set_anon_rmap(page, vma, address, exclusive);
+		__page_set_anon_rmap(page, vma, address,
+				     vma->vm_start, vma->vm_end, exclusive);
 	else
 		__page_check_anon_rmap(page, vma, address);
 }
@@ -907,11 +910,24 @@ void do_page_add_anon_rmap(struct page *page,
 void page_add_new_anon_rmap(struct page *page,
 	struct vm_area_struct *vma, unsigned long address)
 {
-	VM_BUG_ON(address < vma->vm_start || address >= vma->vm_end);
+	__page_add_new_anon_rmap(page, vma, address,
+				 vma->vm_start, vma->vm_end, vma->vm_pgoff);
+}
+
+/**
+ * __page_add_new_anon_rmap - variant for when the VMA is being used
+ * in an RCU read context (and thus its bounds and offset might
+ * change).
+ */
+void __page_add_new_anon_rmap(struct page *page,
+	struct vm_area_struct *vma, unsigned long address,
+	unsigned long start, unsigned long end, unsigned long pgoff)
+{
+	VM_BUG_ON(address < start || address >= end);
 	SetPageSwapBacked(page);
 	atomic_set(&page->_mapcount, 0); /* increment count (starts at -1) */
 	__inc_zone_page_state(page, NR_ANON_PAGES);
-	__page_set_anon_rmap(page, vma, address, 1);
+	__page_set_anon_rmap(page, vma, address, start, pgoff, 1);
 	if (page_evictable(page, vma))
 		lru_cache_add_lru(page, LRU_ACTIVE_ANON);
 	else

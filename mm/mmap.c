@@ -694,12 +694,16 @@ again:			remove_next = 1 + (end > next->vm_end);
 			vma_prio_tree_remove(next, root);
 	}
 
+	write_seqcount_begin(&vma->vm_bound_seq);
 	vma->vm_start = start;
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
+	write_seqcount_end(&vma->vm_bound_seq);
 	if (adjust_next) {
+		write_seqcount_begin(&next->vm_bound_seq);
 		next->vm_start += adjust_next << PAGE_SHIFT;
 		next->vm_pgoff += adjust_next;
+		write_seqcount_end(&next->vm_bound_seq);
 	}
 
 	if (root) {

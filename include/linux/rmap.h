@@ -166,6 +166,9 @@ void page_add_anon_rmap(struct page *, struct vm_area_struct *, unsigned long);
 void do_page_add_anon_rmap(struct page *, struct vm_area_struct *,
 			   unsigned long, int);
 void page_add_new_anon_rmap(struct page *, struct vm_area_struct *, unsigned long);
+void __page_add_new_anon_rmap(struct page *page,
+	struct vm_area_struct *vma, unsigned long address,
+	unsigned long start, unsigned long end, unsigned long pgoff);
 void page_add_file_rmap(struct page *);
 void page_remove_rmap(struct page *);
 
