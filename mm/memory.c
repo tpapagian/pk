@@ -3282,6 +3282,8 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	spinlock_t *ptl;
 	pte_t entry;
 	int ret = 0, r;
+	unsigned seq;
+	unsigned long start, end, pgoff;
 
 	pte_unmap(page_table);
 
@@ -3334,13 +3336,24 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (!pte_none(*page_table))
 		goto release;
 
+	// amdragon: Get a consistent view of vm_start, vm_end, and
+	// vm_pgoff.  We need this for page_add_new_anon_rmap and,
+	// further, that needs to be consistent with our unmap race
+	// check.
+	do {
+		seq = read_seqcount_begin(&vma->vm_bound_seq);
+		start = vma->vm_start;
+		end = vma->vm_end;
+		pgoff = vma->vm_pgoff;
+	} while (read_seqcount_retry(&vma->vm_bound_seq, seq));
+
 	// amdragon: Check that what we're doing is still sane and
 	// that we haven't raced with munmap or a shrinking
 	// vma_adjust.  Note that this is safe to check, since we hold
 	// the PTE lock and any unmap or VMA shrink must zap PTE's,
 	// which will also hold the PTE lock (see zap_pte_range).
 	// Races with VMA expansions are not an issue.
-	if (vma->vm_unlinked || address < vma->vm_start || address >= vma->vm_end) {
+	if (vma->vm_unlinked || address < start || address >= end) {
 		AMDRAGON_LF_STAT_INC(unmap_races);
 		BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
 		// Have to retry.  This time we'll do it with the tree
@@ -3350,7 +3363,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	}
 
 	inc_mm_counter_fast(mm, MM_ANONPAGES);
-	page_add_new_anon_rmap(page, vma, address);
+	__page_add_new_anon_rmap(page, vma, address, start, end, pgoff);
 setpte:
 	set_pte_at(mm, address, page_table, entry);
 

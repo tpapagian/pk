@@ -285,15 +285,23 @@ static inline loff_t page_offset(struct page *page)
 extern pgoff_t linear_hugepage_index(struct vm_area_struct *vma,
 				     unsigned long address);
 
-static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
-					unsigned long address)
+static inline pgoff_t __linear_page_index(struct vm_area_struct *vma,
+					  unsigned long address,
+					  unsigned long vm_start,
+					  unsigned long vm_pgoff)
 {
 	pgoff_t pgoff;
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		return linear_hugepage_index(vma, address);
-	pgoff = (address - vma->vm_start) >> PAGE_SHIFT;
-	pgoff += vma->vm_pgoff;
+	pgoff = (address - vm_start) >> PAGE_SHIFT;
+	pgoff += vm_pgoff;
 	return pgoff >> (PAGE_CACHE_SHIFT - PAGE_SHIFT);
+}
+
+static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
+					unsigned long address)
+{
+	return __linear_page_index(vma, address, vma->vm_start, vma->vm_pgoff);
 }
 
 extern void __lock_page(struct page *page);

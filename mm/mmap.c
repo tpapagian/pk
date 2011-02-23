@@ -711,12 +711,16 @@ again:			remove_next = 1 + (end > next->vm_end);
 			vma_prio_tree_remove(next, root);
 	}
 
+	write_seqcount_begin(&vma->vm_bound_seq);
 	vma->vm_start = start;
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
+	write_seqcount_end(&vma->vm_bound_seq);
 	if (adjust_next) {
+		write_seqcount_begin(&next->vm_bound_seq);
 		next->vm_start += adjust_next << PAGE_SHIFT;
 		next->vm_pgoff += adjust_next;
+		write_seqcount_end(&next->vm_bound_seq);
 	}
 
 	if (root) {
@@ -2850,9 +2854,10 @@ int mm_lf_stat_unmap_races;
 int mm_lf_stat_anon_vma_retries;
 int mm_lf_stat_stack_guard_retries;
 int mm_lf_stat_type_retries;
-int mm_lf_stat_expand_stack_retries;
+int mm_lf_stat_oob_retries;
 int mm_lf_stat_mmap_cache_hit;
 int mm_lf_stat_reuse_vma;
+int mm_lf_stat_reuse_vma_try_expand;
 int mm_lf_stat_reuse_vma_fail;
 
 static struct ctl_table lf_stats_table[] = {
@@ -2885,9 +2890,9 @@ static struct ctl_table lf_stats_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
-		.procname	= "expand_stack_retries",
-		.data		= &mm_lf_stat_expand_stack_retries,
-		.maxlen		= sizeof(mm_lf_stat_expand_stack_retries),
+		.procname	= "oob_retries",
+		.data		= &mm_lf_stat_oob_retries,
+		.maxlen		= sizeof(mm_lf_stat_oob_retries),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},
@@ -2902,6 +2907,13 @@ static struct ctl_table lf_stats_table[] = {
 		.procname	= "reuse_vma",
 		.data		= &mm_lf_stat_reuse_vma,
 		.maxlen		= sizeof(mm_lf_stat_reuse_vma),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "reuse_vma_try_expand",
+		.data		= &mm_lf_stat_reuse_vma_try_expand,
+		.maxlen		= sizeof(mm_lf_stat_reuse_vma_try_expand),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},
