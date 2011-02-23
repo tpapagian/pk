@@ -1119,6 +1119,17 @@ retry:
 	if (likely(vma->vm_start <= address))
 		goto good_area;
 maybe_good_area:
+	// amdragon: Either 1) the access is actually bad, 2) we need
+	// to expand the stack, or 3) we raced with a vma_adjust.  We
+	// need to grab the lock to distinguish between 1 and 3, and
+	// we need the lock anyway if it's case 2.  If it's case 1 or
+	// 2, we'll almost certainly fast path right back here.
+	if (flags & FAULT_FLAG_NO_LOCK) {
+		AMDRAGON_LF_STAT_INC(oob_retries);
+		flags |= FAULT_FLAG_KEEP_LOCK;
+		flags &= ~FAULT_FLAG_NO_LOCK;
+		goto retry;
+	}
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
 		bad_area(regs, error_code, address, flags);
 		goto done_srcu;
@@ -1134,13 +1145,6 @@ maybe_good_area:
 			bad_area(regs, error_code, address, flags);
 			goto done_srcu;
 		}
-	}
-	// amdragon: We need the lock to expand the stack.
-	if (flags & FAULT_FLAG_NO_LOCK) {
-		AMDRAGON_LF_STAT_INC(expand_stack_retries);
-		flags |= FAULT_FLAG_KEEP_LOCK;
-		flags &= ~FAULT_FLAG_NO_LOCK;
-		goto retry;
 	}
 	if (unlikely(expand_stack(vma, address))) {
 		bad_area(regs, error_code, address, flags);
