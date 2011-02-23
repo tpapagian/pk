@@ -892,7 +892,7 @@ void do_page_add_anon_rmap(struct page *page,
 	VM_BUG_ON(address < vma->vm_start || address >= vma->vm_end);
 	if (first)
 		__page_set_anon_rmap(page, vma, address,
-				     vma->vm_start, vma->vm_end, exclusive);
+				     vma->vm_start, vma->vm_pgoff, exclusive);
 	else
 		__page_check_anon_rmap(page, vma, address);
 }
