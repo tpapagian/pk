@@ -1098,7 +1098,7 @@ retry:
 			// previous VMA and cached one
 			if (!vma->vm_prev ||
 			    vma->vm_prev->vm_end <= address) {
-				AMDRAGON_LF_STAT_INC(reuse_vma);
+				AMDRAGON_LF_STAT_INC(reuse_vma_try_expand);
 				goto maybe_good_area;
 			}
 		}
