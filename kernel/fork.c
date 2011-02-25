@@ -14,7 +14,7 @@
 // If 1, use a simplified dup_mmap that inserts each VMA using the
 // generic insert_vm_struct, rather than optimizing for duplicating
 // the RB tree and prio tree linearly.
-#define AMDRAGON_SIMPLE_DUP_MMAP 1
+#define AMDRAGON_SIMPLE_DUP_MMAP 0
 
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -304,6 +304,11 @@ out:
 	return NULL;
 }
 
+#if !AMDRAGON_SIMPLE_DUP_MMAP
+void ___vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
+		    struct rb_node **rb_link, struct rb_node *rb_parent);
+#endif
+
 #ifdef CONFIG_MMU
 static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 {
@@ -425,7 +430,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		tmp->vm_prev = prev;
 		prev = tmp;
 
-		__vma_link_rb(mm, tmp, rb_link, rb_parent);
+		___vma_link_rb(mm, tmp, rb_link, rb_parent);
 		rb_link = &tmp->vm_rb.rb_right;
 		rb_parent = &tmp->vm_rb;
 
