@@ -14,7 +14,7 @@
 // If 1, use a simplified dup_mmap that inserts each VMA using the
 // generic insert_vm_struct, rather than optimizing for duplicating
 // the RB tree and prio tree linearly.
-#define AMDRAGON_SIMPLE_DUP_MMAP 0
+#define AMDRAGON_SIMPLE_DUP_MMAP 1
 
 #include <linux/slab.h>
 #include <linux/init.h>
@@ -313,7 +313,9 @@ void ___vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 {
 	struct vm_area_struct *mpnt, *tmp, *prev, **pprev;
+#if !AMDRAGON_SIMPLE_DUP_MMAP
 	struct rb_node **rb_link, *rb_parent;
+#endif
 	int retval;
 	unsigned long charge;
 	struct mempolicy *pol;
@@ -333,8 +335,10 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	mm->map_count = 0;
 	cpumask_clear(mm_cpumask(mm));
 	mm->mm_rb = RB_ROOT;
+#if !AMDRAGON_SIMPLE_DUP_MMAP
 	rb_link = &mm->mm_rb.rb_node;
 	rb_parent = NULL;
+#endif
 	pprev = &mm->mmap;
 	retval = ksm_fork(mm, oldmm);
 	if (retval)
@@ -383,6 +387,8 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 			// uses the slower vma_prio_tree_insert.
 			get_file(file);
 #else
+			// amdragon: This code mimics vma_link and
+			// __vma_link_file.
 			struct inode *inode = file->f_path.dentry->d_inode;
 			struct address_space *mapping = file->f_mapping;
 
@@ -416,9 +422,16 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 		tmp->anon_vma = NULL;
 		// amdragon XXX Does it have to be inserted in the
 		// prio tree before reset_vma_resv_huge_pages?
-		insert_vm_struct(mm, tmp);
-		// ?  Set by vma_link from file->f_mapping->truncate_count
-		tmp->vm_truncate_count = mpnt->vm_truncate_count;
+		BUG_ON(insert_vm_struct(mm, tmp));
+		// insert_vm_struct overwrites vm_pgoff.  I don't
+		// understand why what it overwrites it with is wrong,
+		// but get the pgoff from the original VMA back.
+		tmp->vm_pgoff = mpnt->vm_pgoff;
+		// ?  Set by vma_link from
+		// file->f_mapping->truncate_count, but the original
+		// code copies it from the original VMA.
+		if (file)
+			tmp->vm_truncate_count = mpnt->vm_truncate_count;
 		if (anon_vma_fork(tmp, mpnt))
 			goto fail_nomem_anon_vma_fork;
 #else
@@ -1797,9 +1810,4 @@ int unshare_files(struct files_struct **displaced)
 		*displaced = NULL;
 		return error;
 	}
-	*displaced = task->files;
-	task_lock(task);
-	task->files = copy;
-	task_unlock(task);
-	return 0;
-}
+	*displaced = task->files
