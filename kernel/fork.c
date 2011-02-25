@@ -312,8 +312,9 @@ void ___vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 #ifdef CONFIG_MMU
 static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 {
-	struct vm_area_struct *mpnt, *tmp, *prev, **pprev;
+	struct vm_area_struct *mpnt, *tmp;
 #if !AMDRAGON_SIMPLE_DUP_MMAP
+	struct vm_area_struct *prev, **pprev;
 	struct rb_node **rb_link, *rb_parent;
 #endif
 	int retval;
@@ -338,13 +339,15 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 #if !AMDRAGON_SIMPLE_DUP_MMAP
 	rb_link = &mm->mm_rb.rb_node;
 	rb_parent = NULL;
-#endif
 	pprev = &mm->mmap;
+#endif
 	retval = ksm_fork(mm, oldmm);
 	if (retval)
 		goto out;
 
+#if !AMDRAGON_SIMPLE_DUP_MMAP
 	prev = NULL;
+#endif
 	for (mpnt = oldmm->mmap; mpnt; mpnt = mpnt->vm_next) {
 		struct file *file;
 
@@ -1810,4 +1813,9 @@ int unshare_files(struct files_struct **displaced)
 		*displaced = NULL;
 		return error;
 	}
-	*displaced = task->files
+	*displaced = task->files;
+	task_lock(task);
+	task->files = copy;
+	task_unlock(task);
+	return 0;
+}
