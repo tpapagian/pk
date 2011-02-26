@@ -77,6 +77,9 @@
 #include <asm/irq_regs.h>
 #include <asm/mutex.h>
 
+extern void mtrace_start_do_irq(unsigned long pc);
+extern void mtrace_end_do_irq(void);
+
 #include "sched_cpupri.h"
 #include "workqueue_sched.h"
 #include "sched_autogroup.h"
@@ -3945,6 +3948,7 @@ asmlinkage void __sched schedule(void)
 
 need_resched:
 	preempt_disable();
+	mtrace_start_do_irq((unsigned long)&schedule);
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);
 	rcu_note_context_switch(cpu);
@@ -4001,6 +4005,7 @@ need_resched_nonpreemptible:
 		rq->curr = next;
 		++*switch_count;
 
+		mtrace_end_do_irq();
 		context_switch(rq, prev, next); /* unlocks the rq */
 		/*
 		 * The context switch have flipped the stack from under us
@@ -4010,8 +4015,10 @@ need_resched_nonpreemptible:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
-	} else
+	} else {
+		mtrace_end_do_irq();
 		raw_spin_unlock_irq(&rq->lock);
+	}
 
 	post_schedule(rq);
 
