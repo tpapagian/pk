@@ -314,6 +314,14 @@ struct mm_struct {
 	atomic_t oom_disable_count;
 };
 
+#define INIT_MM_ROOT	.mm_rb = RB_ROOT
+
+static inline void
+mm_init_root(struct mm_struct *mm)
+{
+	mm->mm_rb = RB_ROOT;
+}
+
 /* Future-safe accessor for struct mm_struct's cpu_vm_mask. */
 #define mm_cpumask(mm) (&(mm)->cpu_vm_mask)
 

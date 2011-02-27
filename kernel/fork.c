@@ -335,7 +335,7 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	mm->cached_hole_size = ~0UL;
 	mm->map_count = 0;
 	cpumask_clear(mm_cpumask(mm));
-	mm->mm_rb = RB_ROOT;
+	mm_init_root(mm);
 #if !AMDRAGON_SIMPLE_DUP_MMAP
 	rb_link = &mm->mm_rb.rb_node;
 	rb_parent = NULL;
