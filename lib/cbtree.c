@@ -345,21 +345,24 @@ deleteMin(node_t *node, node_t **minOut)
 }
 
 static node_t *
-delete(node_t *node, k_t key)
+delete(node_t *node, k_t key, void **deleted)
 {
         node_t *min, *left, *right;
 
-        if (!node)
+        if (!node) {
+                *deleted = NULL;
                 return NULL;
+        }
 
         left = GET(node->left);
         right = GET(node->right);
         if (key < node->kv.key)
-                return mkBalanced(node, delete(left, key), right, 0, INPLACE);
+                return mkBalanced(node, delete(left, key, deleted), right, 0, INPLACE);
         if (key > node->kv.key)
-                return mkBalanced(node, left, delete(right, key), 1, INPLACE);
+                return mkBalanced(node, left, delete(right, key, deleted), 1, INPLACE);
 
         // We found our node to delete
+        *deleted = node->kv.value;
         TreeBBFreeNode(node);
         if (!left)
                 return right;
@@ -374,11 +377,13 @@ delete(node_t *node, k_t key)
         return mkBalanced(min, left, right, 1, false);
 }
 
-void
+void *
 TreeBB_Delete(struct cb_root *tree, uintptr_t key)
 {
-        node_t *nroot = delete(tree->root, key);
+        void *deleted;
+        node_t *nroot = delete(tree->root, key, &deleted);
         rcu_assign_pointer(tree->root, nroot);
+        return deleted;
 }
 
 struct cb_kv *
@@ -553,8 +558,8 @@ main(int argc, char **argv)
 
         for (i = 0; i < DEL; ++i) {
                 printf("--- %d\n", keys[i]);
-                TreeBB_Delete(&tree, keys[i]);
-                TreeBB_Delete(&tree, keys[i]);
+                assert(TreeBB_Delete(&tree, keys[i]) == (void*)keys[i]);
+                assert(TreeBB_Delete(&tree, keys[i]) == NULL);
         }
         int deleteFrees = totalFreed;
         totalFreed = 0;
