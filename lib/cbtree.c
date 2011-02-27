@@ -9,6 +9,7 @@
 #else
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,7 +20,22 @@ struct cb_root
         struct TreeBB_Node *root;
 };
 
+struct cb_kv
+{
+	uintptr_t key;
+	void *value;
+};
+
 #define smp_wmb() __asm__ __volatile__("": : :"memory")
+
+#define rcu_assign_pointer(p, v) \
+	({ \
+		if (!__builtin_constant_p(v) || \
+		    ((v) != NULL)) \
+			smp_wmb(); \
+		(p) = (typeof(*v)*)(v); \
+	})
+
 #endif
 
 #define TEST 1
@@ -37,11 +53,7 @@ enum { INPLACE = 1 };
 
 typedef uintptr_t k_t;
 
-typedef struct
-{
-        k_t key;
-        void *value;
-} kv_t;
+typedef struct cb_kv kv_t;
 
 struct TreeBB_Node
 {
@@ -57,6 +69,12 @@ struct TreeBB_Node
 };
 
 typedef struct TreeBB_Node node_t;
+
+static inline node_t*
+nodeOf(kv_t *kv)
+{
+        return (node_t*)((char*)kv - offsetof(node_t, kv));
+}
 
 /******************************************************************
  * User/kernel adaptors
@@ -304,9 +322,8 @@ void
 TreeBB_Insert(struct cb_root *tree, uintptr_t key, void *value)
 {
         kv_t kv = {key, value};
-	// XXX rcu_assign_pointer
-	smp_wmb();
-        tree->root = insert(tree->root, &kv);
+        node_t *nroot = insert(tree->root, &kv);
+        rcu_assign_pointer(tree->root, nroot);
 }
 
 static node_t *
@@ -330,10 +347,13 @@ deleteMin(node_t *node, node_t **minOut)
 static node_t *
 delete(node_t *node, k_t key)
 {
-        node_t *min;
+        node_t *min, *left, *right;
 
-        // XXX Will crash if value isn't in the tree
-        node_t *left = GET(node->left), *right = GET(node->right);
+        if (!node)
+                return NULL;
+
+        left = GET(node->left);
+        right = GET(node->right);
         if (key < node->kv.key)
                 return mkBalanced(node, delete(left, key), right, 0, INPLACE);
         if (key > node->kv.key)
@@ -350,34 +370,69 @@ delete(node_t *node, k_t key)
         // min element is still linked in to the tree below us.  Thus,
         // we need to create a new min element here, which will be
         // atomically swapped in to the tree by our parent (along with
-        // the new subtree where the min element has been removed).f
+        // the new subtree where the min element has been removed).
         return mkBalanced(min, left, right, 1, false);
 }
 
 void
 TreeBB_Delete(struct cb_root *tree, uintptr_t key)
 {
-	// XXX rcu_assign_pointer
-	smp_wmb();
-        tree->root = delete(tree->root, key);
+        node_t *nroot = delete(tree->root, key);
+        rcu_assign_pointer(tree->root, nroot);
 }
 
-// XXX Need a lookup
-bool
-TreeBB_Contains(struct cb_root *tree, uintptr_t key)
+struct cb_kv *
+TreeBB_Find(struct cb_root *tree, uintptr_t needle)
 {
         node_t *node;
 
         node = tree->root;
         while (node) {
-                if (node->kv.key == key)
+                if (node->kv.key == needle)
                         break;
-                if (node->kv.key < key)
+                else if (node->kv.key > needle)
                         node = GET(node->left);
                 else
                         node = GET(node->right);
         }
-        return !!node;
+        return node ? &node->kv : NULL;
+}
+
+struct cb_kv *
+TreeBB_FindGT(struct cb_root *tree, uintptr_t needle)
+{
+        node_t *node = tree->root;
+        node_t *res = NULL;
+
+        while (node) {
+                if (node->kv.key > needle) {
+                        res = node;
+                        node = GET(node->left);
+                } else {
+                        node = GET(node->right);
+                }
+        }
+        return res ? &res->kv : NULL;
+}
+
+struct cb_kv *
+TreeBB_FindLE(struct cb_root *tree, uintptr_t needle)
+{
+        node_t *node = tree->root;
+        node_t *res = NULL;
+
+        while (node) {
+                if (node->kv.key == needle)
+                        return &node->kv;
+
+                if (node->kv.key > needle) {
+                        node = GET(node->left);
+                } else {
+                        res = node;
+                        node = GET(node->right);
+                }
+        }
+        return res ? &res->kv : NULL;
 }
 
 /******************************************************************
@@ -490,7 +545,7 @@ main(int argc, char **argv)
         for (i = 0; i < LEN; ++i) {
                 k_t key = rand();
                 printf("+++ %d\n", key);
-                TreeBB_Insert(&tree, key, 0);
+                TreeBB_Insert(&tree, key, (void*)key);
                 keys[i] = key;
         }
         int insertFrees = totalFreed;
@@ -499,6 +554,7 @@ main(int argc, char **argv)
         for (i = 0; i < DEL; ++i) {
                 printf("--- %d\n", keys[i]);
                 TreeBB_Delete(&tree, keys[i]);
+                TreeBB_Delete(&tree, keys[i]);
         }
         int deleteFrees = totalFreed;
         totalFreed = 0;
@@ -506,8 +562,28 @@ main(int argc, char **argv)
         qsort(keys+DEL, LEN-DEL, sizeof keys[0], cmpKey);
         assert(nodeSize(tree.root) == LEN-DEL);
         TreeBB_Check(&tree, keys+DEL);
+
+        for (i = DEL; i < LEN; ++i) {
+                void *next = i < LEN - 1 ? (void*)keys[i+1] : NULL;
+                void *this = (void*)keys[i];
+                void *prev = i > DEL ? (void*)keys[i-1] : NULL;
+
+                // XXX Assumes no two keys are consecutive
+#define V(x) ({typeof(x) __x = (x); __x ? __x->value : NULL;})
+                assert(V(TreeBB_Find(&tree, keys[i] - 1)) == NULL);
+                assert(V(TreeBB_Find(&tree, keys[i])) == this);
+                assert(V(TreeBB_Find(&tree, keys[i] + 1)) == NULL);
+                assert(V(TreeBB_FindGT(&tree, keys[i] - 1)) == this);
+                assert(V(TreeBB_FindGT(&tree, keys[i])) == next);
+                assert(V(TreeBB_FindGT(&tree, keys[i] + 1)) == next);
+                assert(V(TreeBB_FindLE(&tree, keys[i] - 1)) == prev);
+                assert(V(TreeBB_FindLE(&tree, keys[i])) == this);
+                assert(V(TreeBB_FindLE(&tree, keys[i] + 1)) == this);
+        }
+
         printf("%d freed by %d inserts, %d freed by %d deletes\n",
                insertFrees, LEN, deleteFrees, DEL);
+        return 0;
 }
 #endif  /* !__KERNEL__ */
 #endif  /* TEST */

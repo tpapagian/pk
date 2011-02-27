@@ -14,6 +14,12 @@ struct cb_root
         struct TreeBB_Node *root;
 };
 
+struct cb_kv
+{
+	uintptr_t key;
+	void *value;
+};
+
 #define CB_ROOT	(struct cb_root) { NULL, }
 
 #define CB_EMPTY_ROOT(cbroot)	(GET((cbroot)->root) == NULL)
