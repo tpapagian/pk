@@ -374,14 +374,20 @@ void validate_mm(struct mm_struct *mm)
 struct vma_insert
 {
 	struct vm_area_struct *prev, *vma;
+#ifndef CONFIG_AMDRAGON_CBTREE
 	struct rb_node **rb_link;
 	struct rb_node *rb_parent;
+#endif
 };
 
 static struct vm_area_struct *
 find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 		 struct vma_insert *insert)
 {
+#ifdef CONFIG_AMDRAGON_CBTREE
+	insert->vma = find_vma_prev(mm, addr, &insert->prev);
+	return insert->vma;
+#else
 	struct vm_area_struct * vma;
 	struct rb_node ** __rb_link, * __rb_parent, * rb_prev;
 
@@ -413,6 +419,7 @@ find_vma_prepare(struct mm_struct *mm, unsigned long addr,
 	insert->rb_link = __rb_link;
 	insert->rb_parent = __rb_parent;
 	return vma;
+#endif
 }
 
 // amdragon
@@ -420,6 +427,7 @@ static inline void
 __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vma_insert *insert)
 {
+#ifndef CONFIG_AMDRAGON_CBTREE
 	// amdragon: Sanity check against old RB-based approach, which
 	// used the RB parent as the successor when it couldn't use
 	// prev->vm_next because prev was NULL (that is, when vma was
@@ -431,6 +439,7 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 					struct vm_area_struct, vm_rb);
 		BUG_ON(insert->vma != next);
 	}
+#endif
 
 	vma->vm_prev = insert->prev;
 	if (insert->prev)
@@ -450,10 +459,16 @@ __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 static void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 		   struct vma_insert *insert)
 {
+#ifdef CONFIG_AMDRAGON_CBTREE
+	// XXX Reuse the traversal from the prepare
+	cb_insert(&mm->mm_cb, vma->vm_end, vma);
+#else
 	rb_link_node(&vma->vm_rb, insert->rb_parent, insert->rb_link);
 	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
+#endif
 }
 
+#ifndef CONFIG_AMDRAGON_CBTREE
 // amdragon: XXX This is just to make the original fork code still
 // usable for testing.
 void ___vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
@@ -462,6 +477,7 @@ void ___vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 	rb_link_node(&vma->vm_rb, rb_parent, rb_link);
 	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
 }
+#endif
 
 static void __vma_link_file(struct vm_area_struct *vma)
 {
@@ -549,7 +565,11 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	prev->vm_next = next;
 	if (next)
 		next->vm_prev = prev;
+#ifdef CONFIG_AMDRAGON_CBTREE
+	BUG_ON(cb_erase(&mm->mm_cb, vma->vm_end) != vma);
+#else
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
+#endif
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
 }
@@ -659,6 +679,17 @@ again:			remove_next = 1 + (end > next->vm_end);
 		if (adjust_next)
 			vma_prio_tree_remove(next, root);
 	}
+
+#ifdef CONFIG_AMDRAGON_CBTREE
+	// XXX This sucks
+	struct cb_kv *kv = cb_find(&mm->mm_cb, vma->vm_end);
+	BUG_ON(!kv);
+	BUG_ON(kv->value != vma);
+
+	// Modify the cbtree node key, since, unlike the rbtree, the
+	// cbtree keeps its own copy of the key.
+	kv->key = end;
+#endif
 
 	vma->vm_start = start;
 	vma->vm_end = end;
@@ -1654,6 +1685,11 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 		/* (Cache hit rate is typically around 35%.) */
 		vma = mm->mmap_cache;
 		if (!(vma && vma->vm_end > addr && vma->vm_start <= addr)) {
+#ifdef CONFIG_AMDRAGON_CBTREE
+			struct cb_kv *kv = cb_find_gt(&mm->mm_cb, addr);
+			if (kv)
+				vma = kv->value;
+#else
 			struct rb_node * rb_node;
 
 			rb_node = mm->mm_rb.rb_node;
@@ -1673,6 +1709,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 				} else
 					rb_node = rb_node->rb_right;
 			}
+#endif
 			if (vma)
 				mm->mmap_cache = vma;
 		}
@@ -1691,12 +1728,31 @@ EXPORT_SYMBOL(find_vma);
 // We could use an iterator that's smart about single read.
 // Curiously, such an iterator must be unidirectional in order to use
 // only O(log n) state.
+//
+// Just find the end <= addr and follow the vm_next link.  I think
+// that's what the RB code does, albeit very confusingly.
 
 /* Same as find_vma, but also return a pointer to the previous VMA in *pprev. */
 struct vm_area_struct *
 find_vma_prev(struct mm_struct *mm, unsigned long addr,
 			struct vm_area_struct **pprev)
 {
+#ifdef CONFIG_AMDRAGON_CBTREE
+	struct cb_kv *kv;
+	if (!mm) {
+		*pprev = NULL;
+		return NULL;
+	}
+	kv = cb_find_le(&mm->mm_cb, addr);
+	if (kv) {
+		struct vm_area_struct *prev = kv->value;
+		*pprev = prev;
+		return prev->vm_next;
+	} else {
+		*pprev = NULL;
+		return mm->mmap;
+	}
+#else
 	struct vm_area_struct *vma = NULL, *prev = NULL;
 	struct rb_node *rb_node;
 	if (!mm)
@@ -1725,6 +1781,7 @@ find_vma_prev(struct mm_struct *mm, unsigned long addr,
 out:
 	*pprev = prev;
 	return prev ? prev->vm_next : vma;
+#endif
 }
 
 /*
@@ -1996,7 +2053,13 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	insertion_point = (prev ? &prev->vm_next : &mm->mmap);
 	vma->vm_prev = NULL;
 	do {
+#ifdef CONFIG_AMDRAGON_CBTREE
+		// XXX This sucks.  We'll wind up doing about twice
+		// the traversal work that we need to.
+		BUG_ON(cb_erase(&mm->mm_cb, vma->vm_end) != vma);
+#else
 		rb_erase(&vma->vm_rb, &mm->mm_rb);
+#endif
 		mm->map_count--;
 		tail_vma = vma;
 		vma = vma->vm_next;

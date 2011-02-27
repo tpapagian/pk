@@ -309,3 +309,7 @@ config NEED_PER_CPU_KM
 	depends on !SMP
 	bool
 	default y
+
+config AMDRAGON_CBTREE
+	bool "Use a concurrent tree instead of a red-black tree for VMA's"
+	default y

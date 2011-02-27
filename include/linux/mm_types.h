@@ -12,6 +12,7 @@
 #include <linux/completion.h>
 #include <linux/cpumask.h>
 #include <linux/page-debug-flags.h>
+#include <linux/cbtree.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
 
@@ -139,7 +140,9 @@ struct vm_area_struct {
 	pgprot_t vm_page_prot;		/* Access permissions of this VMA. */
 	unsigned long vm_flags;		/* Flags, see mm.h. */
 
+#ifndef CONFIG_AMDRAGON_CBTREE
 	struct rb_node vm_rb;
+#endif
 
 	/*
 	 * For areas with an address space and backing store,
@@ -221,7 +224,11 @@ struct mm_rss_stat {
 
 struct mm_struct {
 	struct vm_area_struct * mmap;		/* list of VMAs */
+#ifdef CONFIG_AMDRAGON_CBTREE
+	struct cb_root mm_cb;
+#else
 	struct rb_root mm_rb;
+#endif
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
 #ifdef CONFIG_MMU
 	unsigned long (*get_unmapped_area) (struct file *filp,
@@ -314,6 +321,15 @@ struct mm_struct {
 	atomic_t oom_disable_count;
 };
 
+#ifdef CONFIG_AMDRAGON_CBTREE
+#define INIT_MM_ROOT	.mm_cb = CB_ROOT
+
+static inline void
+mm_init_root(struct mm_struct *mm)
+{
+	mm->mm_cb = CB_ROOT;
+}
+#else
 #define INIT_MM_ROOT	.mm_rb = RB_ROOT
 
 static inline void
@@ -321,6 +337,7 @@ mm_init_root(struct mm_struct *mm)
 {
 	mm->mm_rb = RB_ROOT;
 }
+#endif
 
 /* Future-safe accessor for struct mm_struct's cpu_vm_mask. */
 #define mm_cpumask(mm) (&(mm)->cpu_vm_mask)
