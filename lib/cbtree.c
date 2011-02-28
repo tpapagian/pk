@@ -440,6 +440,22 @@ TreeBB_FindLE(struct cb_root *tree, uintptr_t needle)
         return res ? &res->kv : NULL;
 }
 
+static void
+foreach(node_t *node, void (*cb)(struct cb_kv *))
+{
+        if (!node)
+                return;
+        foreach(GET(node->left), cb);
+        cb(&node->kv);
+        foreach(GET(node->right), cb);
+}
+
+void
+TreeBB_ForEach(struct cb_root *tree, void (*cb)(struct cb_kv *))
+{
+        foreach(tree->root, cb);
+}
+
 /******************************************************************
  * Tree debugging
  */

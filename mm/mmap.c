@@ -433,6 +433,34 @@ void validate_mm(struct mm_struct *mm)
 #define validate_mm(mm) do { } while (0)
 #endif
 
+static void print_vma(struct vm_area_struct *vma)
+{
+	if (!vma) {
+		printk("VMA (null)\n");
+		return;
+	}
+	printk("VMA [%lx, %lx)+%lx %p <- %p -> %p anon_vma %p vm_file %p flags %lx%s\n",
+	       vma->vm_start, vma->vm_end, vma->vm_pgoff,
+	       vma->vm_prev, vma, vma->vm_next,
+	       vma->anon_vma, vma->vm_file,
+	       vma->vm_flags, vma->vm_unlinked ? " UNLINKED" : "");
+}
+
+#ifdef CONFIG_AMDRAGON_CBTREE
+static void print_cb_vma(struct cb_kv *kv)
+{
+	printk("(%lx) ", kv->key);
+	print_vma(kv->value);
+}
+
+__attribute__((__used__))
+static void show_cb_vma(struct mm_struct *mm)
+{
+	void TreeBB_ForEach(struct cb_root *tree, void (*cb)(struct cb_kv *));
+	TreeBB_ForEach(&mm->mm_cb, print_cb_vma);
+}
+#endif
+
 // amdragon
 //
 // This prepares an insertion, but doesn't actually perform it.  After
