@@ -317,3 +317,17 @@ config AMDRAGON_SPLIT_PFLOCK
 config AMDRAGON_SPLIT_TREE_LOCK
 	bool "Protect the VMA tree with a fine-grained lock"
 	default n
+
+config AMDRAGON_MMAP_CACHE_RACE
+	bool
+	default n
+
+config AMDRAGON_PICKY_TREE_LOCK
+	bool "Use an obsessively fine-grined tree lock that simulates cbtree behavior"
+	depends on AMDRAGON_SPLIT_TREE_LOCK
+	default n
+	select AMDRAGON_MMAP_CACHE_RACE
+	help
+	  In this mode, the tree lock is never batched and does not
+	  protect the mmap_cache.  This also enabled mmap_cache race
+	  avoidance.

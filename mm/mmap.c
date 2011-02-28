@@ -266,6 +266,8 @@ static void mm_free_vma_stats_show(unsigned long dummy)
 }
 #endif
 
+static void free_vma_list(struct vm_area_struct *vma);
+
 static int mm_free_vma_thread(void *dummy)
 {
 	while (1) {
@@ -290,7 +292,15 @@ static int mm_free_vma_thread(void *dummy)
 			do {
 				struct vm_area_struct *next = vma->vm_next;
 				BUG_ON(!vma->vm_unlinked);
-				kmem_cache_free(vm_area_cachep, vma);
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+				if (vma->vm_delay_free) {
+					vma->vm_delay_free = 0;
+					vma->vm_next = NULL;
+					// XXX Okay to wake self up?
+					free_vma_list(vma);
+				} else
+#endif
+					kmem_cache_free(vm_area_cachep, vma);
 				vma = next;
 			} while (vma);
 		} while (head);
@@ -589,11 +599,12 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	mm_tree_lock(mm);
 #endif
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
+#ifdef CONFIG_AMDRAGON_PICKY_TREE_LOCK
+	mm_tree_unlock(mm);
+#endif
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
-#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
-	// amdragon: XXX The mmap_cache is also protected by the tree
-	// lock.  For lock-free we'll need to fix that for real.
+#if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
 	mm_tree_unlock(mm);
 #endif
 }
@@ -1724,6 +1735,27 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 		/* Check the cache first. */
 		/* (Cache hit rate is typically around 35%.) */
 		vma = mm->mmap_cache;
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+		if (vma && vma->vm_unlinked) {
+			// mmap_cache race: A stale VMA was left in
+			// the mmap_cache.  Why is it safe to even
+			// dereference this VMA?  The cache can only
+			// get filled with a stale VMA in a lock-less
+			// find_vma call, which must detect the unmap
+			// race and retry, at which point it will
+			// detect the stale cache, wipe it, and delay
+			// the free by one SRCU epoch.  Thus, the VMA
+			// in the mmap_cache is always safe to read,
+			// even if it's been freed.  We still need to
+			// check it here because the mmap_sem could
+			// have changed hands before a concurrent page
+			// fault figured out that the cache was stale.
+			AMDRAGON_LF_STAT_INC(mmap_cache_find_vma_shootdowns);
+			vma->vm_delay_free = 1;
+			mm->mmap_cache = NULL;
+			vma = NULL;
+		}
+#endif
 		if (!(vma && vma->vm_end > addr && vma->vm_start <= addr)) {
 			struct rb_node * rb_node;
 
@@ -2058,12 +2090,18 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	BUG_ON(!mm_pf_is_locked(mm));
 	insertion_point = (prev ? &prev->vm_next : &mm->mmap);
 	vma->vm_prev = NULL;
-#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+#if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
 	mm_tree_lock(mm);
 #endif
 	do {
 		vma->vm_unlinked = 1;
+#ifdef CONFIG_AMDRAGON_PICKY_TREE_LOCK
+		mm_tree_lock(mm);
+#endif
 		rb_erase(&vma->vm_rb, &mm->mm_rb);
+#ifdef CONFIG_AMDRAGON_PICKY_TREE_LOCK
+		mm_tree_unlock(mm);
+#endif
 		mm->map_count--;
 		tail_vma = vma;
 		vma = vma->vm_next;
@@ -2078,7 +2116,7 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 		addr = vma ?  vma->vm_start : mm->mmap_base;
 	mm->unmap_area(mm, addr);
 	mm->mmap_cache = NULL;		/* Kill the cache. */
-#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+#if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
 	// Have to release after we clear the mmap_cache
 	mm_tree_unlock(mm);
 #endif
@@ -2859,6 +2897,10 @@ int mm_lf_stat_mmap_cache_hit;
 int mm_lf_stat_reuse_vma;
 int mm_lf_stat_reuse_vma_try_expand;
 int mm_lf_stat_reuse_vma_fail;
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+int mm_lf_stat_mmap_cache_pf_shootdowns;
+int mm_lf_stat_mmap_cache_find_vma_shootdowns;
+#endif
 
 static struct ctl_table lf_stats_table[] = {
 	{
@@ -2924,6 +2966,22 @@ static struct ctl_table lf_stats_table[] = {
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+	{
+		.procname	= "mmap_cache_pf_shootdowns",
+		.data		= &mm_lf_stat_mmap_cache_pf_shootdowns,
+		.maxlen		= sizeof(mm_lf_stat_mmap_cache_pf_shootdowns),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "mmap_cache_find_vma_shootdowns",
+		.data		= &mm_lf_stat_mmap_cache_find_vma_shootdowns,
+		.maxlen		= sizeof(mm_lf_stat_mmap_cache_find_vma_shootdowns),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{ }
 };
 

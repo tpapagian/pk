@@ -1096,6 +1096,19 @@ retry:
 	// closely related to the mmap_cache check in find_vma, but
 	// won't be muddied by concurrent page faults.
 	if (vma) {
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+		if (vma->vm_unlinked && mm->mmap_cache == vma) {
+			// mmap_cache race: We cached a stale VMA.
+			// Since a concurrent page fault could have
+			// fetched this VMA from the cache, it must
+			// not be freed when our SRCU read section
+			// ends, but will be safe to free one epoch
+			// later.
+			AMDRAGON_LF_STAT_INC(mmap_cache_pf_shootdowns);
+			vma->vm_delay_free = 1;
+			mm->mmap_cache = NULL;
+		}
+#endif
 		if (!vma->vm_unlinked && vma->vm_end > address) {
 			// Common case: Address lies in VMA
 			if(vma->vm_start <= address) {

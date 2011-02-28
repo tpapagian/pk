@@ -147,7 +147,14 @@ struct vm_area_struct {
 	// but not yet freed.  The page fault handler checks this just
 	// before actually inserting the new PTE to detect races with
 	// munmap.
-	int vm_unlinked;
+	bool vm_unlinked;
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+	// amdragon: Set when the freeing of this individual VMA
+	// should be delayed by one more epoch.  Used to handle the
+	// race between a VMA being unlinked and being loaded into the
+	// mmap_cache.
+	bool vm_delay_free;
+#endif
 	// amdragon: Link to the head of the next VMA *list* to free.
 	struct vm_area_struct *vm_next_free_list;
 
@@ -260,7 +267,9 @@ struct mm_struct {
 	bool pf_sem_locked;			/* pf_sem held for write */
 #endif
 #ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
-	/* amdragon: tree_sem protects mm_rb and mmap_cache. */
+	/* amdragon: tree_sem protects mm_rb.  Unless
+	 * CONFIG_AMDRAGON_MMAP_CACHE_RACE is defined, it must also
+	 * protect the mmap_cache. */
 	struct rw_semaphore tree_sem;
 #endif
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
