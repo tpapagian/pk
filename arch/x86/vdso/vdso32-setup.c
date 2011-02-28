@@ -14,6 +14,7 @@
 #include <linux/string.h>
 #include <linux/elf.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/err.h>
 #include <linux/module.h>
 
@@ -320,7 +321,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	if (vdso_enabled == VDSO_DISABLED)
 		return 0;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 
 	/* Test compat mode once here, in case someone
 	   changes it via sysctl */
@@ -367,7 +368,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	if (ret)
 		current->mm->context.vdso = NULL;
 
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 
 	return ret;
 }

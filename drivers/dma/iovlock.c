@@ -28,6 +28,7 @@
 #include <linux/dmaengine.h>
 #include <linux/pagemap.h>
 #include <linux/slab.h>
+#include <linux/mm_lock.h>
 #include <net/tcp.h> /* for memcpy_toiovec */
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -95,8 +96,7 @@ struct dma_pinned_list *dma_pin_iovec_pages(struct iovec *iov, size_t len)
 		pages += page_list->nr_pages;
 
 		/* pin pages down */
-		down_read(&current->mm->mmap_sem);
-		ret = get_user_pages(
+		ret = get_user_pages_locked(
 			current,
 			current->mm,
 			(unsigned long) iov[i].iov_base,
@@ -105,7 +105,6 @@ struct dma_pinned_list *dma_pin_iovec_pages(struct iovec *iov, size_t len)
 			0,	/* force */
 			page_list->pages,
 			NULL);
-		up_read(&current->mm->mmap_sem);
 
 		if (ret != page_list->nr_pages)
 			goto unpin;

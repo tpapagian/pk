@@ -4,6 +4,7 @@
  * Subject to the GPL, v.2
  */
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/err.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
@@ -110,7 +111,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	if (!vdso_enabled)
 		return 0;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 	addr = vdso_addr(mm->start_stack, vdso_size);
 	addr = get_unmapped_area(NULL, addr, vdso_size, 0, 0);
 	if (IS_ERR_VALUE(addr)) {
@@ -131,7 +132,7 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 	}
 
 up_fail:
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	return ret;
 }
 

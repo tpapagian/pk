@@ -13,6 +13,7 @@
 #include <linux/cpumask.h>
 #include <linux/page-debug-flags.h>
 #include <linux/cbtree.h>
+#include <linux/seqlock.h>
 #include <asm/page.h>
 #include <asm/mmu.h>
 
@@ -133,6 +134,7 @@ struct vm_area_struct {
 	unsigned long vm_start;		/* Our start address within vm_mm. */
 	unsigned long vm_end;		/* The first byte after our end address
 					   within vm_mm. */
+	struct seqcount vm_bound_seq;	/* Protects vm_{start,end,pgoff} */
 
 	/* linked list of VM areas per task, sorted by address */
 	struct vm_area_struct *vm_next, *vm_prev;
@@ -143,6 +145,21 @@ struct vm_area_struct {
 #ifndef CONFIG_AMDRAGON_CBTREE
 	struct rb_node vm_rb;
 #endif
+
+	// amdragon: Set when this VMA has been removed from the tree,
+	// but not yet freed.  The page fault handler checks this just
+	// before actually inserting the new PTE to detect races with
+	// munmap.
+	bool vm_unlinked;
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+	// amdragon: Set when the freeing of this individual VMA
+	// should be delayed by one more epoch.  Used to handle the
+	// race between a VMA being unlinked and being loaded into the
+	// mmap_cache.
+	bool vm_delay_free;
+#endif
+	// amdragon: Link to the head of the next VMA *list* to free.
+	struct vm_area_struct *vm_next_free_list;
 
 	/*
 	 * For areas with an address space and backing store,
@@ -245,6 +262,23 @@ struct mm_struct {
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
 	int map_count;				/* number of VMAs */
 	struct rw_semaphore mmap_sem;
+#ifdef CONFIG_AMDRAGON_SPLIT_PFLOCK
+	/* amdragon: pf_sem protects against a concurrent page fault;
+	 * specifically covering the RB tree, the VMA's, and anything
+	 * the page fault handler can *modify*.  It turns out the
+	 * original mmap_sem worked two ways; it prevented the page
+	 * fault handler from observing changes made by writers, but
+	 * it also prevented writers from observing changes made by
+	 * the page fault handler. */
+	struct rw_semaphore pf_sem;
+	bool pf_sem_locked;			/* pf_sem held for write */
+#endif
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	/* amdragon: tree_sem protects mm_rb.  Unless
+	 * CONFIG_AMDRAGON_MMAP_CACHE_RACE is defined, it must also
+	 * protect the mmap_cache. */
+	struct rw_semaphore tree_sem;
+#endif
 	spinlock_t page_table_lock;		/* Protects page tables and some counters */
 
 	struct list_head mmlist;		/* List of maybe swapped mm's.	These are globally strung
@@ -257,7 +291,8 @@ struct mm_struct {
 	unsigned long hiwater_vm;	/* High-water virtual memory usage */
 
 	unsigned long total_vm, locked_vm, shared_vm, exec_vm;
-	unsigned long stack_vm, reserved_vm, def_flags, nr_ptes;
+	unsigned long stack_vm, reserved_vm, def_flags;
+	atomic_t nr_ptes;
 	unsigned long start_code, end_code, start_data, end_data;
 	unsigned long start_brk, brk, start_stack;
 	unsigned long arg_start, arg_end, env_start, env_end;

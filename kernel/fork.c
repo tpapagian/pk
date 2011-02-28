@@ -71,6 +71,7 @@
 #include <linux/posix-timers.h>
 #include <linux/user-return-notifier.h>
 #include <linux/oom.h>
+#include <linux/mm_lock.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -321,12 +322,14 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	unsigned long charge;
 	struct mempolicy *pol;
 
-	down_write(&oldmm->mmap_sem);
+	mm_lock(oldmm);
 	flush_cache_dup_mm(oldmm);
 	/*
 	 * Not linked in yet - no deadlock potential:
 	 */
-	down_write_nested(&mm->mmap_sem, SINGLE_DEPTH_NESTING);
+	mm_lock_nested(mm, SINGLE_DEPTH_NESTING);
+	// amdragon: No point in delaying this
+	mm_pf_lock(mm);
 
 	mm->locked_vm = 0;
 	mm->mmap = NULL;
@@ -464,9 +467,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 	arch_dup_mmap(oldmm, mm);
 	retval = 0;
 out:
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	flush_tlb_mm(oldmm);
-	up_write(&oldmm->mmap_sem);
+	mm_unlock(oldmm);
 	return retval;
 fail_nomem_anon_vma_fork:
 	mpol_put(pol);
@@ -527,12 +530,12 @@ static struct mm_struct * mm_init(struct mm_struct * mm, struct task_struct *p)
 {
 	atomic_set(&mm->mm_users, 1);
 	atomic_set(&mm->mm_count, 1);
-	init_rwsem(&mm->mmap_sem);
+	mm_lock_init(mm);
 	INIT_LIST_HEAD(&mm->mmlist);
 	mm->flags = (current->mm) ?
 		(current->mm->flags & MMF_INIT_MASK) : default_dump_filter;
 	mm->core_state = NULL;
-	mm->nr_ptes = 0;
+	atomic_set(&mm->nr_ptes, 0);
 	memset(&mm->rss_stat, 0, sizeof(mm->rss_stat));
 	spin_lock_init(&mm->page_table_lock);
 	mm->free_area_cache = TASK_UNMAPPED_BASE;
@@ -574,6 +577,11 @@ struct mm_struct * mm_alloc(void)
 void __mmdrop(struct mm_struct *mm)
 {
 	BUG_ON(mm == &init_mm);
+	// amdragon: Used to be in exit_mm, but now that PTE freeing
+	// is delayed, there might be pending free's as of exit_mm.
+	// However, those pending free's will hold a reference to the
+	// mm, so by this point they should all be gone.
+	BUG_ON(atomic_read(&mm->nr_ptes) > (FIRST_USER_ADDRESS+PMD_SIZE-1)>>PMD_SHIFT);
 	mm_free_pgd(mm);
 	destroy_context(mm);
 	mmu_notifier_mm_destroy(mm);

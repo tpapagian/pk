@@ -45,6 +45,7 @@
 #include <linux/pagemap.h>
 #include <linux/kref.h>
 #include <linux/slab.h>
+#include <linux/mm_lock.h>
 
 #include <linux/nfs_fs.h>
 #include <linux/nfs_page.h>
@@ -314,10 +315,8 @@ static ssize_t nfs_direct_read_schedule_segment(struct nfs_direct_req *dreq,
 		if (unlikely(!data))
 			break;
 
-		down_read(&current->mm->mmap_sem);
-		result = get_user_pages(current, current->mm, user_addr,
+		result = get_user_pages_locked(current, current->mm, user_addr,
 					data->npages, 1, 0, data->pagevec, NULL);
-		up_read(&current->mm->mmap_sem);
 		if (result < 0) {
 			nfs_readdata_free(data);
 			break;
@@ -743,10 +742,8 @@ static ssize_t nfs_direct_write_schedule_segment(struct nfs_direct_req *dreq,
 		if (unlikely(!data))
 			break;
 
-		down_read(&current->mm->mmap_sem);
-		result = get_user_pages(current, current->mm, user_addr,
+		result = get_user_pages_locked(current, current->mm, user_addr,
 					data->npages, 0, 0, data->pagevec, NULL);
-		up_read(&current->mm->mmap_sem);
 		if (result < 0) {
 			nfs_writedata_free(data);
 			break;

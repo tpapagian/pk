@@ -67,6 +67,7 @@
 
 #include <linux/mempolicy.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/highmem.h>
 #include <linux/hugetlb.h>
 #include <linux/kernel.h>
@@ -433,10 +434,10 @@ void mpol_rebind_mm(struct mm_struct *mm, nodemask_t *new)
 {
 	struct vm_area_struct *vma;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 	for (vma = mm->mmap; vma; vma = vma->vm_next)
 		mpol_rebind_policy(vma->vm_policy, new, MPOL_REBIND_ONCE);
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 }
 
 static const struct mempolicy_operations mpol_ops[MPOL_MAX] = {
@@ -732,13 +733,13 @@ static long do_set_mempolicy(unsigned short mode, unsigned short flags,
 	 * with no 'mm'.
 	 */
 	if (mm)
-		down_write(&mm->mmap_sem);
+		mm_lock(mm);
 	task_lock(current);
 	ret = mpol_set_nodemask(new, nodes, scratch);
 	if (ret) {
 		task_unlock(current);
 		if (mm)
-			up_write(&mm->mmap_sem);
+			mm_unlock(mm);
 		mpol_put(new);
 		goto out;
 	}
@@ -750,7 +751,7 @@ static long do_set_mempolicy(unsigned short mode, unsigned short flags,
 		current->il_next = first_node(new->v.nodes);
 	task_unlock(current);
 	if (mm)
-		up_write(&mm->mmap_sem);
+		mm_unlock(mm);
 
 	mpol_put(old);
 	ret = 0;
@@ -828,10 +829,10 @@ static long do_get_mempolicy(int *policy, nodemask_t *nmask,
 		 * vma/shared policy at addr is NULL.  We
 		 * want to return MPOL_DEFAULT in this case.
 		 */
-		down_read(&mm->mmap_sem);
+		mm_lock_read(mm);
 		vma = find_vma_intersection(mm, addr, addr+1);
 		if (!vma) {
-			up_read(&mm->mmap_sem);
+			mm_unlock_read(mm);
 			return -EFAULT;
 		}
 		if (vma->vm_ops && vma->vm_ops->get_policy)
@@ -868,7 +869,7 @@ static long do_get_mempolicy(int *policy, nodemask_t *nmask,
 	}
 
 	if (vma) {
-		up_read(&current->mm->mmap_sem);
+		mm_unlock_read(current->mm);
 		vma = NULL;
 	}
 
@@ -886,7 +887,7 @@ static long do_get_mempolicy(int *policy, nodemask_t *nmask,
  out:
 	mpol_cond_put(pol);
 	if (vma)
-		up_read(&current->mm->mmap_sem);
+		mm_unlock_read(current->mm);
 	return err;
 }
 
@@ -960,7 +961,7 @@ int do_migrate_pages(struct mm_struct *mm,
 	if (err)
 		return err;
 
-	down_read(&mm->mmap_sem);
+	mm_lock_read(mm);
 
 	err = migrate_vmas(mm, from_nodes, to_nodes, flags);
 	if (err)
@@ -1026,7 +1027,7 @@ int do_migrate_pages(struct mm_struct *mm,
 			break;
 	}
 out:
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 	if (err < 0)
 		return err;
 	return busy;
@@ -1131,12 +1132,12 @@ static long do_mbind(unsigned long start, unsigned long len,
 	{
 		NODEMASK_SCRATCH(scratch);
 		if (scratch) {
-			down_write(&mm->mmap_sem);
+			mm_lock(mm);
 			task_lock(current);
 			err = mpol_set_nodemask(new, nmask, scratch);
 			task_unlock(current);
 			if (err)
-				up_write(&mm->mmap_sem);
+				mm_unlock(mm);
 		} else
 			err = -ENOMEM;
 		NODEMASK_SCRATCH_FREE(scratch);
@@ -1165,7 +1166,7 @@ static long do_mbind(unsigned long start, unsigned long len,
 	} else
 		putback_lru_pages(&pagelist);
 
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
  mpol_out:
 	mpol_put(new);
 	return err;

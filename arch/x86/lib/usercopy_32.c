@@ -745,18 +745,18 @@ unsigned long __copy_to_user_ll(void __user *to, const void *from,
 				len = n;
 
 survive:
-			down_read(&current->mm->mmap_sem);
+			mm_lock_read(current->mm);
 			retval = get_user_pages(current, current->mm,
 					(unsigned long)to, 1, 1, 0, &pg, NULL);
 
 			if (retval == -ENOMEM && is_global_init(current)) {
-				up_read(&current->mm->mmap_sem);
+				mm_unlock_read(current->mm);
 				congestion_wait(BLK_RW_ASYNC, HZ/50);
 				goto survive;
 			}
 
 			if (retval != 1) {
-				up_read(&current->mm->mmap_sem);
+				mm_unlock_read(current->mm);
 				break;
 			}
 
@@ -765,7 +765,7 @@ survive:
 			kunmap_atomic(maddr, KM_USER0);
 			set_page_dirty_lock(pg);
 			put_page(pg);
-			up_read(&current->mm->mmap_sem);
+			mm_unlock_read(current->mm);
 
 			from += len;
 			to += len;

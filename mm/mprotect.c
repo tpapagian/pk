@@ -9,6 +9,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/hugetlb.h>
 #include <linux/shm.h>
 #include <linux/mman.h>
@@ -250,7 +251,7 @@ SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 
 	vm_flags = calc_vm_prot_bits(prot);
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 
 	vma = find_vma_prev(current->mm, start, &prev);
 	error = -ENOMEM;
@@ -314,6 +315,6 @@ SYSCALL_DEFINE3(mprotect, unsigned long, start, size_t, len,
 		}
 	}
 out:
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 	return error;
 }

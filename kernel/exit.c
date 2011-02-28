@@ -5,6 +5,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -663,11 +664,11 @@ static void exit_mm(struct task_struct * tsk)
 	 * will increment ->nr_threads for each thread in the
 	 * group with ->mm != NULL.
 	 */
-	down_read(&mm->mmap_sem);
+	mm_lock_read(mm);
 	core_state = mm->core_state;
 	if (core_state) {
 		struct core_thread self;
-		up_read(&mm->mmap_sem);
+		mm_unlock_read(mm);
 
 		self.task = tsk;
 		self.next = xchg(&core_state->dumper.next, &self);
@@ -685,14 +686,14 @@ static void exit_mm(struct task_struct * tsk)
 			schedule();
 		}
 		__set_task_state(tsk, TASK_RUNNING);
-		down_read(&mm->mmap_sem);
+		mm_lock_read(mm);
 	}
 	atomic_inc(&mm->mm_count);
 	BUG_ON(mm != tsk->active_mm);
 	/* more a memory barrier than a real lock */
 	task_lock(tsk);
 	tsk->mm = NULL;
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 	enter_lazy_tlb(mm, current);
 	/* We don't want this task to be frozen prematurely */
 	clear_freeze_flag(tsk);

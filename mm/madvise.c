@@ -13,6 +13,7 @@
 #include <linux/hugetlb.h>
 #include <linux/sched.h>
 #include <linux/ksm.h>
+#include <linux/mm_lock.h>
 
 /*
  * Any behaviour which results in changes to the vma->vm_flags needs to
@@ -213,9 +214,9 @@ static long madvise_remove(struct vm_area_struct *vma,
 			+ ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
 
 	/* vmtruncate_range needs to take i_mutex and i_alloc_sem */
-	up_read(&current->mm->mmap_sem);
+	mm_unlock_read(current->mm);
 	error = vmtruncate_range(mapping->host, offset, endoff);
-	down_read(&current->mm->mmap_sem);
+	mm_lock_read(current->mm);
 	return error;
 }
 
@@ -350,9 +351,9 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 
 	write = madvise_need_mmap_write(behavior);
 	if (write)
-		down_write(&current->mm->mmap_sem);
+		mm_lock(current->mm);
 	else
-		down_read(&current->mm->mmap_sem);
+		mm_lock_read(current->mm);
 
 	if (start & ~PAGE_MASK)
 		goto out;
@@ -415,9 +416,9 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 	}
 out:
 	if (write)
-		up_write(&current->mm->mmap_sem);
+		mm_unlock(current->mm);
 	else
-		up_read(&current->mm->mmap_sem);
+		mm_unlock_read(current->mm);
 
 	return error;
 }

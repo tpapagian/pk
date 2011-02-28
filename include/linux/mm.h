@@ -14,6 +14,15 @@
 #include <linux/mm_types.h>
 #include <linux/range.h>
 #include <linux/pfn.h>
+#include <linux/sched.h>	/* amdragon: for struct task_struct */
+
+#define AMDRAGON_LF_STATS
+#ifdef AMDRAGON_LF_STATS
+#define AMDRAGON_LF_STAT_INC(var) \
+	do { extern int mm_lf_stat_##var; mm_lf_stat_##var++; } while (0)
+#else
+#define AMDRAGON_LF_STAT_INC(var) do { } while (0)
+#endif
 
 struct mempolicy;
 struct anon_vma;
@@ -145,6 +154,14 @@ extern pgprot_t protection_map[16];
 #define FAULT_FLAG_NONLINEAR	0x02	/* Fault was via a nonlinear mapping */
 #define FAULT_FLAG_MKWRITE	0x04	/* Fault was mkwrite of existing pte */
 #define FAULT_FLAG_ALLOW_RETRY	0x08	/* Retry fault if blocking */
+
+// amdragon: XXX This is a hack for __get_user_pages that should go
+// away once we're dropping the VMA lock in do_page_fault.
+#define FAULT_FLAG_KEEP_LOCK	0x10	/* amdragon: Don't release the vma lock */
+// amdragon: The VMA lock is not being held.  If anything happens that
+// may require the VMA lock, return with VM_FAULT_RETRY and the page
+// fault will be retried with the lock held.
+#define FAULT_FLAG_NO_LOCK	0x20
 
 /*
  * This interface is used by x86 PAT code to identify a pfn mapping that is
@@ -724,7 +741,7 @@ static inline int page_mapped(struct page *page)
 
 #define VM_FAULT_NOPAGE	0x0100	/* ->fault installed the pte, not return page */
 #define VM_FAULT_LOCKED	0x0200	/* ->fault locked the returned page */
-#define VM_FAULT_RETRY	0x0400	/* ->fault blocked, must retry */
+#define VM_FAULT_RETRY	0x0400	/* ->fault blocked, must retry, implies lock released */
 
 #define VM_FAULT_HWPOISON_LARGE_MASK 0xf000 /* encodes hpage index for large hwpoison */
 

@@ -4701,7 +4701,7 @@ static void mem_cgroup_clear_mc(void)
 		mc.moved_swap = 0;
 	}
 	if (mc.mm) {
-		up_read(&mc.mm->mmap_sem);
+		mm_unlock_read(mc.mm);
 		mmput(mc.mm);
 	}
 	spin_lock(&mc.lock);
@@ -4740,7 +4740,7 @@ static int mem_cgroup_can_attach(struct cgroup_subsys *ss,
 			 * avoid deadlock with down_write(&mmap_sem)
 			 * -> try_charge() -> if (mc.moving_task) -> sleep.
 			 */
-			down_read(&mm->mmap_sem);
+			mm_lock_read(mm);
 
 			VM_BUG_ON(mc.from);
 			VM_BUG_ON(mc.to);

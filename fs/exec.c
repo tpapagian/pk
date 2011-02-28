@@ -26,6 +26,7 @@
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/stat.h>
 #include <linux/fcntl.h>
 #include <linux/swap.h>
@@ -260,7 +261,7 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 	if (!vma)
 		return -ENOMEM;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 	vma->vm_mm = mm;
 
 	/*
@@ -285,11 +286,11 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 		goto err;
 
 	mm->stack_vm = mm->total_vm = 1;
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	bprm->p = vma->vm_end - sizeof(void *);
 	return 0;
 err:
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	bprm->vma = NULL;
 	kmem_cache_free(vm_area_cachep, vma);
 	return err;
@@ -655,7 +656,7 @@ int setup_arg_pages(struct linux_binprm *bprm,
 		bprm->loader -= stack_shift;
 	bprm->exec -= stack_shift;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 	vm_flags = VM_STACK_FLAGS;
 
 	/*
@@ -710,7 +711,7 @@ int setup_arg_pages(struct linux_binprm *bprm,
 		ret = -EFAULT;
 
 out_unlock:
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	return ret;
 }
 EXPORT_SYMBOL(setup_arg_pages);
@@ -785,9 +786,9 @@ static int exec_mmap(struct mm_struct *mm)
 		 * through with the exec.  We must hold mmap_sem around
 		 * checking core_state and changing tsk->mm.
 		 */
-		down_read(&old_mm->mmap_sem);
+		mm_lock_read(old_mm);
 		if (unlikely(old_mm->core_state)) {
-			up_read(&old_mm->mmap_sem);
+			mm_unlock_read(old_mm);
 			return -EINTR;
 		}
 	}
@@ -803,7 +804,7 @@ static int exec_mmap(struct mm_struct *mm)
 	task_unlock(tsk);
 	arch_pick_mmap_layout(mm);
 	if (old_mm) {
-		up_read(&old_mm->mmap_sem);
+		mm_unlock_read(old_mm);
 		BUG_ON(active_mm != old_mm);
 		mm_update_next_owner(old_mm);
 		mmput(old_mm);
@@ -1746,10 +1747,10 @@ static int coredump_wait(int exit_code, struct core_state *core_state)
 	core_state->dumper.task = tsk;
 	core_state->dumper.next = NULL;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 	if (!mm->core_state)
 		core_waiters = zap_threads(tsk, mm, core_state, exit_code);
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 
 	if (unlikely(core_waiters < 0))
 		goto fail;

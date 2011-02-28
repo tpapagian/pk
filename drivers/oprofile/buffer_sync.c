@@ -22,6 +22,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/workqueue.h>
 #include <linux/notifier.h>
 #include <linux/dcookies.h>
@@ -88,11 +89,11 @@ munmap_notify(struct notifier_block *self, unsigned long val, void *data)
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *mpnt;
 
-	down_read(&mm->mmap_sem);
+	mm_lock_read(mm);
 
 	mpnt = find_vma(mm, addr);
 	if (mpnt && mpnt->vm_file && (mpnt->vm_flags & VM_EXEC)) {
-		up_read(&mm->mmap_sem);
+		mm_unlock_read(mm);
 		/* To avoid latency problems, we only process the current CPU,
 		 * hoping that most samples for the task are on this CPU
 		 */
@@ -100,7 +101,7 @@ munmap_notify(struct notifier_block *self, unsigned long val, void *data)
 		return 0;
 	}
 
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 	return 0;
 }
 
@@ -412,7 +413,7 @@ static void release_mm(struct mm_struct *mm)
 {
 	if (!mm)
 		return;
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 	mmput(mm);
 }
 
@@ -421,7 +422,7 @@ static struct mm_struct *take_tasks_mm(struct task_struct *task)
 {
 	struct mm_struct *mm = get_task_mm(task);
 	if (mm)
-		down_read(&mm->mmap_sem);
+		mm_lock_read(mm);
 	return mm;
 }
 

@@ -8,6 +8,8 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/ftrace.h>
+#include <linux/mm.h>
+#include <linux/mm_lock.h>
 
 #include "trace_output.h"
 
@@ -436,7 +438,7 @@ int seq_print_user_ip(struct trace_seq *s, struct mm_struct *mm,
 	if (mm) {
 		const struct vm_area_struct *vma;
 
-		down_read(&mm->mmap_sem);
+		mm_lock_read(mm);
 		vma = find_vma(mm, ip);
 		if (vma) {
 			file = vma->vm_file;
@@ -448,7 +450,7 @@ int seq_print_user_ip(struct trace_seq *s, struct mm_struct *mm,
 				ret = trace_seq_printf(s, "[+0x%lx]",
 						       ip - vmstart);
 		}
-		up_read(&mm->mmap_sem);
+		mm_unlock_read(mm);
 	}
 	if (ret && ((sym_flags & TRACE_ITER_SYM_ADDR) || !file))
 		ret = trace_seq_printf(s, " <" IP_FMT ">", ip);

@@ -59,6 +59,7 @@
 #include <linux/magic.h>
 #include <linux/pid.h>
 #include <linux/nsproxy.h>
+#include <linux/mm_lock.h>
 
 #include <asm/futex.h>
 
@@ -306,10 +307,8 @@ static int fault_in_user_writeable(u32 __user *uaddr)
 	struct mm_struct *mm = current->mm;
 	int ret;
 
-	down_read(&mm->mmap_sem);
-	ret = get_user_pages(current, mm, (unsigned long)uaddr,
+	ret = get_user_pages_locked(current, mm, (unsigned long)uaddr,
 			     1, 1, 0, NULL, NULL);
-	up_read(&mm->mmap_sem);
 
 	return ret < 0 ? ret : 0;
 }

@@ -12,10 +12,13 @@
 #include <linux/mmiotrace.h>		/* kmmio_handler, ...		*/
 #include <linux/perf_event.h>		/* perf_sw_event		*/
 #include <linux/hugetlb.h>		/* hstate_index_to_shift	*/
+#include <linux/mm_lock.h>
 
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
 #include <asm/kmemcheck.h>		/* kmemcheck_*(), ...		*/
+
+extern struct srcu_struct mm_srcu;
 
 /*
  * Page fault error code bits:
@@ -748,30 +751,30 @@ bad_area_nosemaphore(struct pt_regs *regs, unsigned long error_code,
 
 static void
 __bad_area(struct pt_regs *regs, unsigned long error_code,
-	   unsigned long address, int si_code)
+	   unsigned long address, unsigned int flags, int si_code)
 {
-	struct mm_struct *mm = current->mm;
-
 	/*
 	 * Something tried to access memory that isn't in our memory map..
 	 * Fix it, but check if it's kernel or user first..
 	 */
-	up_read(&mm->mmap_sem);
+	if (!(flags & FAULT_FLAG_NO_LOCK))
+		mm_pf_unlock_read(current->mm);
 
 	__bad_area_nosemaphore(regs, error_code, address, si_code);
 }
 
 static noinline void
-bad_area(struct pt_regs *regs, unsigned long error_code, unsigned long address)
+bad_area(struct pt_regs *regs, unsigned long error_code, unsigned long address,
+	 unsigned int flags)
 {
-	__bad_area(regs, error_code, address, SEGV_MAPERR);
+	__bad_area(regs, error_code, address, flags, SEGV_MAPERR);
 }
 
 static noinline void
 bad_area_access_error(struct pt_regs *regs, unsigned long error_code,
-		      unsigned long address)
+		      unsigned long address, unsigned int flags)
 {
-	__bad_area(regs, error_code, address, SEGV_ACCERR);
+	__bad_area(regs, error_code, address, flags, SEGV_ACCERR);
 }
 
 /* TODO: fixup for "mm-invoke-oom-killer-from-page-fault.patch" */
@@ -783,20 +786,15 @@ out_of_memory(struct pt_regs *regs, unsigned long error_code,
 	 * We ran out of memory, call the OOM killer, and return the userspace
 	 * (which will retry the fault, or kill us if we got oom-killed):
 	 */
-	up_read(&current->mm->mmap_sem);
-
 	pagefault_out_of_memory();
 }
 
 static void
 do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
-	  unsigned int fault)
+	  unsigned int fault, struct mm_struct *mm)
 {
 	struct task_struct *tsk = current;
-	struct mm_struct *mm = tsk->mm;
 	int code = BUS_ADRERR;
-
-	up_read(&mm->mmap_sem);
 
 	/* Kernel mode? Handle exceptions or die: */
 	if (!(error_code & PF_USER)) {
@@ -825,14 +823,15 @@ do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 
 static noinline void
 mm_fault_error(struct pt_regs *regs, unsigned long error_code,
-	       unsigned long address, unsigned int fault)
+	       unsigned long address, unsigned int fault,
+	       struct mm_struct *mm)
 {
 	if (fault & VM_FAULT_OOM) {
 		out_of_memory(regs, error_code, address);
 	} else {
 		if (fault & (VM_FAULT_SIGBUS|VM_FAULT_HWPOISON|
 			     VM_FAULT_HWPOISON_LARGE))
-			do_sigbus(regs, error_code, address, fault);
+			do_sigbus(regs, error_code, address, fault, mm);
 		else
 			BUG();
 	}
@@ -952,7 +951,7 @@ static int fault_in_kernel_space(unsigned long address)
 dotraplinkage void __kprobes
 do_page_fault(struct pt_regs *regs, unsigned long error_code)
 {
-	struct vm_area_struct *vma;
+	struct vm_area_struct *vma = NULL;
 	struct task_struct *tsk;
 	unsigned long address;
 	struct mm_struct *mm;
@@ -973,7 +972,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 */
 	if (kmemcheck_active(regs))
 		kmemcheck_hide(regs);
-	prefetchw(&mm->mmap_sem);
+	mm_pf_lock_prefetch(mm);
 
 	if (unlikely(kmmio_fault(regs, address)))
 		return;
@@ -1048,6 +1047,16 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		return;
 	}
 
+	srcu_read_acquire(&mm_srcu);
+
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	// In this case, the first VMA tree lookup is protected by the
+	// tree lock, so we needn't bother with the page fault lock.
+	// We'll still take the page fault lock if we retry.
+	flags |= FAULT_FLAG_NO_LOCK;
+	goto lookup;
+#endif
+
 	/*
 	 * When running in the kernel we expect faults to occur only to
 	 * addresses in user space.  All other faults represent errors in
@@ -1064,14 +1073,14 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 * validate the source. If this is invalid we can skip the address
 	 * space check, thus avoiding the deadlock:
 	 */
-	if (unlikely(!down_read_trylock(&mm->mmap_sem))) {
+	if (unlikely(!mm_pf_lock_tryread(mm))) {
 		if ((error_code & PF_USER) == 0 &&
 		    !search_exception_tables(regs->ip)) {
 			bad_area_nosemaphore(regs, error_code, address);
-			return;
+			goto done_srcu;
 		}
 retry:
-		down_read(&mm->mmap_sem);
+		mm_pf_lock_read(mm);
 	} else {
 		/*
 		 * The above down_read_trylock() might have succeeded in
@@ -1081,16 +1090,84 @@ retry:
 		might_sleep();
 	}
 
+	// amdragon: If this is our second time through (because of a
+	// retry), check if we can just use the VMA we found last time
+	// (that is, if find_vma would return the same VMA).  This is
+	// closely related to the mmap_cache check in find_vma, but
+	// won't be muddied by concurrent page faults.
+	if (vma) {
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+		if (vma->vm_unlinked && mm->mmap_cache == vma) {
+			// mmap_cache race: We cached a stale VMA.
+			// Since a concurrent page fault could have
+			// fetched this VMA from the cache, it must
+			// not be freed when our SRCU read section
+			// ends, but will be safe to free one epoch
+			// later.
+			AMDRAGON_LF_STAT_INC(mmap_cache_pf_shootdowns);
+			vma->vm_delay_free = 1;
+			mm->mmap_cache = NULL;
+		}
+#endif
+		if (!vma->vm_unlinked && vma->vm_end > address) {
+			// Common case: Address lies in VMA
+			if(vma->vm_start <= address) {
+				AMDRAGON_LF_STAT_INC(reuse_vma);
+				goto good_area;
+			}
+			// Less common: Address lies between end of
+			// previous VMA and cached one
+			if (!vma->vm_prev ||
+			    vma->vm_prev->vm_end <= address) {
+				AMDRAGON_LF_STAT_INC(reuse_vma_try_expand);
+				goto maybe_good_area;
+			}
+		}
+		AMDRAGON_LF_STAT_INC(reuse_vma_fail);
+	}
+
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+lookup:
+	// We only need the tree lock if we're not already holding the
+	// page fault lock
+	if (!(flags & FAULT_FLAG_NO_LOCK))
+		mm_tree_lock_read(mm);
+#endif
 	vma = find_vma(mm, address);
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	if (!(flags & FAULT_FLAG_NO_LOCK))
+		mm_tree_unlock_read(mm);
+#endif
+
+#ifndef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	// amdragon
+	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
+		mm_pf_unlock_read(mm);
+		flags |= FAULT_FLAG_NO_LOCK;
+	}
+#endif
+
 	if (unlikely(!vma)) {
-		bad_area(regs, error_code, address);
-		return;
+		bad_area(regs, error_code, address, flags);
+		goto done_srcu;
 	}
 	if (likely(vma->vm_start <= address))
 		goto good_area;
+maybe_good_area:
+	// amdragon: Either 1) the access is actually bad, 2) we need
+	// to expand the stack, or 3) we raced with a vma_adjust.  We
+	// need to grab the lock to distinguish between 1 and 3, and
+	// we need the lock anyway if it's case 2.  If it's case 1 or
+	// 2, we'll almost certainly fast path right back here.
+	if (flags & FAULT_FLAG_NO_LOCK) {
+		AMDRAGON_LF_STAT_INC(oob_retries);
+		flags |= FAULT_FLAG_KEEP_LOCK;
+		flags &= ~FAULT_FLAG_NO_LOCK;
+		goto retry;
+	}
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
-		bad_area(regs, error_code, address);
-		return;
+		bad_area(regs, error_code, address, flags);
+		goto done_srcu;
 	}
 	if (error_code & PF_USER) {
 		/*
@@ -1100,13 +1177,13 @@ retry:
 		 * 32 pointers and then decrements %sp by 65535.)
 		 */
 		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp)) {
-			bad_area(regs, error_code, address);
-			return;
+			bad_area(regs, error_code, address, flags);
+			goto done_srcu;
 		}
 	}
 	if (unlikely(expand_stack(vma, address))) {
-		bad_area(regs, error_code, address);
-		return;
+		bad_area(regs, error_code, address, flags);
+		goto done_srcu;
 	}
 
 	/*
@@ -1115,8 +1192,8 @@ retry:
 	 */
 good_area:
 	if (unlikely(access_error(error_code, vma))) {
-		bad_area_access_error(regs, error_code, address);
-		return;
+		bad_area_access_error(regs, error_code, address, flags);
+		goto done_srcu;
 	}
 
 	/*
@@ -1127,8 +1204,10 @@ good_area:
 	fault = handle_mm_fault(mm, vma, address, flags);
 
 	if (unlikely(fault & VM_FAULT_ERROR)) {
-		mm_fault_error(regs, error_code, address, fault);
-		return;
+		if (!(flags & FAULT_FLAG_NO_LOCK))
+			mm_pf_unlock_read(mm);
+		mm_fault_error(regs, error_code, address, fault, mm);
+		goto done_srcu;
 	}
 
 	/*
@@ -1150,11 +1229,23 @@ good_area:
 			/* Clear FAULT_FLAG_ALLOW_RETRY to avoid any risk
 			 * of starvation. */
 			flags &= ~FAULT_FLAG_ALLOW_RETRY;
+			// amdragon: XXX Hold on to the lock the
+			// second time around to avoid live lock.
+			// This should go away once we drop the lock
+			// in this function.
+			flags |= FAULT_FLAG_KEEP_LOCK;
+			// amdragon: We'll reacquire the lock on the
+			// retry path, so clear the no-lock flag.
+			flags &= ~FAULT_FLAG_NO_LOCK;
 			goto retry;
 		}
 	}
 
 	check_v8086_mode(regs, address, tsk);
 
-	up_read(&mm->mmap_sem);
+	if (!(flags & FAULT_FLAG_NO_LOCK))
+		mm_pf_unlock_read(mm);
+
+done_srcu:
+	srcu_read_release(&mm_srcu);
 }

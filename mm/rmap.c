@@ -44,6 +44,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/pagemap.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
@@ -114,6 +115,16 @@ static void anon_vma_chain_free(struct anon_vma_chain *anon_vma_chain)
  */
 int anon_vma_prepare(struct vm_area_struct *vma)
 {
+	int ret = __anon_vma_prepare(vma, 0);
+	if (likely(ret == 0))
+		return 0;
+	if (ret == VM_FAULT_OOM)
+		return -ENOMEM;
+	BUG();
+}
+
+int __anon_vma_prepare(struct vm_area_struct *vma, int flags)
+{
 	struct anon_vma *anon_vma = vma->anon_vma;
 	struct anon_vma_chain *avc;
 
@@ -121,6 +132,12 @@ int anon_vma_prepare(struct vm_area_struct *vma)
 	if (unlikely(!anon_vma)) {
 		struct mm_struct *mm = vma->vm_mm;
 		struct anon_vma *allocated;
+
+		if (flags & FAULT_FLAG_NO_LOCK) {
+			// amdragon: This operation requires the lock,
+			// so retry with the lock.
+			return VM_FAULT_RETRY;
+		}
 
 		avc = anon_vma_chain_alloc();
 		if (!avc)
@@ -523,7 +540,7 @@ int page_referenced_one(struct page *page, struct vm_area_struct *vma,
 	/* Pretend the page is referenced if the task has the
 	   swap token and is in the middle of a page fault. */
 	if (mm != current->mm && has_swap_token(mm) &&
-			rwsem_is_locked(&mm->mmap_sem))
+			mm_is_locked(mm))
 		referenced++;
 
 out_unmap:
@@ -789,7 +806,9 @@ void page_move_anon_rmap(struct page *page,
  * @exclusive:	the page is exclusively owned by the current process
  */
 static void __page_set_anon_rmap(struct page *page,
-	struct vm_area_struct *vma, unsigned long address, int exclusive)
+	struct vm_area_struct *vma, unsigned long address,
+	unsigned long start, unsigned long pgoff,
+	int exclusive)
 {
 	struct anon_vma *anon_vma = vma->anon_vma;
 
@@ -808,7 +827,7 @@ static void __page_set_anon_rmap(struct page *page,
 
 	anon_vma = (void *) anon_vma + PAGE_MAPPING_ANON;
 	page->mapping = (struct address_space *) anon_vma;
-	page->index = linear_page_index(vma, address);
+	page->index = __linear_page_index(vma, address, start, pgoff);
 }
 
 /**
@@ -872,7 +891,8 @@ void do_page_add_anon_rmap(struct page *page,
 	VM_BUG_ON(!PageLocked(page));
 	VM_BUG_ON(address < vma->vm_start || address >= vma->vm_end);
 	if (first)
-		__page_set_anon_rmap(page, vma, address, exclusive);
+		__page_set_anon_rmap(page, vma, address,
+				     vma->vm_start, vma->vm_pgoff, exclusive);
 	else
 		__page_check_anon_rmap(page, vma, address);
 }
@@ -890,11 +910,24 @@ void do_page_add_anon_rmap(struct page *page,
 void page_add_new_anon_rmap(struct page *page,
 	struct vm_area_struct *vma, unsigned long address)
 {
-	VM_BUG_ON(address < vma->vm_start || address >= vma->vm_end);
+	__page_add_new_anon_rmap(page, vma, address,
+				 vma->vm_start, vma->vm_end, vma->vm_pgoff);
+}
+
+/**
+ * __page_add_new_anon_rmap - variant for when the VMA is being used
+ * in an RCU read context (and thus its bounds and offset might
+ * change).
+ */
+void __page_add_new_anon_rmap(struct page *page,
+	struct vm_area_struct *vma, unsigned long address,
+	unsigned long start, unsigned long end, unsigned long pgoff)
+{
+	VM_BUG_ON(address < start || address >= end);
 	SetPageSwapBacked(page);
 	atomic_set(&page->_mapcount, 0); /* increment count (starts at -1) */
 	__inc_zone_page_state(page, NR_ANON_PAGES);
-	__page_set_anon_rmap(page, vma, address, 1);
+	__page_set_anon_rmap(page, vma, address, start, pgoff, 1);
 	if (page_evictable(page, vma))
 		lru_cache_add_lru(page, LRU_ACTIVE_ANON);
 	else
@@ -1076,12 +1109,12 @@ out_mlock:
 	 * vmscan could retry to move the page to unevictable lru if the
 	 * page is actually mlocked.
 	 */
-	if (down_read_trylock(&vma->vm_mm->mmap_sem)) {
+	if (mm_lock_tryread(vma->vm_mm)) {
 		if (vma->vm_flags & VM_LOCKED) {
 			mlock_vma_page(page);
 			ret = SWAP_MLOCK;
 		}
-		up_read(&vma->vm_mm->mmap_sem);
+		mm_unlock_read(vma->vm_mm);
 	}
 	return ret;
 }
@@ -1152,10 +1185,10 @@ static int try_to_unmap_cluster(unsigned long cursor, unsigned int *mapcount,
 	 * If we can acquire the mmap_sem for read, and vma is VM_LOCKED,
 	 * keep the sem while scanning the cluster for mlocking pages.
 	 */
-	if (down_read_trylock(&vma->vm_mm->mmap_sem)) {
+	if (mm_lock_tryread(vma->vm_mm)) {
 		locked_vma = (vma->vm_flags & VM_LOCKED);
 		if (!locked_vma)
-			up_read(&vma->vm_mm->mmap_sem); /* don't need it */
+			mm_unlock_read(vma->vm_mm); /* don't need it */
 	}
 
 	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
@@ -1198,7 +1231,7 @@ static int try_to_unmap_cluster(unsigned long cursor, unsigned int *mapcount,
 	}
 	pte_unmap_unlock(pte - 1, ptl);
 	if (locked_vma)
-		up_read(&vma->vm_mm->mmap_sem);
+		mm_unlock_read(vma->vm_mm);
 	return ret;
 }
 

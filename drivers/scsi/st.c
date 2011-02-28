@@ -25,6 +25,7 @@ static const char *verstr = "20100829";
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/init.h>
 #include <linux/string.h>
 #include <linux/slab.h>
@@ -4559,9 +4560,8 @@ static int sgl_map_user_pages(struct st_buffer *STbp,
 		return -ENOMEM;
 
         /* Try to fault in all of the necessary pages */
-	down_read(&current->mm->mmap_sem);
         /* rw==READ means read from drive, write into memory area */
-	res = get_user_pages(
+	res = get_user_pages_locked(
 		current,
 		current->mm,
 		uaddr,
@@ -4570,7 +4570,6 @@ static int sgl_map_user_pages(struct st_buffer *STbp,
 		0, /* don't force */
 		pages,
 		NULL);
-	up_read(&current->mm->mmap_sem);
 
 	/* Errors and no page mapped should return here */
 	if (res < nr_pages)

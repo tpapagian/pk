@@ -63,6 +63,7 @@
 #include <linux/namei.h>
 #include <linux/mnt_namespace.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/swap.h>
 #include <linux/rcupdate.h>
 #include <linux/kallsyms.h>
@@ -1509,11 +1510,11 @@ struct file *get_mm_exe_file(struct mm_struct *mm)
 
 	/* We need mmap_sem to protect against races with removal of
 	 * VM_EXECUTABLE vmas */
-	down_read(&mm->mmap_sem);
+	mm_lock_read(mm);
 	exe_file = mm->exe_file;
 	if (exe_file)
 		get_file(exe_file);
-	up_read(&mm->mmap_sem);
+	mm_unlock_read(mm);
 	return exe_file;
 }
 

@@ -963,7 +963,7 @@ static void audit_log_task_info(struct audit_buffer *ab, struct task_struct *tsk
 	audit_log_untrustedstring(ab, name);
 
 	if (mm) {
-		down_read(&mm->mmap_sem);
+		mm_lock_read(mm);
 		vma = mm->mmap;
 		while (vma) {
 			if ((vma->vm_flags & VM_EXECUTABLE) &&
@@ -974,7 +974,7 @@ static void audit_log_task_info(struct audit_buffer *ab, struct task_struct *tsk
 			}
 			vma = vma->vm_next;
 		}
-		up_read(&mm->mmap_sem);
+		mm_unlock_read(mm);
 	}
 	audit_log_task_context(ab);
 }

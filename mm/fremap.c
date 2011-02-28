@@ -7,6 +7,7 @@
  */
 #include <linux/backing-dev.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/swap.h>
 #include <linux/file.h>
 #include <linux/mman.h>
@@ -152,7 +153,7 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 #endif
 
 	/* We need down_write() to change vma->vm_flags. */
-	down_read(&mm->mmap_sem);
+	mm_lock_read(mm);
  retry:
 	vma = find_vma(mm, start);
 
@@ -183,8 +184,8 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 		}
 
 		if (!has_write_lock) {
-			up_read(&mm->mmap_sem);
-			down_write(&mm->mmap_sem);
+			mm_unlock_read(mm);
+			mm_lock(mm);
 			has_write_lock = 1;
 			goto retry;
 		}
@@ -240,7 +241,7 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 			mlock_vma_pages_range(vma, start, start + size);
 		} else {
 			if (unlikely(has_write_lock)) {
-				downgrade_write(&mm->mmap_sem);
+				mm_lock_write_to_read(mm);
 				has_write_lock = 0;
 			}
 			make_pages_present(start, start+size);
@@ -255,9 +256,9 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 
 out:
 	if (likely(!has_write_lock))
-		up_read(&mm->mmap_sem);
+		mm_unlock_read(mm);
 	else
-		up_write(&mm->mmap_sem);
+		mm_unlock(mm);
 
 	return err;
 }

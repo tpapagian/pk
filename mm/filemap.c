@@ -18,6 +18,7 @@
 #include <linux/kernel_stat.h>
 #include <linux/gfp.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/swap.h>
 #include <linux/mman.h>
 #include <linux/pagemap.h>
@@ -624,7 +625,7 @@ int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
 		__lock_page(page);
 		return 1;
 	} else {
-		up_read(&mm->mmap_sem);
+		mm_pf_unlock_read(mm);
 		wait_on_page_locked(page);
 		return 0;
 	}

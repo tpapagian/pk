@@ -10,6 +10,7 @@
 #include <linux/pagemap.h>
 #include <linux/gfp.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/mman.h>
 #include <linux/syscalls.h>
 #include <linux/swap.h>
@@ -285,9 +286,9 @@ SYSCALL_DEFINE3(mincore, unsigned long, start, size_t, len,
 		 * Do at most PAGE_SIZE entries per iteration, due to
 		 * the temporary buffer size.
 		 */
-		down_read(&current->mm->mmap_sem);
+		mm_lock_read(current->mm);
 		retval = do_mincore(start, min(pages, PAGE_SIZE), tmp);
-		up_read(&current->mm->mmap_sem);
+		mm_unlock_read(current->mm);
 
 		if (retval <= 0)
 			break;

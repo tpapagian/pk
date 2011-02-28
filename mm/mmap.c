@@ -9,6 +9,7 @@
 #include <linux/slab.h>
 #include <linux/backing-dev.h>
 #include <linux/mm.h>
+#include <linux/mm_lock.h>
 #include <linux/shm.h>
 #include <linux/mman.h>
 #include <linux/pagemap.h>
@@ -29,6 +30,8 @@
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
 #include <linux/audit.h>
+#include <linux/srcu.h>
+#include <linux/kthread.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
@@ -48,6 +51,8 @@
 static void unmap_region(struct mm_struct *mm,
 		struct vm_area_struct *vma, struct vm_area_struct *prev,
 		unsigned long start, unsigned long end);
+
+static inline void verify_mm_writelocked(struct mm_struct *mm);
 
 /*
  * WARNING: the debugging will use recursive algorithms so never enable this
@@ -87,6 +92,10 @@ int sysctl_overcommit_memory = OVERCOMMIT_GUESS;  /* heuristic overcommit */
 int sysctl_overcommit_ratio = 50;	/* default is 50% */
 int sysctl_max_map_count __read_mostly = DEFAULT_MAX_MAP_COUNT;
 struct percpu_counter vm_committed_as;
+
+struct srcu_struct mm_srcu;
+static struct task_struct *mm_free_vma_task;
+static struct vm_area_struct *mm_free_vma_head;
 
 /*
  * Check that a process has enough memory to allocate a new virtual
@@ -226,7 +235,8 @@ void unlink_file_vma(struct vm_area_struct *vma)
 /*
  * Close a vm structure and free it, returning the next.
  */
-static struct vm_area_struct *remove_vma(struct vm_area_struct *vma)
+static struct vm_area_struct *remove_vma(struct vm_area_struct *vma,
+					 int free_now)
 {
 	struct vm_area_struct *next = vma->vm_next;
 
@@ -239,8 +249,83 @@ static struct vm_area_struct *remove_vma(struct vm_area_struct *vma)
 			removed_exe_file_vma(vma->vm_mm);
 	}
 	mpol_put(vma_policy(vma));
-	kmem_cache_free(vm_area_cachep, vma);
+	if (free_now)
+		kmem_cache_free(vm_area_cachep, vma);
 	return next;
+}
+
+#ifdef DEBUG_PENDING_FREE
+static atomic_t pending_free;
+
+static void mm_free_vma_stats_show(unsigned long dummy);
+static DEFINE_TIMER(mm_free_vma_stats, mm_free_vma_stats_show, 0, 0);
+static void mm_free_vma_stats_show(unsigned long dummy)
+{
+	mod_timer(&mm_free_vma_stats, jiffies + HZ);
+	printk(KERN_INFO "pending_free: %d\n", atomic_read(&pending_free));
+}
+#endif
+
+static void free_vma_list(struct vm_area_struct *vma);
+
+static int mm_free_vma_thread(void *dummy)
+{
+	while (1) {
+		struct vm_area_struct *head;
+		set_current_state(TASK_INTERRUPTIBLE);
+		while (!(head = xchg(&mm_free_vma_head, NULL))) {
+			schedule();
+			set_current_state(TASK_INTERRUPTIBLE);
+		}
+		set_current_state(TASK_RUNNING);
+
+		// Wait until VMA's can no longer be in use
+		synchronize_srcu(&mm_srcu);
+
+		// Free each VMA list
+		do {
+			struct vm_area_struct *vma = head;
+			head = head->vm_next_free_list;
+#ifdef DEBUG_PENDING_FREE
+			atomic_dec(&pending_free);
+#endif
+			do {
+				struct vm_area_struct *next = vma->vm_next;
+				BUG_ON(!vma->vm_unlinked);
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+				if (vma->vm_delay_free) {
+					vma->vm_delay_free = 0;
+					vma->vm_next = NULL;
+					// XXX Okay to wake self up?
+					free_vma_list(vma);
+				} else
+#endif
+					kmem_cache_free(vm_area_cachep, vma);
+				vma = next;
+			} while (vma);
+		} while (head);
+	}
+	BUG_ON(1);
+	return 0;
+}
+
+static void free_vma_list(struct vm_area_struct *vma)
+{
+	struct vm_area_struct *head;
+#ifdef DEBUG_PENDING_FREE
+	atomic_inc(&pending_free);
+#endif
+
+	// Atomically add this list to the list of VMA lists to free
+retry:
+	head = mm_free_vma_head;
+	// Make sure the compiler reads mm_free_vma_head just once.
+	barrier();
+	vma->vm_next_free_list = head;
+	if (cmpxchg(&mm_free_vma_head, head, vma) != head)
+		goto retry;
+
+	wake_up_process(mm_free_vma_task);
 }
 
 SYSCALL_DEFINE1(brk, unsigned long, brk)
@@ -250,7 +335,7 @@ SYSCALL_DEFINE1(brk, unsigned long, brk)
 	struct mm_struct *mm = current->mm;
 	unsigned long min_brk;
 
-	down_write(&mm->mmap_sem);
+	mm_lock(mm);
 
 #ifdef CONFIG_COMPAT_BRK
 	min_brk = mm->end_code;
@@ -294,7 +379,7 @@ set_brk:
 	mm->brk = brk;
 out:
 	retval = mm->brk;
-	up_write(&mm->mmap_sem);
+	mm_unlock(mm);
 	return retval;
 }
 
@@ -474,6 +559,7 @@ static void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 void ___vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 		    struct rb_node **rb_link, struct rb_node *rb_parent)
 {
+	BUG_ON(!mm_pf_is_locked(mm));
 	rb_link_node(&vma->vm_rb, rb_parent, rb_link);
 	rb_insert_color(&vma->vm_rb, &mm->mm_rb);
 }
@@ -483,6 +569,8 @@ static void __vma_link_file(struct vm_area_struct *vma)
 {
 	struct file *file;
 
+	// amdragon: Don't need vma lock here because this is all
+	// protected by the i_mmap_lock
 	file = vma->vm_file;
 	if (file) {
 		struct address_space *mapping = file->f_mapping;
@@ -505,8 +593,17 @@ static void
 __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 	   struct vma_insert *insert)
 {
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	// We do this here instead of in __vma_link_rb because the
+	// other user of __vma_link_rb is fork and that use doesn't
+	// need the lock.
+	mm_tree_lock(mm);
+#endif
 	__vma_link_list(mm, vma, insert);
 	__vma_link_rb(mm, vma, insert);
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	mm_tree_unlock(mm);
+#endif
 }
 
 // amdragon
@@ -551,6 +648,7 @@ static void __insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 
 	__vma = find_vma_prepare(mm, vma->vm_start, &insert);
 	BUG_ON(__vma && __vma->vm_start < vma->vm_end);
+	mm_pf_lock(mm);
 	__vma_link(mm, vma, &insert);
 	mm->map_count++;
 }
@@ -562,16 +660,27 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 {
 	struct vm_area_struct *next = vma->vm_next;
 
+	BUG_ON(!mm_pf_is_locked(mm));
+	vma->vm_unlinked = 1;
 	prev->vm_next = next;
 	if (next)
 		next->vm_prev = prev;
+#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+	mm_tree_lock(mm);
+#endif
 #ifdef CONFIG_AMDRAGON_CBTREE
 	BUG_ON(cb_erase(&mm->mm_cb, vma->vm_end) != vma);
 #else
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
 #endif
+#ifdef CONFIG_AMDRAGON_PICKY_TREE_LOCK
+	mm_tree_unlock(mm);
+#endif
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+#if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
+	mm_tree_unlock(mm);
+#endif
 }
 
 /*
@@ -593,6 +702,13 @@ int vma_adjust(struct vm_area_struct *vma, unsigned long start,
 	struct file *file = vma->vm_file;
 	long adjust_next = 0;
 	int remove_next = 0;
+
+	// amdragon: We could push this slightly later at the cost of
+	// having mm_pf_lock calls on most branches in this function.
+	// The added code and repeat checks probably aren't worth it,
+	// especially since the majority of cases (vma_merge calls),
+	// require this just a few instructions from now.
+	mm_pf_lock(mm);
 
 	if (next && !insert) {
 		struct vm_area_struct *exporter = NULL;
@@ -691,12 +807,16 @@ again:			remove_next = 1 + (end > next->vm_end);
 	kv->key = end;
 #endif
 
+	write_seqcount_begin(&vma->vm_bound_seq);
 	vma->vm_start = start;
 	vma->vm_end = end;
 	vma->vm_pgoff = pgoff;
+	write_seqcount_end(&vma->vm_bound_seq);
 	if (adjust_next) {
+		write_seqcount_begin(&next->vm_bound_seq);
 		next->vm_start += adjust_next << PAGE_SHIFT;
 		next->vm_pgoff += adjust_next;
+		write_seqcount_end(&next->vm_bound_seq);
 	}
 
 	if (root) {
@@ -738,7 +858,10 @@ again:			remove_next = 1 + (end > next->vm_end);
 			anon_vma_merge(vma, next);
 		mm->map_count--;
 		mpol_put(vma_policy(next));
-		kmem_cache_free(vm_area_cachep, next);
+		// amdragon: Delay free.  Since we delay free VMA
+		// lists, make next a list.
+		next->vm_next = NULL;
+		free_vma_list(next);
 		/*
 		 * In mprotect's case 6 (see comments on vma_merge),
 		 * we must remove another next too. It would clutter
@@ -772,9 +895,17 @@ static inline int is_mergeable_vma(struct vm_area_struct *vma,
 	return 1;
 }
 
-static inline int is_mergeable_anon_vma(struct anon_vma *anon_vma1,
+static inline int is_mergeable_anon_vma(struct mm_struct *mm,
+					struct anon_vma *anon_vma1,
 					struct anon_vma *anon_vma2)
 {
+	// amdragon: We have to take the vma lock now to prevent a
+	// concurrent page fault from filling in an anon_vma between
+	// now and when we finish the VMA merge.  However, once an
+	// anon_vma is assigned, it never changes, so we only need the
+	// lock now if either is NULL (and thus could change).
+	if (!anon_vma1 || !anon_vma2)
+		mm_pf_lock(mm);
 	return !anon_vma1 || !anon_vma2 || (anon_vma1 == anon_vma2);
 }
 
@@ -794,7 +925,7 @@ can_vma_merge_before(struct vm_area_struct *vma, unsigned long vm_flags,
 	struct anon_vma *anon_vma, struct file *file, pgoff_t vm_pgoff)
 {
 	if (is_mergeable_vma(vma, file, vm_flags) &&
-	    is_mergeable_anon_vma(anon_vma, vma->anon_vma)) {
+	    is_mergeable_anon_vma(vma->vm_mm, anon_vma, vma->anon_vma)) {
 		if (vma->vm_pgoff == vm_pgoff)
 			return 1;
 	}
@@ -813,7 +944,7 @@ can_vma_merge_after(struct vm_area_struct *vma, unsigned long vm_flags,
 	struct anon_vma *anon_vma, struct file *file, pgoff_t vm_pgoff)
 {
 	if (is_mergeable_vma(vma, file, vm_flags) &&
-	    is_mergeable_anon_vma(anon_vma, vma->anon_vma)) {
+	    is_mergeable_anon_vma(vma->vm_mm, anon_vma, vma->anon_vma)) {
 		pgoff_t vm_pglen;
 		vm_pglen = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 		if (vma->vm_pgoff + vm_pglen == vm_pgoff)
@@ -890,7 +1021,7 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 				mpol_equal(policy, vma_policy(next)) &&
 				can_vma_merge_before(next, vm_flags,
 					anon_vma, file, pgoff+pglen) &&
-				is_mergeable_anon_vma(prev->anon_vma,
+				is_mergeable_anon_vma(mm, prev->anon_vma,
 						      next->anon_vma)) {
 							/* cases 1, 6 */
 			err = vma_adjust(prev, prev->vm_start,
@@ -1058,6 +1189,9 @@ unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	int error;
 	unsigned long reqprot = prot;
 
+	// amdragon
+	verify_mm_writelocked(mm);
+
 	/*
 	 * Does the application expect PROT_READ to imply PROT_EXEC?
 	 *
@@ -1217,9 +1351,9 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
-	down_write(&current->mm->mmap_sem);
+	mm_lock(current->mm);
 	retval = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
-	up_write(&current->mm->mmap_sem);
+	mm_unlock(current->mm);
 
 	if (file)
 		fput(file);
@@ -1422,6 +1556,7 @@ munmap_back:
 			vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	}
 
+	mm_pf_lock(mm);
 	vma_link(mm, vma, &insert);
 	file = vma->vm_file;
 
@@ -1450,6 +1585,8 @@ unmap_and_free_vma:
 	unmap_region(mm, vma, insert.prev, vma->vm_start, vma->vm_end);
 	charged = 0;
 free_vma:
+	// amdragon: No need to delay this since the VMA didn't make
+	// it into the tree.
 	kmem_cache_free(vm_area_cachep, vma);
 unacct_error:
 	if (charged)
@@ -1684,6 +1821,27 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 		/* Check the cache first. */
 		/* (Cache hit rate is typically around 35%.) */
 		vma = mm->mmap_cache;
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+		if (vma && vma->vm_unlinked) {
+			// mmap_cache race: A stale VMA was left in
+			// the mmap_cache.  Why is it safe to even
+			// dereference this VMA?  The cache can only
+			// get filled with a stale VMA in a lock-less
+			// find_vma call, which must detect the unmap
+			// race and retry, at which point it will
+			// detect the stale cache, wipe it, and delay
+			// the free by one SRCU epoch.  Thus, the VMA
+			// in the mmap_cache is always safe to read,
+			// even if it's been freed.  We still need to
+			// check it here because the mmap_sem could
+			// have changed hands before a concurrent page
+			// fault figured out that the cache was stale.
+			AMDRAGON_LF_STAT_INC(mmap_cache_find_vma_shootdowns);
+			vma->vm_delay_free = 1;
+			mm->mmap_cache = NULL;
+			vma = NULL;
+		}
+#endif
 		if (!(vma && vma->vm_end > addr && vma->vm_start <= addr)) {
 #ifdef CONFIG_AMDRAGON_CBTREE
 			struct cb_kv *kv = cb_find_gt(&mm->mm_cb, addr);
@@ -1712,7 +1870,8 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 #endif
 			if (vma)
 				mm->mmap_cache = vma;
-		}
+		} else
+			AMDRAGON_LF_STAT_INC(mmap_cache_hit);
 	}
 	return vma;
 }
@@ -1998,6 +2157,7 @@ find_extend_vma(struct mm_struct * mm, unsigned long addr)
  */
 static void remove_vma_list(struct mm_struct *mm, struct vm_area_struct *vma)
 {
+	struct vm_area_struct *start = vma;
 	/* Update high watermark before we lower total_vm */
 	update_hiwater_vm(mm);
 	do {
@@ -2005,8 +2165,12 @@ static void remove_vma_list(struct mm_struct *mm, struct vm_area_struct *vma)
 
 		mm->total_vm -= nrpages;
 		vm_stat_account(mm, vma->vm_flags, vma->vm_file, -nrpages);
-		vma = remove_vma(vma);
+		// amdragon: We delay freeing and put the whole vma
+		// list on the delayed-free worklist, so don't free
+		// here.
+		vma = remove_vma(vma, 0);
 	} while (vma);
+	free_vma_list(start);
 	validate_mm(mm);
 }
 
@@ -2050,15 +2214,26 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *tail_vma = NULL;
 	unsigned long addr;
 
+	BUG_ON(!mm_pf_is_locked(mm));
 	insertion_point = (prev ? &prev->vm_next : &mm->mmap);
 	vma->vm_prev = NULL;
+#if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
+	mm_tree_lock(mm);
+#endif
 	do {
+		vma->vm_unlinked = 1;
+#ifdef CONFIG_AMDRAGON_PICKY_TREE_LOCK
+		mm_tree_lock(mm);
+#endif
 #ifdef CONFIG_AMDRAGON_CBTREE
 		// XXX This sucks.  We'll wind up doing about twice
 		// the traversal work that we need to.
 		BUG_ON(cb_erase(&mm->mm_cb, vma->vm_end) != vma);
 #else
 		rb_erase(&vma->vm_rb, &mm->mm_rb);
+#endif
+#ifdef CONFIG_AMDRAGON_PICKY_TREE_LOCK
+		mm_tree_unlock(mm);
 #endif
 		mm->map_count--;
 		tail_vma = vma;
@@ -2074,6 +2249,10 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 		addr = vma ?  vma->vm_start : mm->mmap_base;
 	mm->unmap_area(mm, addr);
 	mm->mmap_cache = NULL;		/* Kill the cache. */
+#if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
+	// Have to release after we clear the mmap_cache
+	mm_tree_unlock(mm);
+#endif
 }
 
 /*
@@ -2148,6 +2327,8 @@ static int __split_vma(struct mm_struct * mm, struct vm_area_struct * vma,
  out_free_mpol:
 	mpol_put(pol);
  out_free_vma:
+	// amdragon: No need to delay since the VMA didn't make it
+	// into the tree.
 	kmem_cache_free(vm_area_cachep, new);
  out_err:
 	return err;
@@ -2175,6 +2356,9 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 {
 	unsigned long end;
 	struct vm_area_struct *vma, *prev, *last;
+
+	// amdragon
+	verify_mm_writelocked(mm);
 
 	if ((start & ~PAGE_MASK) || start > TASK_SIZE || len > TASK_SIZE-start)
 		return -EINVAL;
@@ -2243,6 +2427,7 @@ int do_munmap(struct mm_struct *mm, unsigned long start, size_t len)
 	/*
 	 * Remove the vma's, and unmap the actual pages
 	 */
+	mm_pf_lock(mm);
 	detach_vmas_to_be_unmapped(mm, vma, prev, end);
 	unmap_region(mm, vma, prev, start, end);
 
@@ -2261,18 +2446,16 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 
 	profile_munmap(addr);
 
-	down_write(&mm->mmap_sem);
-	ret = do_munmap(mm, addr, len);
-	up_write(&mm->mmap_sem);
+	ret = do_munmap_locked(mm, addr, len);
 	return ret;
 }
 
 static inline void verify_mm_writelocked(struct mm_struct *mm)
 {
 #ifdef CONFIG_DEBUG_VM
-	if (unlikely(down_read_trylock(&mm->mmap_sem))) {
+	if (unlikely(mm_lock_tryread(mm))) {
 		WARN_ON(1);
-		up_read(&mm->mmap_sem);
+		mm_unlock_read(mm);
 	}
 #endif
 }
@@ -2367,6 +2550,7 @@ unsigned long do_brk(unsigned long addr, unsigned long len)
 	vma->vm_pgoff = pgoff;
 	vma->vm_flags = flags;
 	vma->vm_page_prot = vm_get_page_prot(flags);
+	mm_pf_lock(mm);
 	vma_link(mm, vma, &insert);
 out:
 	perf_event_mmap(vma);
@@ -2422,9 +2606,9 @@ void exit_mmap(struct mm_struct *mm)
 	 * with preemption enabled, without holding any MM locks.
 	 */
 	while (vma)
-		vma = remove_vma(vma);
-
-	BUG_ON(mm->nr_ptes > (FIRST_USER_ADDRESS+PMD_SIZE-1)>>PMD_SHIFT);
+		// amdragon: It's safe to immediately free VMA's here
+		// because no page fault handler can be racing.
+		vma = remove_vma(vma, 1);
 }
 
 /* Insert vm structure into process list sorted by address
@@ -2458,6 +2642,7 @@ int insert_vm_struct(struct mm_struct * mm, struct vm_area_struct * vma)
 	if ((vma->vm_flags & VM_ACCOUNT) &&
 	     security_vm_enough_memory_mm(mm, vma_pages(vma)))
 		return -ENOMEM;
+	mm_pf_lock(mm);
 	vma_link(mm, vma, &insert);
 	return 0;
 }
@@ -2514,6 +2699,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
 			}
 			if (new_vma->vm_ops && new_vma->vm_ops->open)
 				new_vma->vm_ops->open(new_vma);
+			mm_pf_lock(mm);
 			vma_link(mm, new_vma, &insert);
 		}
 	}
@@ -2522,6 +2708,7 @@ struct vm_area_struct *copy_vma(struct vm_area_struct **vmap,
  out_free_mempol:
 	mpol_put(pol);
  out_free_vma:
+	// amdragon: No need to delay
 	kmem_cache_free(vm_area_cachep, new_vma);
 	return NULL;
 }
@@ -2628,6 +2815,7 @@ int install_special_mapping(struct mm_struct *mm,
 	return 0;
 
 out:
+	// amdragon: No need to delay
 	kmem_cache_free(vm_area_cachep, vma);
 	return ret;
 }
@@ -2641,7 +2829,7 @@ static void vm_lock_anon_vma(struct mm_struct *mm, struct anon_vma *anon_vma)
 		 * The LSB of head.next can't change from under us
 		 * because we hold the mm_all_locks_mutex.
 		 */
-		spin_lock_nest_lock(&anon_vma->root->lock, &mm->mmap_sem);
+		mm_nest_spin_lock(&anon_vma->root->lock, mm);
 		/*
 		 * We can safely modify head.next after taking the
 		 * anon_vma->root->lock. If some other vma in this mm shares
@@ -2671,7 +2859,7 @@ static void vm_lock_mapping(struct mm_struct *mm, struct address_space *mapping)
 		 */
 		if (test_and_set_bit(AS_MM_ALL_LOCKS, &mapping->flags))
 			BUG();
-		spin_lock_nest_lock(&mapping->i_mmap_lock, &mm->mmap_sem);
+		mm_nest_spin_lock(&mapping->i_mmap_lock, mm);
 	}
 }
 
@@ -2713,7 +2901,7 @@ int mm_take_all_locks(struct mm_struct *mm)
 	struct anon_vma_chain *avc;
 	int ret = -EINTR;
 
-	BUG_ON(down_read_trylock(&mm->mmap_sem));
+	BUG_ON(mm_lock_tryread(mm));
 
 	mutex_lock(&mm_all_locks_mutex);
 
@@ -2786,7 +2974,7 @@ void mm_drop_all_locks(struct mm_struct *mm)
 	struct vm_area_struct *vma;
 	struct anon_vma_chain *avc;
 
-	BUG_ON(down_read_trylock(&mm->mmap_sem));
+	BUG_ON(mm_lock_tryread(mm));
 	BUG_ON(!mutex_is_locked(&mm_all_locks_mutex));
 
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
@@ -2808,5 +2996,142 @@ void __init mmap_init(void)
 	int ret;
 
 	ret = percpu_counter_init(&vm_committed_as, 0);
-	VM_BUG_ON(ret);
+	BUG_ON(ret);
+
+	ret = init_srcu_struct(&mm_srcu);
+	BUG_ON(ret);
 }
+
+static int __init mmap_init_kthread(void)
+{
+	// amdragon: We can't create a kthread in mmap_init because
+	// it's too early.  This is late enough that we can create
+	// kthread's, but that there's no danger of trying to free
+	// VMA's.
+	mm_free_vma_task = kthread_create(mm_free_vma_thread, NULL,
+					  "mm_free_vma");
+	BUG_ON(IS_ERR(mm_free_vma_task));
+
+#ifdef DEBUG_PENDING_FREE
+	mod_timer(&mm_free_vma_stats, jiffies);
+#endif
+	return 0;
+}
+__initcall(mmap_init_kthread);
+
+#ifdef AMDRAGON_LF_STATS
+
+int mm_lf_stat_unmap_races;
+int mm_lf_stat_anon_vma_retries;
+int mm_lf_stat_stack_guard_retries;
+int mm_lf_stat_type_retries;
+int mm_lf_stat_oob_retries;
+int mm_lf_stat_mmap_cache_hit;
+int mm_lf_stat_reuse_vma;
+int mm_lf_stat_reuse_vma_try_expand;
+int mm_lf_stat_reuse_vma_fail;
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+int mm_lf_stat_mmap_cache_pf_shootdowns;
+int mm_lf_stat_mmap_cache_find_vma_shootdowns;
+#endif
+
+static struct ctl_table lf_stats_table[] = {
+	{
+		.procname	= "unmap_races",
+		.data		= &mm_lf_stat_unmap_races,
+		.maxlen		= sizeof(mm_lf_stat_unmap_races),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "anon_vma_retries",
+		.data		= &mm_lf_stat_anon_vma_retries,
+		.maxlen		= sizeof(mm_lf_stat_anon_vma_retries),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "stack_guard_retries",
+		.data		= &mm_lf_stat_stack_guard_retries,
+		.maxlen		= sizeof(mm_lf_stat_stack_guard_retries),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "type_retries",
+		.data		= &mm_lf_stat_type_retries,
+		.maxlen		= sizeof(mm_lf_stat_type_retries),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "oob_retries",
+		.data		= &mm_lf_stat_oob_retries,
+		.maxlen		= sizeof(mm_lf_stat_oob_retries),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "mmap_cache_hit",
+		.data		= &mm_lf_stat_mmap_cache_hit,
+		.maxlen		= sizeof(mm_lf_stat_mmap_cache_hit),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "reuse_vma",
+		.data		= &mm_lf_stat_reuse_vma,
+		.maxlen		= sizeof(mm_lf_stat_reuse_vma),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "reuse_vma_try_expand",
+		.data		= &mm_lf_stat_reuse_vma_try_expand,
+		.maxlen		= sizeof(mm_lf_stat_reuse_vma_try_expand),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "reuse_vma_fail",
+		.data		= &mm_lf_stat_reuse_vma_fail,
+		.maxlen		= sizeof(mm_lf_stat_reuse_vma_fail),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
+	{
+		.procname	= "mmap_cache_pf_shootdowns",
+		.data		= &mm_lf_stat_mmap_cache_pf_shootdowns,
+		.maxlen		= sizeof(mm_lf_stat_mmap_cache_pf_shootdowns),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "mmap_cache_find_vma_shootdowns",
+		.data		= &mm_lf_stat_mmap_cache_find_vma_shootdowns,
+		.maxlen		= sizeof(mm_lf_stat_mmap_cache_find_vma_shootdowns),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
+	{ }
+};
+
+static struct ctl_path lf_stats_path[] = {
+	{ .procname = "vm" },
+	{ .procname = "lf_stats" },
+	{ }
+};
+
+static struct ctl_table_header *lf_stats_table_header;
+
+static int __init mmap_init_lf_stats(void)
+{
+	lf_stats_table_header = register_sysctl_paths(lf_stats_path, lf_stats_table);
+
+	return lf_stats_table_header ? 0 : -ENOMEM;
+}
+__initcall(mmap_init_lf_stats);
+
+#endif	/* AMDRAGON_LF_STATS */
