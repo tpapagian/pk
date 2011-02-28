@@ -1047,9 +1047,10 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		return;
 	}
 
+	// Protect VMA's
 	srcu_read_acquire(&mm_srcu);
 
-#ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+#if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) || defined(CONFIG_AMDRAGON_LOCKLESS_PF)
 	// In this case, the first VMA tree lookup is protected by the
 	// tree lock, so we needn't bother with the page fault lock.
 	// We'll still take the page fault lock if we retry.
@@ -1133,13 +1134,21 @@ lookup:
 	if (!(flags & FAULT_FLAG_NO_LOCK))
 		mm_tree_lock_read(mm);
 #endif
+#ifdef CONFIG_AMDRAGON_LOCKLESS_PF
+lookup:
+	// Protect VMA cbtree
+	rcu_read_lock();
+#endif
 	vma = find_vma(mm, address);
+#ifdef CONFIG_AMDRAGON_LOCKLESS_PF
+	rcu_read_unlock();
+#endif
 #ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
 	if (!(flags & FAULT_FLAG_NO_LOCK))
 		mm_tree_unlock_read(mm);
 #endif
 
-#ifndef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
+#if !(defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) || defined(CONFIG_AMDRAGON_LOCKLESS_PF))
 	// amdragon
 	if (!(flags & FAULT_FLAG_KEEP_LOCK)) {
 		mm_pf_unlock_read(mm);

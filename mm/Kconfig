@@ -335,4 +335,9 @@ config AMDRAGON_PICKY_TREE_LOCK
 config AMDRAGON_CBTREE
 	bool "Use a concurrent tree instead of a red-black tree for VMA's"
 	default y
+
+config AMDRAGON_LOCKLESS_PF
+	bool "Handle page faults with no locks in the common case"
+	default y
+	depends on AMDRAGON_CBTREE && !AMDRAGON_SPLIT_TREE_LOCK
 	select AMDRAGON_MMAP_CACHE_RACE
