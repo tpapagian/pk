@@ -708,6 +708,22 @@ again:			remove_next = 1 + (end > next->vm_end);
 			vma_prio_tree_remove(next, root);
 	}
 
+	// amdragon: Stock does this after adjusting vma.  We need to
+	// do it here in case vma is adjusted to overlap with next
+	// (possibly always?) for two reasons: in a racing page fault,
+	// there must be no confusion about which VMA to use and the
+	// keys in a cbtree must be unique (we're about to adjust
+	// vma's end and sometimes we set it equal to next's end!)
+	if (remove_next) {
+		/*
+		 * vma_merge has merged next into vma, and needs
+		 * us to remove next before dropping the locks.
+		 */
+		__vma_unlink(mm, next, vma);
+		if (file)
+			__remove_shared_vm_struct(next, file, mapping);
+	}
+
 #ifdef CONFIG_AMDRAGON_CBTREE
 	// XXX This sucks
 	struct cb_kv *kv = cb_find(&mm->mm_cb, vma->vm_end);
@@ -734,15 +750,7 @@ again:			remove_next = 1 + (end > next->vm_end);
 		flush_dcache_mmap_unlock(mapping);
 	}
 
-	if (remove_next) {
-		/*
-		 * vma_merge has merged next into vma, and needs
-		 * us to remove next before dropping the locks.
-		 */
-		__vma_unlink(mm, next, vma);
-		if (file)
-			__remove_shared_vm_struct(next, file, mapping);
-	} else if (insert) {
+	if (insert) {
 		/*
 		 * split_vma has split insert from vma, and needs
 		 * us to insert it before dropping the locks
