@@ -2837,16 +2837,33 @@ __initcall(mmap_init_kthread);
 	__x(reuse_vma_try_expand)		\
 	__x(reuse_vma_fail)
 
-#define DECLARE_ACCUM(stat) int mm_lf_stat_##stat;
+#define DECLARE_ACCUM(stat)					\
+	struct amdragon_lf_stat mm_lf_stat_##stat[NR_CPUS];	\
+	static int accum_##stat;
 DO_STATS(DECLARE_ACCUM)
+
+static int mm_accum(struct ctl_table *table, int write,
+		    void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	// Accumulate per-cpu values
+	int i, accum = 0;
+	struct amdragon_lf_stat *stat = table->extra1;
+	for (i = 0; i < NR_CPUS; ++i)
+		accum += atomic_read(&stat[i].counter);
+	// Set the global accumulator to give proc something to read
+	*((int*)table->data) = accum;
+	// Call the usual proc_dointvec
+	return proc_dointvec(table, write, buffer, lenp, ppos);
+}
 
 #define TABLE_ENTRY(stat)						\
 	{								\
 		.procname	= #stat,				\
-		.data		= &mm_lf_stat_##stat,			\
-		.maxlen		= sizeof(mm_lf_stat_##stat),		\
+		.data		= &accum_##stat,			\
+		.maxlen		= sizeof(accum_##stat),			\
 		.mode		= 0444,					\
-		.proc_handler	= proc_dointvec,			\
+		.proc_handler	= mm_accum,				\
+		.extra1		= mm_lf_stat_##stat,			\
 	},
 
 static struct ctl_table lf_stats_table[] = {
