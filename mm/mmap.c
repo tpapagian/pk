@@ -2852,11 +2852,12 @@ static ssize_t lf_stats_show(struct kobject *kobj, struct kobj_attribute *attr, 
 	struct lf_stats_kobj *stats =
 		container_of(attr, struct lf_stats_kobj, attr);
 	// Accumulate per-cpu values
-	int i, accum = 0;
+	int i;
+	unsigned long long accum = 0;
 	for (i = 0; i < NR_CPUS; ++i)
-		accum += atomic_read(&stats->stats[i].counter);
+		accum += stats->stats[i].counter;
 	// Format result
-	return snprintf(buf, PAGE_SIZE, "%d\n", accum);
+	return snprintf(buf, PAGE_SIZE, "%llu\n", accum);
 }
 
 #define LF_STATS_KOBJ(stat)					\
