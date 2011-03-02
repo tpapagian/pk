@@ -1130,12 +1130,12 @@ retry:
 lookup:
 	// We only need the tree lock if we're not already holding the
 	// page fault lock
-	if (!(flags & FAULT_FLAG_NO_LOCK))
+	if (flags & FAULT_FLAG_NO_LOCK)
 		mm_tree_lock_read(mm);
 #endif
 	vma = find_vma(mm, address);
 #ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
-	if (!(flags & FAULT_FLAG_NO_LOCK))
+	if (flags & FAULT_FLAG_NO_LOCK)
 		mm_tree_unlock_read(mm);
 #endif
 
