@@ -2905,7 +2905,7 @@ __initcall(mmap_init_kthread);
 	__x(mmap_cache_pf_shootdowns)	    \
 	__x(mmap_cache_find_vma_shootdowns)
 #else
-#define DO_STATS_MMAP_CACHE_RACE()
+#define DO_STATS_MMAP_CACHE_RACE(__x)
 #endif
 
 #define DECLARE_ACCUM(stat)					\
