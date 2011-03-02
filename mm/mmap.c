@@ -2837,53 +2837,49 @@ __initcall(mmap_init_kthread);
 	__x(reuse_vma_try_expand)		\
 	__x(reuse_vma_fail)
 
-#define DECLARE_ACCUM(stat)					\
-	struct amdragon_lf_stat mm_lf_stat_##stat[NR_CPUS];	\
-	static int accum_##stat;
-DO_STATS(DECLARE_ACCUM)
+#define DECLARE_STAT(stat)					\
+	struct amdragon_lf_stat mm_lf_stat_##stat[NR_CPUS];
+DO_STATS(DECLARE_STAT)
 
-static int mm_accum(struct ctl_table *table, int write,
-		    void __user *buffer, size_t *lenp, loff_t *ppos)
+struct lf_stats_kobj
 {
+	struct kobj_attribute attr;
+	struct amdragon_lf_stat *stats;
+};
+
+static ssize_t lf_stats_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	struct lf_stats_kobj *stats =
+		container_of(attr, struct lf_stats_kobj, attr);
 	// Accumulate per-cpu values
 	int i, accum = 0;
-	struct amdragon_lf_stat *stat = table->extra1;
 	for (i = 0; i < NR_CPUS; ++i)
-		accum += atomic_read(&stat[i].counter);
-	// Set the global accumulator to give proc something to read
-	*((int*)table->data) = accum;
-	// Call the usual proc_dointvec
-	return proc_dointvec(table, write, buffer, lenp, ppos);
+		accum += atomic_read(&stats->stats[i].counter);
+	// Format result
+	return snprintf(buf, PAGE_SIZE, "%d\n", accum);
 }
 
-#define TABLE_ENTRY(stat)						\
-	{								\
-		.procname	= #stat,				\
-		.data		= &accum_##stat,			\
-		.maxlen		= sizeof(accum_##stat),			\
-		.mode		= 0444,					\
-		.proc_handler	= mm_accum,				\
-		.extra1		= mm_lf_stat_##stat,			\
-	},
+#define LF_STATS_KOBJ(stat)					\
+	static struct lf_stats_kobj lf_stats_kobj_##stat = {	\
+		__ATTR(stat, 0444, lf_stats_show, NULL),	\
+		mm_lf_stat_##stat				\
+	};
+DO_STATS(LF_STATS_KOBJ);
 
-static struct ctl_table lf_stats_table[] = {
-	DO_STATS(TABLE_ENTRY)
-	{ }
+static struct attribute *lf_stats_attrs[] = {
+#define ATTR_PTR(stat) &lf_stats_kobj_##stat.attr.attr,
+	DO_STATS(ATTR_PTR)
+	NULL
 };
 
-static struct ctl_path lf_stats_path[] = {
-	{ .procname = "vm" },
-	{ .procname = "lf_stats" },
-	{ }
+static struct attribute_group lf_stats_attr_group = {
+	.name = "lf_stats",
+	.attrs = lf_stats_attrs,
 };
-
-static struct ctl_table_header *lf_stats_table_header;
 
 static int __init mmap_init_lf_stats(void)
 {
-	lf_stats_table_header = register_sysctl_paths(lf_stats_path, lf_stats_table);
-
-	return lf_stats_table_header ? 0 : -ENOMEM;
+	return sysfs_create_group(mm_kobj, &lf_stats_attr_group);
 }
 __initcall(mmap_init_lf_stats);
 
