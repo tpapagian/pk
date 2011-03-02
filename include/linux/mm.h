@@ -18,8 +18,17 @@
 
 #define AMDRAGON_LF_STATS
 #ifdef AMDRAGON_LF_STATS
-#define AMDRAGON_LF_STAT_INC(var) \
-	do { extern int mm_lf_stat_##var; mm_lf_stat_##var++; } while (0)
+struct amdragon_lf_stat
+{
+	atomic_t counter;
+	// Why ____ instead of __?  Because otherwise it puts a
+	// section on it.
+} ____cacheline_aligned_in_smp;
+#define AMDRAGON_LF_STAT_INC(var)					\
+	do {								\
+		extern struct amdragon_lf_stat mm_lf_stat_##var[];	\
+		atomic_add(1, &mm_lf_stat_##var[smp_processor_id()].counter); \
+	} while (0)
 #else
 #define AMDRAGON_LF_STAT_INC(var) do { } while (0)
 #endif

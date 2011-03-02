@@ -3057,100 +3057,57 @@ __initcall(mmap_init_kthread);
 
 #ifdef AMDRAGON_LF_STATS
 
-int mm_lf_stat_unmap_races;
-int mm_lf_stat_anon_vma_retries;
-int mm_lf_stat_stack_guard_retries;
-int mm_lf_stat_type_retries;
-int mm_lf_stat_oob_retries;
-int mm_lf_stat_mmap_cache_hit;
-int mm_lf_stat_reuse_vma;
-int mm_lf_stat_reuse_vma_try_expand;
-int mm_lf_stat_reuse_vma_fail;
+#define DO_STATS(__x)				\
+	__x(unmap_races)			\
+	__x(anon_vma_retries)			\
+	__x(stack_guard_retries)		\
+	__x(type_retries)			\
+	__x(oob_retries)			\
+	__x(mmap_cache_hit)			\
+	__x(reuse_vma)				\
+	__x(reuse_vma_try_expand)		\
+	__x(reuse_vma_fail)			\
+	DO_STATS_MMAP_CACHE_RACE(__x)
+
 #ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
-int mm_lf_stat_mmap_cache_pf_shootdowns;
-int mm_lf_stat_mmap_cache_find_vma_shootdowns;
+#define DO_STATS_MMAP_CACHE_RACE(__x)	    \
+	__x(mmap_cache_pf_shootdowns)	    \
+	__x(mmap_cache_find_vma_shootdowns)
+#else
+#define DO_STATS_MMAP_CACHE_RACE()
 #endif
 
+#define DECLARE_ACCUM(stat)					\
+	struct amdragon_lf_stat mm_lf_stat_##stat[NR_CPUS];	\
+	static int accum_##stat;
+DO_STATS(DECLARE_ACCUM)
+
+static int mm_accum(struct ctl_table *table, int write,
+		    void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	// Accumulate per-cpu values
+	int i, accum = 0;
+	struct amdragon_lf_stat *stat = table->extra1;
+	for (i = 0; i < NR_CPUS; ++i)
+		accum += atomic_read(&stat[i].counter);
+	// Set the global accumulator to give proc something to read
+	*((int*)table->data) = accum;
+	// Call the usual proc_dointvec
+	return proc_dointvec(table, write, buffer, lenp, ppos);
+}
+
+#define TABLE_ENTRY(stat)						\
+	{								\
+		.procname	= #stat,				\
+		.data		= &accum_##stat,			\
+		.maxlen		= sizeof(accum_##stat),			\
+		.mode		= 0444,					\
+		.proc_handler	= mm_accum,				\
+		.extra1		= mm_lf_stat_##stat,			\
+	},
+
 static struct ctl_table lf_stats_table[] = {
-	{
-		.procname	= "unmap_races",
-		.data		= &mm_lf_stat_unmap_races,
-		.maxlen		= sizeof(mm_lf_stat_unmap_races),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "anon_vma_retries",
-		.data		= &mm_lf_stat_anon_vma_retries,
-		.maxlen		= sizeof(mm_lf_stat_anon_vma_retries),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "stack_guard_retries",
-		.data		= &mm_lf_stat_stack_guard_retries,
-		.maxlen		= sizeof(mm_lf_stat_stack_guard_retries),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "type_retries",
-		.data		= &mm_lf_stat_type_retries,
-		.maxlen		= sizeof(mm_lf_stat_type_retries),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "oob_retries",
-		.data		= &mm_lf_stat_oob_retries,
-		.maxlen		= sizeof(mm_lf_stat_oob_retries),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "mmap_cache_hit",
-		.data		= &mm_lf_stat_mmap_cache_hit,
-		.maxlen		= sizeof(mm_lf_stat_mmap_cache_hit),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "reuse_vma",
-		.data		= &mm_lf_stat_reuse_vma,
-		.maxlen		= sizeof(mm_lf_stat_reuse_vma),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "reuse_vma_try_expand",
-		.data		= &mm_lf_stat_reuse_vma_try_expand,
-		.maxlen		= sizeof(mm_lf_stat_reuse_vma_try_expand),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "reuse_vma_fail",
-		.data		= &mm_lf_stat_reuse_vma_fail,
-		.maxlen		= sizeof(mm_lf_stat_reuse_vma_fail),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
-	{
-		.procname	= "mmap_cache_pf_shootdowns",
-		.data		= &mm_lf_stat_mmap_cache_pf_shootdowns,
-		.maxlen		= sizeof(mm_lf_stat_mmap_cache_pf_shootdowns),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "mmap_cache_find_vma_shootdowns",
-		.data		= &mm_lf_stat_mmap_cache_find_vma_shootdowns,
-		.maxlen		= sizeof(mm_lf_stat_mmap_cache_find_vma_shootdowns),
-		.mode		= 0444,
-		.proc_handler	= proc_dointvec,
-	},
-#endif
+	DO_STATS(TABLE_ENTRY)
 	{ }
 };
 
