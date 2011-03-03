@@ -1,7 +1,8 @@
 #ifndef __LINUX_MM_STATS_H
 #define __LINUX_MM_STATS_H
 
-#define AMDRAGON_FOR_MM_STAT(__x)
+#define AMDRAGON_FOR_MM_STAT(__x)		\
+	__x(mmap_cache_hit)
 
 #ifdef CONFIG_AMDRAGON_MM_STATS
 
