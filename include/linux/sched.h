@@ -1234,6 +1234,12 @@ struct task_struct {
 	struct sched_info sched_info;
 #endif
 
+	// amdragon: If task is not running, then run_accum is the
+	// total cycles that task has run for.  If it is running, then
+	// run_accum + (get_cycles() - last_run_start) is how many
+	// cycles it has been running for.
+	cycles_t run_accum, last_run_start;
+
 	struct list_head tasks;
 	struct plist_node pushable_tasks;
 
