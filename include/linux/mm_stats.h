@@ -2,7 +2,9 @@
 #define __LINUX_MM_STATS_H
 
 #define AMDRAGON_FOR_MM_STAT(__x)		\
-	__x(mmap_cache_hit)
+	__x(mmap_cache_hit)			\
+	__x(pf_run_cycles)			\
+	__x(pf_wall_cycles)
 
 #ifdef CONFIG_AMDRAGON_MM_STATS
 

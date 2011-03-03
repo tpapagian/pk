@@ -12,6 +12,7 @@
 #include <linux/mmiotrace.h>		/* kmmio_handler, ...		*/
 #include <linux/perf_event.h>		/* perf_sw_event		*/
 #include <linux/hugetlb.h>		/* hstate_index_to_shift	*/
+#include <linux/mm_stats.h>
 
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
@@ -961,8 +962,18 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY |
 					(write ? FAULT_FLAG_WRITE : 0);
 
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t start_tsc, end_tsc;
+	cycles_t start_run_tsc, end_run_tsc;
+#endif
+
 	tsk = current;
 	mm = tsk->mm;
+
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	start_tsc = get_cycles();
+	start_run_tsc = tsk->run_accum + (start_tsc - tsk->last_run_start);
+#endif
 
 	/* Get the faulting address: */
 	address = read_cr2();
@@ -1157,4 +1168,12 @@ good_area:
 	check_v8086_mode(regs, address, tsk);
 
 	up_read(&mm->mmap_sem);
+
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	end_tsc = get_cycles();
+	end_run_tsc = tsk->run_accum + (end_tsc - tsk->last_run_start);
+
+	AMDRAGON_MM_STAT_ADD(pf_wall_cycles, end_tsc - start_tsc);
+	AMDRAGON_MM_STAT_ADD(pf_run_cycles, end_run_tsc - start_run_tsc);
+#endif
 }
