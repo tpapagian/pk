@@ -1240,6 +1240,13 @@ struct task_struct {
 	// cycles it has been running for.
 	cycles_t run_accum, last_run_start;
 
+#ifdef CONFIG_AMDRAGON_CONTENTION_STATS
+	// amdragon: Count of lock contentions (only rwsem currently).
+	// Used to detect contended versus uncontended acquires
+	// without the overhead of a try_lock.
+	int contention_count;
+#endif
+
 	struct list_head tasks;
 	struct plist_node pushable_tasks;
 

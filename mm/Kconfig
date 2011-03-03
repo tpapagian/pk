@@ -310,8 +310,12 @@ config NEED_PER_CPU_KM
 	bool
 	default y
 
+config AMDRAGON_CONTENTION_STATS
+	bool
+
 config AMDRAGON_MM_STATS
 	bool "Record global mm statistics"
 	default y
+	select AMDRAGON_CONTENTION_STATS
 	help
 	  Counters will be reported in /sys/kernel/mm/mm_stats.
