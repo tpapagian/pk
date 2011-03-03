@@ -309,3 +309,9 @@ config NEED_PER_CPU_KM
 	depends on !SMP
 	bool
 	default y
+
+config AMDRAGON_MM_STATS
+	bool "Record global mm statistics"
+	default y
+	help
+	  Counters will be reported in /sys/kernel/mm/mm_stats.

@@ -29,6 +29,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
 #include <linux/audit.h>
+#include <linux/mm_stats.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
