@@ -58,6 +58,7 @@
 #include <linux/swapops.h>
 #include <linux/elf.h>
 #include <linux/gfp.h>
+#include <linux/mm_stats.h>
 
 #include <asm/io.h>
 #include <asm/pgalloc.h>
@@ -3237,7 +3238,7 @@ static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned lo
 		// amdragon: We need the lock to consistently check
 		// prev and, more importantly, to expand the stack.
 		if (flags & FAULT_FLAG_NO_LOCK) {
-			AMDRAGON_LF_STAT_INC(stack_guard_retries);
+			AMDRAGON_MM_STAT_INC(stack_guard_retries);
 			return VM_FAULT_RETRY;
 		}
 
@@ -3256,7 +3257,7 @@ static inline int check_stack_guard_page(struct vm_area_struct *vma, unsigned lo
 		struct vm_area_struct *next = vma->vm_next;
 
 		if (flags & FAULT_FLAG_NO_LOCK) {
-			AMDRAGON_LF_STAT_INC(stack_guard_retries);
+			AMDRAGON_MM_STAT_INC(stack_guard_retries);
 			return VM_FAULT_RETRY;
 		}
 
@@ -3301,7 +3302,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			goto unlock;
 		// amdragon: Check for unmap race
 		if (vma->vm_unlinked || address < vma->vm_start || address >= vma->vm_end) {
-			AMDRAGON_LF_STAT_INC(unmap_races);
+			AMDRAGON_MM_STAT_INC(unmap_races);
 			BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
 			ret = VM_FAULT_RETRY;
 			goto unlock;
@@ -3314,7 +3315,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (unlikely(r == VM_FAULT_OOM))
 		goto oom;
 	if (unlikely(r == VM_FAULT_RETRY)) {
-		AMDRAGON_LF_STAT_INC(anon_vma_retries);
+		AMDRAGON_MM_STAT_INC(anon_vma_retries);
 		return VM_FAULT_RETRY;
 	}
 
@@ -3354,7 +3355,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	// which will also hold the PTE lock (see zap_pte_range).
 	// Races with VMA expansions are not an issue.
 	if (vma->vm_unlinked || address < start || address >= end) {
-		AMDRAGON_LF_STAT_INC(unmap_races);
+		AMDRAGON_MM_STAT_INC(unmap_races);
 		BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
 		// Have to retry.  This time we'll do it with the tree
 		// lock to ensure progress.
@@ -3640,7 +3641,7 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 #define RETRY_IF_NO_LOCK()					\
 	do {							\
 		if (flags & FAULT_FLAG_NO_LOCK) {		\
-			AMDRAGON_LF_STAT_INC(type_retries);	\
+			AMDRAGON_MM_STAT_INC(type_retries);	\
 			return VM_FAULT_RETRY;			\
 		}						\
 	} while (0)

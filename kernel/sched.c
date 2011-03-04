@@ -75,6 +75,7 @@
 
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
+#include <asm/timex.h>
 
 #include "sched_cpupri.h"
 #include "workqueue_sched.h"
