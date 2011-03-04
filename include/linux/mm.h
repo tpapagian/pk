@@ -16,26 +16,6 @@
 #include <linux/pfn.h>
 #include <linux/sched.h>	/* amdragon: for struct task_struct */
 
-#define AMDRAGON_LF_STATS
-#ifdef AMDRAGON_LF_STATS
-struct amdragon_lf_stat
-{
-	unsigned long long counter;
-	// Why ____ instead of __?  Because otherwise it puts a
-	// section on it.
-} ____cacheline_aligned_in_smp;
-#define AMDRAGON_LF_STAT_ADD(var, amt)					\
-	do {								\
-		extern struct amdragon_lf_stat mm_lf_stat_##var[];	\
-		preempt_disable();					\
-		mm_lf_stat_##var[smp_processor_id()].counter += amt;	\
-		preempt_enable();					\
-	} while (0)
-#else
-#define AMDRAGON_LF_STAT_ADD(var, amt) do { } while (0)
-#endif
-#define AMDRAGON_LF_STAT_INC(var) AMDRAGON_LF_STAT_ADD(var, 1)
-
 struct mempolicy;
 struct anon_vma;
 struct file_ra_state;

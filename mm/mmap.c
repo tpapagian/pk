@@ -30,6 +30,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
 #include <linux/audit.h>
+#include <linux/mm_stats.h>
 #include <linux/srcu.h>
 #include <linux/kthread.h>
 
@@ -1730,7 +1731,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 			if (vma)
 				mm->mmap_cache = vma;
 		} else
-			AMDRAGON_LF_STAT_INC(mmap_cache_hit);
+			AMDRAGON_MM_STAT_INC(mmap_cache_hit);
 	}
 	return vma;
 }
@@ -2823,65 +2824,3 @@ static int __init mmap_init_kthread(void)
 	return 0;
 }
 __initcall(mmap_init_kthread);
-
-#ifdef AMDRAGON_LF_STATS
-
-#define DO_STATS(__x)				\
-	__x(unmap_races)			\
-	__x(anon_vma_retries)			\
-	__x(stack_guard_retries)		\
-	__x(type_retries)			\
-	__x(oob_retries)			\
-	__x(mmap_cache_hit)			\
-	__x(reuse_vma)				\
-	__x(reuse_vma_try_expand)		\
-	__x(reuse_vma_fail)
-
-#define DECLARE_STAT(stat)					\
-	struct amdragon_lf_stat mm_lf_stat_##stat[NR_CPUS];
-DO_STATS(DECLARE_STAT)
-
-struct lf_stats_kobj
-{
-	struct kobj_attribute attr;
-	struct amdragon_lf_stat *stats;
-};
-
-static ssize_t lf_stats_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	struct lf_stats_kobj *stats =
-		container_of(attr, struct lf_stats_kobj, attr);
-	// Accumulate per-cpu values
-	int i;
-	unsigned long long accum = 0;
-	for (i = 0; i < NR_CPUS; ++i)
-		accum += stats->stats[i].counter;
-	// Format result
-	return snprintf(buf, PAGE_SIZE, "%llu\n", accum);
-}
-
-#define LF_STATS_KOBJ(stat)					\
-	static struct lf_stats_kobj lf_stats_kobj_##stat = {	\
-		__ATTR(stat, 0444, lf_stats_show, NULL),	\
-		mm_lf_stat_##stat				\
-	};
-DO_STATS(LF_STATS_KOBJ);
-
-static struct attribute *lf_stats_attrs[] = {
-#define ATTR_PTR(stat) &lf_stats_kobj_##stat.attr.attr,
-	DO_STATS(ATTR_PTR)
-	NULL
-};
-
-static struct attribute_group lf_stats_attr_group = {
-	.name = "lf_stats",
-	.attrs = lf_stats_attrs,
-};
-
-static int __init mmap_init_lf_stats(void)
-{
-	return sysfs_create_group(mm_kobj, &lf_stats_attr_group);
-}
-__initcall(mmap_init_lf_stats);
-
-#endif	/* AMDRAGON_LF_STATS */
