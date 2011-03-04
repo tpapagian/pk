@@ -3,6 +3,10 @@
 
 #ifdef __KERNEL__
 
+#ifdef CONFIG_AMDRAGON_MM_STATS
+#include <linux/mm_stats.h>
+#endif
+
 /* mm_struct locking */
 
 static inline void
@@ -173,13 +177,36 @@ mm_tree_unlock(struct mm_struct *mm)
 static inline void
 mm_tree_lock_read(struct mm_struct *mm)
 {
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t start, end;
+	int contention_count = current->contention_count;
+	start = get_cycles();
+#endif
 	down_read(&mm->tree_sem);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	end = get_cycles();
+	if (current->contention_count == contention_count) {
+		AMDRAGON_MM_STAT_INC(tree_lock_read_uncontended);
+		AMDRAGON_MM_STAT_ADD(tree_lock_read_uncontended_cycles, end-start);
+	} else {
+		AMDRAGON_MM_STAT_INC(tree_lock_read_contended);
+		AMDRAGON_MM_STAT_ADD(tree_lock_read_contended_cycles, end-start);
+	}
+#endif
 }
 
 static inline void
 mm_tree_unlock_read(struct mm_struct *mm)
 {
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t start, end;
+	start = get_cycles();
+#endif
 	up_read(&mm->tree_sem);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	end = get_cycles();
+	AMDRAGON_MM_STAT_ADD(tree_lock_read_release_cycles, end-start);
+#endif
 }
 #endif
 
