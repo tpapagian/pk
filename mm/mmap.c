@@ -30,6 +30,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
 #include <linux/audit.h>
+#include <linux/mm_stats.h>
 #include <linux/srcu.h>
 #include <linux/kthread.h>
 
@@ -1750,7 +1751,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 			// check it here because the mmap_sem could
 			// have changed hands before a concurrent page
 			// fault figured out that the cache was stale.
-			AMDRAGON_LF_STAT_INC(mmap_cache_find_vma_shootdowns);
+			AMDRAGON_MM_STAT_INC(mmap_cache_find_vma_shootdowns);
 			vma->vm_delay_free = 1;
 			mm->mmap_cache = NULL;
 			vma = NULL;
@@ -1779,7 +1780,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 			if (vma)
 				mm->mmap_cache = vma;
 		} else
-			AMDRAGON_LF_STAT_INC(mmap_cache_hit);
+			AMDRAGON_MM_STAT_INC(mmap_cache_hit);
 	}
 	return vma;
 }
@@ -2885,77 +2886,3 @@ static int __init mmap_init_kthread(void)
 	return 0;
 }
 __initcall(mmap_init_kthread);
-
-#ifdef AMDRAGON_LF_STATS
-
-#define DO_STATS(__x)				\
-	__x(unmap_races)			\
-	__x(anon_vma_retries)			\
-	__x(stack_guard_retries)		\
-	__x(type_retries)			\
-	__x(oob_retries)			\
-	__x(mmap_cache_hit)			\
-	__x(reuse_vma)				\
-	__x(reuse_vma_try_expand)		\
-	__x(reuse_vma_fail)			\
-	DO_STATS_MMAP_CACHE_RACE(__x)
-
-#ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
-#define DO_STATS_MMAP_CACHE_RACE(__x)	    \
-	__x(mmap_cache_pf_shootdowns)	    \
-	__x(mmap_cache_find_vma_shootdowns)
-#else
-#define DO_STATS_MMAP_CACHE_RACE(__x)
-#endif
-
-#define DECLARE_ACCUM(stat)					\
-	struct amdragon_lf_stat mm_lf_stat_##stat[NR_CPUS];	\
-	static int accum_##stat;
-DO_STATS(DECLARE_ACCUM)
-
-static int mm_accum(struct ctl_table *table, int write,
-		    void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	// Accumulate per-cpu values
-	int i, accum = 0;
-	struct amdragon_lf_stat *stat = table->extra1;
-	for (i = 0; i < NR_CPUS; ++i)
-		accum += atomic_read(&stat[i].counter);
-	// Set the global accumulator to give proc something to read
-	*((int*)table->data) = accum;
-	// Call the usual proc_dointvec
-	return proc_dointvec(table, write, buffer, lenp, ppos);
-}
-
-#define TABLE_ENTRY(stat)						\
-	{								\
-		.procname	= #stat,				\
-		.data		= &accum_##stat,			\
-		.maxlen		= sizeof(accum_##stat),			\
-		.mode		= 0444,					\
-		.proc_handler	= mm_accum,				\
-		.extra1		= mm_lf_stat_##stat,			\
-	},
-
-static struct ctl_table lf_stats_table[] = {
-	DO_STATS(TABLE_ENTRY)
-	{ }
-};
-
-static struct ctl_path lf_stats_path[] = {
-	{ .procname = "vm" },
-	{ .procname = "lf_stats" },
-	{ }
-};
-
-static struct ctl_table_header *lf_stats_table_header;
-
-static int __init mmap_init_lf_stats(void)
-{
-	lf_stats_table_header = register_sysctl_paths(lf_stats_path, lf_stats_table);
-
-	return lf_stats_table_header ? 0 : -ENOMEM;
-}
-__initcall(mmap_init_lf_stats);
-
-#endif	/* AMDRAGON_LF_STATS */

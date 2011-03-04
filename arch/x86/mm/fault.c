@@ -12,6 +12,7 @@
 #include <linux/mmiotrace.h>		/* kmmio_handler, ...		*/
 #include <linux/perf_event.h>		/* perf_sw_event		*/
 #include <linux/hugetlb.h>		/* hstate_index_to_shift	*/
+#include <linux/mm_stats.h>
 #include <linux/mm_lock.h>
 
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -960,8 +961,18 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY |
 					(write ? FAULT_FLAG_WRITE : 0);
 
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t start_tsc, end_tsc;
+	cycles_t start_run_tsc, end_run_tsc;
+#endif
+
 	tsk = current;
 	mm = tsk->mm;
+
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	start_tsc = get_cycles();
+	start_run_tsc = tsk->run_accum + (start_tsc - tsk->last_run_start);
+#endif
 
 	/* Get the faulting address: */
 	address = read_cr2();
@@ -1104,7 +1115,7 @@ retry:
 			// not be freed when our SRCU read section
 			// ends, but will be safe to free one epoch
 			// later.
-			AMDRAGON_LF_STAT_INC(mmap_cache_pf_shootdowns);
+			AMDRAGON_MM_STAT_INC(mmap_cache_pf_shootdowns);
 			vma->vm_delay_free = 1;
 			mm->mmap_cache = NULL;
 		}
@@ -1112,18 +1123,18 @@ retry:
 		if (!vma->vm_unlinked && vma->vm_end > address) {
 			// Common case: Address lies in VMA
 			if(vma->vm_start <= address) {
-				AMDRAGON_LF_STAT_INC(reuse_vma);
+				AMDRAGON_MM_STAT_INC(reuse_vma);
 				goto good_area;
 			}
 			// Less common: Address lies between end of
 			// previous VMA and cached one
 			if (!vma->vm_prev ||
 			    vma->vm_prev->vm_end <= address) {
-				AMDRAGON_LF_STAT_INC(reuse_vma_try_expand);
+				AMDRAGON_MM_STAT_INC(reuse_vma_try_expand);
 				goto maybe_good_area;
 			}
 		}
-		AMDRAGON_LF_STAT_INC(reuse_vma_fail);
+		AMDRAGON_MM_STAT_INC(reuse_vma_fail);
 	}
 
 #ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
@@ -1160,7 +1171,7 @@ maybe_good_area:
 	// we need the lock anyway if it's case 2.  If it's case 1 or
 	// 2, we'll almost certainly fast path right back here.
 	if (flags & FAULT_FLAG_NO_LOCK) {
-		AMDRAGON_LF_STAT_INC(oob_retries);
+		AMDRAGON_MM_STAT_INC(oob_retries);
 		flags |= FAULT_FLAG_KEEP_LOCK;
 		flags &= ~FAULT_FLAG_NO_LOCK;
 		goto retry;
@@ -1245,6 +1256,14 @@ good_area:
 
 	if (!(flags & FAULT_FLAG_NO_LOCK))
 		mm_pf_unlock_read(mm);
+
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	end_tsc = get_cycles();
+	end_run_tsc = tsk->run_accum + (end_tsc - tsk->last_run_start);
+
+	AMDRAGON_MM_STAT_ADD(pf_wall_cycles, end_tsc - start_tsc);
+	AMDRAGON_MM_STAT_ADD(pf_run_cycles, end_run_tsc - start_run_tsc);
+#endif
 
 done_srcu:
 	srcu_read_release(&mm_srcu);
