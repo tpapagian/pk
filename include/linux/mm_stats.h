@@ -3,6 +3,8 @@
 
 #define AMDRAGON_FOR_MM_STAT(__x)		\
 	__x(mmap_cache_hit)			\
+	__x(pf_count)				\
+	__x(pf_find_vma_cycles)			\
 	__x(pf_run_cycles)			\
 	__x(pf_wall_cycles)
 

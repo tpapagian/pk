@@ -965,6 +965,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 #ifdef CONFIG_AMDRAGON_MM_STATS
 	cycles_t start_tsc, end_tsc;
 	cycles_t start_run_tsc, end_run_tsc;
+	cycles_t find_vma_start, find_vma_end;
 #endif
 
 	tsk = current;
@@ -1092,7 +1093,13 @@ retry:
 		might_sleep();
 	}
 
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	find_vma_start = get_cycles();
+#endif
 	vma = find_vma(mm, address);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	find_vma_end = get_cycles();
+#endif
 	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address);
 		return;
@@ -1175,5 +1182,7 @@ good_area:
 
 	AMDRAGON_MM_STAT_ADD(pf_wall_cycles, end_tsc - start_tsc);
 	AMDRAGON_MM_STAT_ADD(pf_run_cycles, end_run_tsc - start_run_tsc);
+	AMDRAGON_MM_STAT_ADD(pf_find_vma_cycles, find_vma_end - find_vma_start);
+	AMDRAGON_MM_STAT_INC(pf_count);
 #endif
 }
