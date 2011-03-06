@@ -416,6 +416,14 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 	 */
 	smp_wmb(); /* Could be smp_wmb__xxx(before|after)_spin_lock */
 
+#ifdef CONFIG_AMDRAGON_ATOMIC_PGD_UPDATE
+	if (!pmd_populate_if_clear(mm, pmd, new)) {
+		pte_free(mm, new);
+		AMDRAGON_MM_STAT_INC(pte_alloc_race);
+	} else
+		// XXX Is it okay to do this without the PTL?
+		atomic_inc(&mm->nr_ptes);
+#else
 	spin_lock(&mm->page_table_lock);
 	if (!pmd_present(*pmd)) {	/* Has another populated it ? */
 		mm->nr_ptes++;
@@ -427,6 +435,7 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 		pte_free(mm, new);
 		AMDRAGON_MM_STAT_INC(pte_alloc_race);
 	}
+#endif
 	AMDRAGON_MM_STAT_INC(pte_alloc);
 	return 0;
 }
@@ -3252,6 +3261,12 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 
 	smp_wmb(); /* See comment in __pte_alloc */
 
+#ifdef CONFIG_AMDRAGON_ATOMIC_PGD_UPDATE
+	if (!pgd_populate_if_clear(mm, pgd, new)) {
+		pud_free(mm, new);
+		AMDRAGON_MM_STAT_INC(pud_alloc_race);
+	}
+#else
 	spin_lock(&mm->page_table_lock);
 	if (pgd_present(*pgd)) {	/* Another has populated it */
 		pud_free(mm, new);
@@ -3259,6 +3274,7 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 	} else
 		pgd_populate(mm, pgd, new);
 	spin_unlock(&mm->page_table_lock);
+#endif
 	AMDRAGON_MM_STAT_INC(pud_alloc);
 	return 0;
 }
@@ -3277,6 +3293,12 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 
 	smp_wmb(); /* See comment in __pte_alloc */
 
+#ifdef CONFIG_AMDRAGON_ATOMIC_PGD_UPDATE
+	if (!pud_populate_if_clear(mm, pud, new)) {
+		pmd_free(mm, new);
+		AMDRAGON_MM_STAT_INC(pmd_alloc_race);
+	}
+#else
 	spin_lock(&mm->page_table_lock);
 #ifndef __ARCH_HAS_4LEVEL_HACK
 	if (pud_present(*pud)) {	/* Another has populated it */
@@ -3292,6 +3314,7 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 		pgd_populate(mm, pud, new);
 #endif /* __ARCH_HAS_4LEVEL_HACK */
 	spin_unlock(&mm->page_table_lock);
+#endif
 	AMDRAGON_MM_STAT_INC(pmd_alloc);
 	return 0;
 }

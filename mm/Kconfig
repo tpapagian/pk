@@ -323,3 +323,8 @@ config AMDRAGON_MM_STATS
 	select AMDRAGON_CONTENTION_STATS
 	help
 	  Counters will be reported in /sys/kernel/mm/mm_stats.
+
+config AMDRAGON_ATOMIC_PGD_UPDATE
+	bool "Update page directories using atomic ops instead of a giant lock"
+	default n
+	depends on !CONFIG_PARAVIRT
