@@ -57,6 +57,7 @@
 #include <linux/swapops.h>
 #include <linux/elf.h>
 #include <linux/gfp.h>
+#include <linux/mm_stats.h>
 
 #include <asm/io.h>
 #include <asm/pgalloc.h>
@@ -422,8 +423,11 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 		new = NULL;
 	}
 	spin_unlock(&mm->page_table_lock);
-	if (new)
+	if (new) {
 		pte_free(mm, new);
+		AMDRAGON_MM_STAT_INC(pte_alloc_race);
+	}
+	AMDRAGON_MM_STAT_INC(pte_alloc);
 	return 0;
 }
 
@@ -3249,11 +3253,13 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 	smp_wmb(); /* See comment in __pte_alloc */
 
 	spin_lock(&mm->page_table_lock);
-	if (pgd_present(*pgd))		/* Another has populated it */
+	if (pgd_present(*pgd)) {	/* Another has populated it */
 		pud_free(mm, new);
-	else
+		AMDRAGON_MM_STAT_INC(pud_alloc_race);
+	} else
 		pgd_populate(mm, pgd, new);
 	spin_unlock(&mm->page_table_lock);
+	AMDRAGON_MM_STAT_INC(pud_alloc);
 	return 0;
 }
 #endif /* __PAGETABLE_PUD_FOLDED */
@@ -3273,17 +3279,20 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 
 	spin_lock(&mm->page_table_lock);
 #ifndef __ARCH_HAS_4LEVEL_HACK
-	if (pud_present(*pud))		/* Another has populated it */
+	if (pud_present(*pud)) {	/* Another has populated it */
 		pmd_free(mm, new);
-	else
+		AMDRAGON_MM_STAT_INC(pmd_alloc_race);
+	} else
 		pud_populate(mm, pud, new);
 #else
-	if (pgd_present(*pud))		/* Another has populated it */
+	if (pgd_present(*pud)) {	/* Another has populated it */
 		pmd_free(mm, new);
-	else
+		AMDRAGON_MM_STAT_INC(pmd_alloc_race);
+	} else
 		pgd_populate(mm, pud, new);
 #endif /* __ARCH_HAS_4LEVEL_HACK */
 	spin_unlock(&mm->page_table_lock);
+	AMDRAGON_MM_STAT_INC(pmd_alloc);
 	return 0;
 }
 #endif /* __PAGETABLE_PMD_FOLDED */
