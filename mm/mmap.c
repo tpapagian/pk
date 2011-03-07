@@ -603,8 +603,10 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 #ifdef CONFIG_AMDRAGON_PICKY_TREE_LOCK
 	mm_tree_unlock(mm);
 #endif
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+#endif
 #if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
 	mm_tree_unlock(mm);
 #endif
@@ -1242,6 +1244,7 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 {
 	struct file *file = NULL;
 	unsigned long retval = -EBADF;
+	struct mm_stat_time mm_stat_time;
 
 	if (!(flags & MAP_ANONYMOUS)) {
 		audit_mmap_fd(fd, flags);
@@ -1268,7 +1271,9 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
 	mm_lock(current->mm);
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
 	retval = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, mmap);
 	mm_unlock(current->mm);
 
 	if (file)
@@ -1735,6 +1740,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 	if (mm) {
 		/* Check the cache first. */
 		/* (Cache hit rate is typically around 35%.) */
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 		vma = mm->mmap_cache;
 #ifdef CONFIG_AMDRAGON_MMAP_CACHE_RACE
 		if (vma && vma->vm_unlinked) {
@@ -1757,6 +1763,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 			vma = NULL;
 		}
 #endif
+#endif
 		if (!(vma && vma->vm_end > addr && vma->vm_start <= addr)) {
 			struct rb_node * rb_node;
 
@@ -1777,8 +1784,10 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 				} else
 					rb_node = rb_node->rb_right;
 			}
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 			if (vma)
 				mm->mmap_cache = vma;
+#endif
 		} else
 			AMDRAGON_MM_STAT_INC(mmap_cache_hit);
 	}
@@ -2116,7 +2125,9 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	else
 		addr = vma ?  vma->vm_start : mm->mmap_base;
 	mm->unmap_area(mm, addr);
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 	mm->mmap_cache = NULL;		/* Kill the cache. */
+#endif
 #if defined(CONFIG_AMDRAGON_SPLIT_TREE_LOCK) && !defined(CONFIG_AMDRAGON_PICKY_TREE_LOCK)
 	// Have to release after we clear the mmap_cache
 	mm_tree_unlock(mm);
@@ -2311,10 +2322,15 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 {
 	int ret;
 	struct mm_struct *mm = current->mm;
+	struct mm_stat_time mm_stat_time;
 
 	profile_munmap(addr);
 
-	ret = do_munmap_locked(mm, addr, len);
+	mm_lock(mm);
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
+	ret = do_munmap(mm, addr, len);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, munmap);
+	mm_unlock(mm);
 	return ret;
 }
 

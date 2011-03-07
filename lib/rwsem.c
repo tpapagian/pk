@@ -178,9 +178,6 @@ rwsem_down_failed_common(struct rw_semaphore *sem,
 	signed long count;
 
 	set_task_state(tsk, TASK_UNINTERRUPTIBLE);
-#ifdef CONFIG_AMDRAGON_CONTENTION_STATS
-	tsk->contention_count++;
-#endif
 
 	/* set up my own style of waitqueue */
 	spin_lock_irq(&sem->wait_lock);

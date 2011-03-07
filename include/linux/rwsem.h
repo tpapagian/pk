@@ -23,9 +23,9 @@ struct rw_semaphore;
 #endif
 
 /*
- * lock for reading
+ * lock for reading -- returns 1 if contended, 0 otherwise
  */
-extern void down_read(struct rw_semaphore *sem);
+extern int down_read(struct rw_semaphore *sem);
 
 /*
  * trylock for reading -- returns 1 if successful, 0 if contention
@@ -33,9 +33,9 @@ extern void down_read(struct rw_semaphore *sem);
 extern int down_read_trylock(struct rw_semaphore *sem);
 
 /*
- * lock for writing
+ * lock for writing -- returns 1 if contended, 0 otherwise
  */
-extern void down_write(struct rw_semaphore *sem);
+extern int down_write(struct rw_semaphore *sem);
 
 /*
  * trylock for writing -- returns 1 if successful, 0 if contention

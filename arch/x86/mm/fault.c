@@ -961,18 +961,15 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY |
 					(write ? FAULT_FLAG_WRITE : 0);
 
+	struct mm_stat_time mm_stat_time;
 #ifdef CONFIG_AMDRAGON_MM_STATS
-	cycles_t start_tsc, end_tsc;
-	cycles_t start_run_tsc, end_run_tsc;
+	cycles_t find_vma_start, find_vma_end;
 #endif
 
 	tsk = current;
 	mm = tsk->mm;
 
-#ifdef CONFIG_AMDRAGON_MM_STATS
-	start_tsc = get_cycles();
-	start_run_tsc = tsk->run_accum + (start_tsc - tsk->last_run_start);
-#endif
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, tsk);
 
 	/* Get the faulting address: */
 	address = read_cr2();
@@ -1144,7 +1141,13 @@ lookup:
 	if (flags & FAULT_FLAG_NO_LOCK)
 		mm_tree_lock_read(mm);
 #endif
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	find_vma_start = get_cycles();
+#endif
 	vma = find_vma(mm, address);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	find_vma_end = get_cycles();
+#endif
 #ifdef CONFIG_AMDRAGON_SPLIT_TREE_LOCK
 	if (flags & FAULT_FLAG_NO_LOCK)
 		mm_tree_unlock_read(mm);
@@ -1257,13 +1260,8 @@ good_area:
 	if (!(flags & FAULT_FLAG_NO_LOCK))
 		mm_pf_unlock_read(mm);
 
-#ifdef CONFIG_AMDRAGON_MM_STATS
-	end_tsc = get_cycles();
-	end_run_tsc = tsk->run_accum + (end_tsc - tsk->last_run_start);
-
-	AMDRAGON_MM_STAT_ADD(pf_wall_cycles, end_tsc - start_tsc);
-	AMDRAGON_MM_STAT_ADD(pf_run_cycles, end_run_tsc - start_run_tsc);
-#endif
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, tsk, pf);
+	AMDRAGON_MM_STAT_ADD(pf_find_vma_cycles, find_vma_end - find_vma_start);
 
 done_srcu:
 	srcu_read_release(&mm_srcu);

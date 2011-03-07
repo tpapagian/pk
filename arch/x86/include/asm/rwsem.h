@@ -114,18 +114,32 @@ do {								\
 /*
  * lock for reading
  */
-static inline void __down_read(struct rw_semaphore *sem)
+static inline int __down_read(struct rw_semaphore *sem)
 {
+	// This is arranged such that, if not
+	// CONFIG_AMDRAGON_CONTENTION_STATS, the 'contended' variable
+	// will result in no extra code; this function will return a
+	// bogus value (sem, in fact), but the caller will ignore it.
+	int contended;
 	asm volatile("# beginning down_read\n\t"
-		     LOCK_PREFIX _ASM_INC "(%1)\n\t"
+		     LOCK_PREFIX _ASM_INC "(%2)\n\t"
 		     /* adds 0x00000001 */
 		     "  jns        1f\n"
 		     "  call call_rwsem_down_read_failed\n"
+#ifdef CONFIG_AMDRAGON_CONTENTION_STATS
+		     "  mov        $1,%1\n\t"
+		     "  jmp        2f\n\t"
 		     "1:\n\t"
+		     "  mov        $0,%1\n\t"
+		     "2:\n\t"
+#else
+		     "1:\n\t"
+#endif
 		     "# ending down_read\n\t"
-		     : "+m" (sem->count)
+		     : "+m" (sem->count), "=a" (contended)
 		     : "a" (sem)
 		     : "memory", "cc");
+	return contended;
 }
 
 /*
@@ -153,26 +167,36 @@ static inline int __down_read_trylock(struct rw_semaphore *sem)
 /*
  * lock for writing
  */
-static inline void __down_write_nested(struct rw_semaphore *sem, int subclass)
+static inline int __down_write_nested(struct rw_semaphore *sem, int subclass)
 {
 	rwsem_count_t tmp;
+	int contended;
 	asm volatile("# beginning down_write\n\t"
-		     LOCK_PREFIX "  xadd      %1,(%2)\n\t"
+		     LOCK_PREFIX "  xadd      %1,(%3)\n\t"
 		     /* adds 0xffff0001, returns the old value */
 		     "  test      %1,%1\n\t"
 		     /* was the count 0 before? */
 		     "  jz        1f\n"
 		     "  call call_rwsem_down_write_failed\n"
+#ifdef CONFIG_AMDRAGON_CONTENTION_STATS
+		     "  mov        $1,%2\n\t"
+		     "  jmp        2f\n\t"
+		     "1:\n\t"
+		     "  mov        $0,%2\n\t"
+		     "2:\n\t"
+#else
 		     "1:\n"
+#endif
 		     "# ending down_write"
-		     : "+m" (sem->count), "=d" (tmp)
+		     : "+m" (sem->count), "=d" (tmp), "=a" (contended)
 		     : "a" (sem), "1" (RWSEM_ACTIVE_WRITE_BIAS)
 		     : "memory", "cc");
+	return contended;
 }
 
-static inline void __down_write(struct rw_semaphore *sem)
+static inline int __down_write(struct rw_semaphore *sem)
 {
-	__down_write_nested(sem, 0);
+	return __down_write_nested(sem, 0);
 }
 
 /*
