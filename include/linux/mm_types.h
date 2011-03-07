@@ -222,7 +222,12 @@ struct mm_rss_stat {
 struct mm_struct {
 	struct vm_area_struct * mmap;		/* list of VMAs */
 	struct rb_root mm_rb;
+#ifdef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
+	// amdragon: Avoid changing struct alignment
+	void *__mmap_cache_pad;
+#else
 	struct vm_area_struct * mmap_cache;	/* last find_vma result */
+#endif
 #ifdef CONFIG_MMU
 	unsigned long (*get_unmapped_area) (struct file *filp,
 				unsigned long addr, unsigned long len,

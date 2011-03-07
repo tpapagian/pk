@@ -497,8 +497,10 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (next)
 		next->vm_prev = prev;
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+#endif
 }
 
 /*
@@ -1598,7 +1600,9 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 	if (mm) {
 		/* Check the cache first. */
 		/* (Cache hit rate is typically around 35%.) */
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 		vma = mm->mmap_cache;
+#endif
 		if (!(vma && vma->vm_end > addr && vma->vm_start <= addr)) {
 			struct rb_node * rb_node;
 
@@ -1619,8 +1623,10 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 				} else
 					rb_node = rb_node->rb_right;
 			}
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 			if (vma)
 				mm->mmap_cache = vma;
+#endif
 		} else
 			AMDRAGON_MM_STAT_INC(mmap_cache_hit);
 	}
@@ -1942,7 +1948,9 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	else
 		addr = vma ?  vma->vm_start : mm->mmap_base;
 	mm->unmap_area(mm, addr);
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 	mm->mmap_cache = NULL;		/* Kill the cache. */
+#endif
 }
 
 /*
