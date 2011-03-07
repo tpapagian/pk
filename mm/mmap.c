@@ -1110,6 +1110,7 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 {
 	struct file *file = NULL;
 	unsigned long retval = -EBADF;
+	struct mm_stat_time mm_stat_time;
 
 	if (!(flags & MAP_ANONYMOUS)) {
 		audit_mmap_fd(fd, flags);
@@ -1136,7 +1137,9 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
 	down_write(&current->mm->mmap_sem);
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
 	retval = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, mmap);
 	up_write(&current->mm->mmap_sem);
 
 	if (file)
@@ -2135,11 +2138,14 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 {
 	int ret;
 	struct mm_struct *mm = current->mm;
+	struct mm_stat_time mm_stat_time;
 
 	profile_munmap(addr);
 
 	down_write(&mm->mmap_sem);
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
 	ret = do_munmap(mm, addr, len);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, munmap);
 	up_write(&mm->mmap_sem);
 	return ret;
 }

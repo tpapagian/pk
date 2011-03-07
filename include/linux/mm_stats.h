@@ -9,6 +9,12 @@
 	__x(pmd_alloc_race)			\
 	__x(pte_alloc)				\
 	__x(pte_alloc_race)			\
+	__x(mmap_count)				\
+	__x(mmap_run_cycles)			\
+	__x(mmap_wall_cycles)			\
+	__x(munmap_count)			\
+	__x(munmap_run_cycles)			\
+	__x(munmap_wall_cycles)			\
 	__x(pf_find_vma_cycles)			\
 	__x(pf_count)				\
 	__x(pf_run_cycles)			\
@@ -29,6 +35,9 @@ struct mm_stat_time
 	cycles_t start_tsc, start_run_tsc;
 };
 
+// Note that the wall_cycles statistics are only valid for
+// architectures with synchronized TSC's.  run_cycles should always be
+// valid.
 #define AMDRAGON_MM_STAT_TIME(stat_time, tsk)				\
 	do {								\
 		(stat_time)->start_tsc = get_cycles();			\
