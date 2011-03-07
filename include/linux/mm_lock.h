@@ -177,16 +177,15 @@ mm_tree_unlock(struct mm_struct *mm)
 static inline void
 mm_tree_lock_read(struct mm_struct *mm)
 {
+	int contended;
 #ifdef CONFIG_AMDRAGON_MM_STATS
-	// XXX Broken
 	cycles_t start, end;
-	int contention_count = 0;
 	start = get_cycles();
 #endif
-	down_read(&mm->tree_sem);
+	contended = down_read(&mm->tree_sem);
 #ifdef CONFIG_AMDRAGON_MM_STATS
 	end = get_cycles();
-	if (0 == contention_count) {
+	if (contended) {
 		AMDRAGON_MM_STAT_INC(tree_lock_read_uncontended);
 		AMDRAGON_MM_STAT_ADD(tree_lock_read_uncontended_cycles, end-start);
 	} else {
