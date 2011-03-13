@@ -16,6 +16,7 @@
 	__x(munmap_run_cycles)			\
 	__x(munmap_wall_cycles)			\
 	__x(pf_find_vma_cycles)			\
+	__x(pf_alloc_page_cycles)		\
 	__x(pf_count)				\
 	__x(pf_run_cycles)			\
 	__x(pf_wall_cycles)			\
@@ -73,7 +74,7 @@ struct mm_stat_time
 
 struct mm_stat_time { };
 #define AMDRAGON_MM_STAT_TIME(stat_time, tsk) do { } while (0)
-#define AMDRAGON_MM_STAT_TIME_END(stat_time, tsk) do { } while (0)
+#define AMDRAGON_MM_STAT_TIME_END(stat_time, tsk, end) do { } while (0)
 
 #endif
 

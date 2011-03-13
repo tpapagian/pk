@@ -248,7 +248,11 @@ struct mm_struct {
 	unsigned long task_size;		/* size of task vm space */
 	unsigned long cached_hole_size; 	/* if non-zero, the largest hole below free_area_cache */
 	unsigned long free_area_cache;		/* first hole of size cached_hole_size or larger */
+#ifdef CONFIG_AMDRAGON_CACHE_ISOLATE_PGD
+	pgd_t * __pgd_pad;
+#else
 	pgd_t * pgd;
+#endif
 	atomic_t mm_users;			/* How many users with user space? */
 	atomic_t mm_count;			/* How many references to "struct mm_struct" (users count as 1) */
 	int map_count;				/* number of VMAs */
@@ -339,6 +343,9 @@ struct mm_struct {
 #endif
 	/* How many tasks sharing this mm are OOM_DISABLE */
 	atomic_t oom_disable_count;
+#ifdef CONFIG_AMDRAGON_CACHE_ISOLATE_PGD
+	pgd_t * pgd;
+#endif
 };
 
 /* Future-safe accessor for struct mm_struct's cpu_vm_mask. */
