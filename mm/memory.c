@@ -3297,6 +3297,9 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	int ret = 0, r;
 	unsigned seq;
 	unsigned long start, end, pgoff;
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t alloc_start, alloc_end;
+#endif
 
 	pte_unmap(page_table);
 
@@ -3331,7 +3334,15 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		return VM_FAULT_RETRY;
 	}
 
+
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	alloc_start = get_cycles();
+#endif
 	page = alloc_zeroed_user_highpage_movable(vma, address);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	alloc_end = get_cycles();
+	AMDRAGON_MM_STAT_ADD(pf_alloc_page_cycles, alloc_end - alloc_start);
+#endif
 	if (!page)
 		goto oom;
 	__SetPageUptodate(page);

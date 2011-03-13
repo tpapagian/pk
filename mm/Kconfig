@@ -314,6 +314,10 @@ config AMDRAGON_DISABLE_MMAP_CACHE
 	bool "Don't use the mmap_cache"
 	default n
 
+config AMDRAGON_CACHE_ISOLATE_PGD
+	bool "Put mm_struct.pgd on a non-contended cache line"
+	default n
+
 config AMDRAGON_CONTENTION_STATS
 	bool
 
