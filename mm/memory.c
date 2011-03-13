@@ -2856,6 +2856,9 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct page *page;
 	spinlock_t *ptl;
 	pte_t entry;
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t alloc_start, alloc_end;
+#endif
 
 	pte_unmap(page_table);
 
@@ -2876,7 +2879,15 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
+
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	alloc_start = get_cycles();
+#endif
 	page = alloc_zeroed_user_highpage_movable(vma, address);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	alloc_end = get_cycles();
+	AMDRAGON_MM_STAT_ADD(pf_alloc_page_cycles, alloc_end - alloc_start);
+#endif
 	if (!page)
 		goto oom;
 	__SetPageUptodate(page);
