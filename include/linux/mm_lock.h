@@ -186,11 +186,11 @@ mm_tree_lock_read(struct mm_struct *mm)
 #ifdef CONFIG_AMDRAGON_MM_STATS
 	end = get_cycles();
 	if (contended) {
-		AMDRAGON_MM_STAT_INC(tree_lock_read_uncontended);
-		AMDRAGON_MM_STAT_ADD(tree_lock_read_uncontended_cycles, end-start);
-	} else {
 		AMDRAGON_MM_STAT_INC(tree_lock_read_contended);
 		AMDRAGON_MM_STAT_ADD(tree_lock_read_contended_cycles, end-start);
+	} else {
+		AMDRAGON_MM_STAT_INC(tree_lock_read_uncontended);
+		AMDRAGON_MM_STAT_ADD(tree_lock_read_uncontended_cycles, end-start);
 	}
 #endif
 }
