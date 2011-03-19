@@ -3201,6 +3201,9 @@ void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 			  int trylock, int read, int check,
 			  struct lockdep_map *nest_lock, unsigned long ip)
 {
+#ifdef CONFIG_MTRACE
+	trace_lock_acquire(lock, subclass, trylock, read, check, nest_lock, ip);
+#else
 	unsigned long flags;
 
 	if (unlikely(current->lockdep_recursion))
@@ -3215,12 +3218,16 @@ void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 		       irqs_disabled_flags(flags), nest_lock, ip, 0);
 	current->lockdep_recursion = 0;
 	raw_local_irq_restore(flags);
+#endif
 }
 EXPORT_SYMBOL_GPL(lock_acquire);
 
 void lock_release(struct lockdep_map *lock, int nested,
 			  unsigned long ip)
 {
+#ifdef CONFIG_MTRACE
+	trace_lock_release(lock, ip);
+#else
 	unsigned long flags;
 
 	if (unlikely(current->lockdep_recursion))
@@ -3233,6 +3240,7 @@ void lock_release(struct lockdep_map *lock, int nested,
 	__lock_release(lock, nested, ip);
 	current->lockdep_recursion = 0;
 	raw_local_irq_restore(flags);
+#endif
 }
 EXPORT_SYMBOL_GPL(lock_release);
 

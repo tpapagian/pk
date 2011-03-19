@@ -473,6 +473,7 @@ void __init mtrace_init(void)
 #ifdef CONFIG_LOCKDEP
 	REG(lock_acquire);
 	REG(lock_release);
+	debug_locks = 0;
 #endif
 
 #undef REG
