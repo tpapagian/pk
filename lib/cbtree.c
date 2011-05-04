@@ -38,7 +38,7 @@ struct cb_kv
 
 #endif
 
-#define TEST 1
+#define TEST 0
 
 // Sequential operations
 #define SHARED(typ, name) struct { typ val; } name
