@@ -3745,7 +3745,7 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pmd_t *pmd;
 	pte_t *pte;
 	struct page *pte_page;
-	int ret;
+	int err, ret;
 
 	__set_current_state(TASK_RUNNING);
 
@@ -3763,13 +3763,13 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	rcu_read_lock();
 
 	pgd = pgd_offset(mm, address);
-	pud = pud_alloc_vma(mm, pgd, address, vma);
+	pud = pud_alloc_vma(mm, pgd, address, vma, &err);
 	if (!pud)
 		goto oom;
-	pmd = pmd_alloc_vma(mm, pud, address, vma);
+	pmd = pmd_alloc_vma(mm, pud, address, vma, &err);
 	if (!pmd)
 		goto oom;
-	pte = pte_alloc_map_vma(mm, pmd, address, vma);
+	pte = pte_alloc_map_vma(mm, pmd, address, vma, &err);
 	if (!pte)
 		goto oom;
 
@@ -3795,13 +3795,15 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	return ret;
 
 oom:
-	if (vma->vm_unlinked) {
+	if (err == -EINVAL) {
 		// We failed because of a race with unmap, not because
 		// we're OOM.
 		BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
 		ret = VM_FAULT_RETRY;
-	} else
+	} else {
+		BUG_ON(err != -ENOMEM);
 		ret = VM_FAULT_OOM;
+	}
 	rcu_read_unlock();
 	return ret;
 }

@@ -1087,27 +1087,29 @@ int __pte_alloc_kernel(pmd_t *pmd, unsigned long address);
  */
 #if defined(CONFIG_MMU) && !defined(__ARCH_HAS_4LEVEL_HACK)
 static inline pud_t *pud_alloc_vma(struct mm_struct *mm, pgd_t *pgd, unsigned long address,
-	struct vm_area_struct *vma)
+				   struct vm_area_struct *vma, int *err)
 {
-	return (unlikely(pgd_none(*pgd)) && __pud_alloc(mm, pgd, address, vma))?
+	return (unlikely(pgd_none(*pgd)) && (*err = __pud_alloc(mm, pgd, address, vma)))?
 		NULL: pud_offset(pgd, address);
 }
 
 static inline pud_t *pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 {
-	return pud_alloc_vma(mm, pgd, address, NULL);
+	int err;
+	return pud_alloc_vma(mm, pgd, address, NULL, &err);
 }
 
 static inline pmd_t *pmd_alloc_vma(struct mm_struct *mm, pud_t *pud, unsigned long address,
-	struct vm_area_struct *vma)
+				   struct vm_area_struct *vma, int *err)
 {
-	return (unlikely(pud_none(*pud)) && __pmd_alloc(mm, pud, address, vma))?
+	return (unlikely(pud_none(*pud)) && (*err = __pmd_alloc(mm, pud, address, vma)))?
 		NULL: pmd_offset(pud, address);
 }
 
 static inline pmd_t *pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 {
-	return pmd_alloc_vma(mm, pud, address, NULL);
+	int err;
+	return pmd_alloc_vma(mm, pud, address, NULL, &err);
 }
 #endif /* CONFIG_MMU && !__ARCH_HAS_4LEVEL_HACK */
 
@@ -1163,8 +1165,8 @@ static inline void pgtable_page_dtor(struct page *page)
 	((unlikely(!pmd_present(*(pmd))) && __pte_alloc(mm, pmd, address, NULL))? \
 		NULL: pte_offset_map(pmd, address))
 
-#define pte_alloc_map_vma(mm, pmd, address, vma)				\
-	((unlikely(!pmd_present(*(pmd))) && __pte_alloc(mm, pmd, address, vma))? \
+#define pte_alloc_map_vma(mm, pmd, address, vma, err)			\
+	((unlikely(!pmd_present(*(pmd))) && (*err = __pte_alloc(mm, pmd, address, vma)))? \
 		NULL: pte_offset_map(pmd, address))
 
 #define pte_alloc_map_lock(mm, pmd, address, ptlp)	\
