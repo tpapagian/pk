@@ -813,7 +813,15 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
-int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
+static int
+vma_valid(struct vm_area_struct *vma, unsigned long address)
+{
+	return !vma->vm_unlinked && address >= vma->vm_start &&
+		address < vma->vm_end;
+}
+
+int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address,
+	struct vm_area_struct *vma)
 {
 	pgtable_t new = pte_alloc_one(mm, address);
 	if (!new)
@@ -843,7 +851,8 @@ int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address)
 		atomic_inc(&mm->nr_ptes);
 #else
 	spin_lock(&mm->page_table_lock);
-	if (!pmd_present(*pmd)) {	/* Has another populated it ? */
+	if (!pmd_present(*pmd) &&	/* Has another populated it ? */
+	    (!vma || vma_valid(vma, address))) {
 		atomic_inc(&mm->nr_ptes);
 		pmd_populate(mm, pmd, new);
 		new = NULL;
@@ -3316,7 +3325,7 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		if (!pte_none(*page_table))
 			goto unlock;
 		// amdragon: Check for unmap race
-		if (vma->vm_unlinked || address < vma->vm_start || address >= vma->vm_end) {
+		if (!vma_valid(vma, address)) {
 			AMDRAGON_MM_STAT_INC(unmap_races);
 			BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
 			ret = VM_FAULT_RETRY;
@@ -3750,13 +3759,13 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	rcu_read_lock();
 
 	pgd = pgd_offset(mm, address);
-	pud = pud_alloc(mm, pgd, address);
+	pud = pud_alloc_vma(mm, pgd, address, vma);
 	if (!pud)
 		goto oom;
-	pmd = pmd_alloc(mm, pud, address);
+	pmd = pmd_alloc_vma(mm, pud, address, vma);
 	if (!pmd)
 		goto oom;
-	pte = pte_alloc_map(mm, pmd, address);
+	pte = pte_alloc_map_vma(mm, pmd, address, vma);
 	if (!pte)
 		goto oom;
 
@@ -3781,8 +3790,15 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	return ret;
 
 oom:
+	if (vma->vm_unlinked) {
+		// We failed because of a race with unmap, not because
+		// we're OOM.
+		BUG_ON(!(flags & FAULT_FLAG_NO_LOCK));
+		ret = VM_FAULT_RETRY;
+	} else
+		ret = VM_FAULT_OOM;
 	rcu_read_unlock();
-	return VM_FAULT_OOM;
+	return ret;
 }
 
 #ifndef __PAGETABLE_PUD_FOLDED
@@ -3790,7 +3806,8 @@ oom:
  * Allocate page upper directory.
  * We've already handled the fast-path in-line.
  */
-int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
+int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address,
+		struct vm_area_struct *vma)
 {
 	pud_t *new = pud_alloc_one(mm, address);
 	if (!new)
@@ -3808,6 +3825,9 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 	if (pgd_present(*pgd)) {	/* Another has populated it */
 		pud_free(mm, new);
 		AMDRAGON_MM_STAT_INC(pud_alloc_race);
+	} else if (vma && !vma_valid(vma, address)) {
+		pud_free(mm, new);
+		AMDRAGON_MM_STAT_INC(pud_alloc_unmap_race);
 	} else
 		pgd_populate(mm, pgd, new);
 	spin_unlock(&mm->page_table_lock);
@@ -3822,7 +3842,8 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
  * Allocate page middle directory.
  * We've already handled the fast-path in-line.
  */
-int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
+int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address,
+		struct vm_area_struct *vma)
 {
 	pmd_t *new = pmd_alloc_one(mm, address);
 	if (!new)
@@ -3841,12 +3862,18 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 	if (pud_present(*pud)) {	/* Another has populated it */
 		pmd_free(mm, new);
 		AMDRAGON_MM_STAT_INC(pmd_alloc_race);
+	} else if (vma && !vma_valid(vma, address)) {
+		pmd_free(mm, new);
+		AMDRAGON_MM_STAT_INC(pmd_alloc_unmap_race);
 	} else
 		pud_populate(mm, pud, new);
 #else
 	if (pgd_present(*pud)) {	/* Another has populated it */
 		pmd_free(mm, new);
 		AMDRAGON_MM_STAT_INC(pmd_alloc_race);
+	} else if (vma && !vma_valid(vma, address)) {
+		pmd_free(mm, new);
+		AMDRAGON_MM_STAT_INC(pmd_alloc_unmap_race);
 	} else
 		pgd_populate(mm, pud, new);
 #endif /* __ARCH_HAS_4LEVEL_HACK */
