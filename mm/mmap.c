@@ -2129,6 +2129,9 @@ static int expand_downwards(struct vm_area_struct *vma,
 
 		error = acct_stack_growth(vma, size, grow);
 		if (!error) {
+			// amdragon: XXX This can't be right.  A
+			// concurrent page fault in this VMA could
+			// compute a bad rmap index.
 			vma->vm_start = address;
 			vma->vm_pgoff -= grow;
 			perf_event_mmap(vma);
