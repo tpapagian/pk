@@ -3791,13 +3791,6 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	ret = handle_pte_fault(mm, vma, address, pte, pmd, flags);
 
-	// XXX
-	if (pte_page == (struct page *)0xffffea0000000000) {
-		printk(KERN_ALERT
-		       "handle_mm_fault: pte_page %p  pgd %p  pud %p  pmd %p  pte %p  address %lu  flags %u\n",
-		       pte_page, pgd, pud, pmd, pte, address, flags);
-	}
-
 	put_page(pte_page);
 	return ret;
 
