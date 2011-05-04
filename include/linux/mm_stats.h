@@ -5,10 +5,13 @@
 	__x(mmap_cache_hit)			\
 	__x(pud_alloc)				\
 	__x(pud_alloc_race)			\
+	__x(pud_alloc_unmap_race)		\
 	__x(pmd_alloc)				\
 	__x(pmd_alloc_race)			\
+	__x(pmd_alloc_unmap_race)		\
 	__x(pte_alloc)				\
 	__x(pte_alloc_race)			\
+	__x(pte_alloc_unmap_race)		\
 	__x(mmap_count)				\
 	__x(mmap_run_cycles)			\
 	__x(mmap_wall_cycles)			\
