@@ -1055,25 +1055,30 @@ static inline pte_t *get_locked_pte(struct mm_struct *mm, unsigned long addr,
 
 #ifdef __PAGETABLE_PUD_FOLDED
 static inline int __pud_alloc(struct mm_struct *mm, pgd_t *pgd,
-						unsigned long address)
+			      unsigned long address,
+			      struct vm_area_struct *vma)
 {
 	return 0;
 }
 #else
-int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address);
+int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address,
+		struct vm_area_struct *vma);
 #endif
 
 #ifdef __PAGETABLE_PMD_FOLDED
 static inline int __pmd_alloc(struct mm_struct *mm, pud_t *pud,
-						unsigned long address)
+			      unsigned long address,
+			      struct vm_area_struct *vma)
 {
 	return 0;
 }
 #else
-int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address);
+int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address,
+		struct vm_area_struct *vma);
 #endif
 
-int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address);
+int __pte_alloc(struct mm_struct *mm, pmd_t *pmd, unsigned long address,
+		struct vm_area_struct *vma);
 int __pte_alloc_kernel(pmd_t *pmd, unsigned long address);
 
 /*
@@ -1081,16 +1086,30 @@ int __pte_alloc_kernel(pmd_t *pmd, unsigned long address);
  * Remove it when 4level-fixup.h has been removed.
  */
 #if defined(CONFIG_MMU) && !defined(__ARCH_HAS_4LEVEL_HACK)
+static inline pud_t *pud_alloc_vma(struct mm_struct *mm, pgd_t *pgd, unsigned long address,
+				   struct vm_area_struct *vma, int *err)
+{
+	return (unlikely(pgd_none(*pgd)) && (*err = __pud_alloc(mm, pgd, address, vma)))?
+		NULL: pud_offset(pgd, address);
+}
+
 static inline pud_t *pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 {
-	return (unlikely(pgd_none(*pgd)) && __pud_alloc(mm, pgd, address))?
-		NULL: pud_offset(pgd, address);
+	int err;
+	return pud_alloc_vma(mm, pgd, address, NULL, &err);
+}
+
+static inline pmd_t *pmd_alloc_vma(struct mm_struct *mm, pud_t *pud, unsigned long address,
+				   struct vm_area_struct *vma, int *err)
+{
+	return (unlikely(pud_none(*pud)) && (*err = __pmd_alloc(mm, pud, address, vma)))?
+		NULL: pmd_offset(pud, address);
 }
 
 static inline pmd_t *pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 {
-	return (unlikely(pud_none(*pud)) && __pmd_alloc(mm, pud, address))?
-		NULL: pmd_offset(pud, address);
+	int err;
+	return pmd_alloc_vma(mm, pud, address, NULL, &err);
 }
 #endif /* CONFIG_MMU && !__ARCH_HAS_4LEVEL_HACK */
 
@@ -1143,11 +1162,15 @@ static inline void pgtable_page_dtor(struct page *page)
 } while (0)
 
 #define pte_alloc_map(mm, pmd, address)			\
-	((unlikely(!pmd_present(*(pmd))) && __pte_alloc(mm, pmd, address))? \
+	((unlikely(!pmd_present(*(pmd))) && __pte_alloc(mm, pmd, address, NULL))? \
+		NULL: pte_offset_map(pmd, address))
+
+#define pte_alloc_map_vma(mm, pmd, address, vma, err)			\
+	((unlikely(!pmd_present(*(pmd))) && (*err = __pte_alloc(mm, pmd, address, vma)))? \
 		NULL: pte_offset_map(pmd, address))
 
 #define pte_alloc_map_lock(mm, pmd, address, ptlp)	\
-	((unlikely(!pmd_present(*(pmd))) && __pte_alloc(mm, pmd, address))? \
+	((unlikely(!pmd_present(*(pmd))) && __pte_alloc(mm, pmd, address, NULL))? \
 		NULL: pte_offset_map_lock(mm, pmd, address, ptlp))
 
 #define pte_alloc_kernel(pmd, address)			\

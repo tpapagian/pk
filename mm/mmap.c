@@ -2075,6 +2075,23 @@ static void unmap_region(struct mm_struct *mm,
 	struct mmu_gather *tlb;
 	unsigned long nr_accounted = 0;
 
+	// After marking VMA's as unlinked but before we start
+	// zero'ing page directory entries, we need to buzz the page
+	// table lock.  This ensures that when pud_alloc and friends
+	// observe a NULL page directory entry and take the
+	// page_table_lock, they can atomically check if the VMA is
+	// unlinked and set the page directory entry without the
+	// danger of a simultaneous munmap unlinking the VMA and
+	// clearing the page directory entry between these two steps.
+	// We don't need to hold on to the lock; we just need to
+	// ensure that the pud_alloc section happens entirely before
+	// this point (in which case we'll soon clear the page
+	// directory entry it inserts) or entirely after (in which
+	// case it will observe that the VMA has been marked
+	// unlinked).
+	spin_lock(&mm->page_table_lock);
+	spin_unlock(&mm->page_table_lock);
+
 	lru_add_drain();
 	tlb = tlb_gather_mmu(mm, 0);
 	update_hiwater_rss(mm);

@@ -63,7 +63,7 @@ static pmd_t *alloc_new_pmd(struct mm_struct *mm, unsigned long addr)
 	if (!pmd)
 		return NULL;
 
-	if (!pmd_present(*pmd) && __pte_alloc(mm, pmd, addr))
+	if (!pmd_present(*pmd) && __pte_alloc(mm, pmd, addr, NULL))
 		return NULL;
 
 	return pmd;
