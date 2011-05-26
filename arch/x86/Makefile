@@ -154,6 +154,23 @@ PHONY += bzImage $(BOOT_TARGETS)
 # Default kernel to build
 all: bzImage
 
+ifeq ($(CONFIG_MTRACE),y)
+mscan.syms: vmlinux
+	$(Q)echo "  NM      $@"
+	$(Q)$(NM) -S $< > $@
+
+mscan.kern: vmlinux
+	$(Q)echo "  CP      $@"
+	$(Q)cp $< $@
+
+mscan.bzImage: bzImage
+	$(Q)echo "  CP      $@"
+	$(Q)cp arch/x86/boot/bzImage $@
+
+mtrace: mscan.syms mscan.kern mscan.bzImage
+PHONY += mtrace
+endif
+
 # KBUILD_IMAGE specify target image being built
 KBUILD_IMAGE := $(boot)/bzImage
 
