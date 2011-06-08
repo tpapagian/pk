@@ -25,6 +25,7 @@
 #include <linux/workqueue.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
+#include <net/multi_accept.h>
 #include <net/xfrm.h>
 
 int sysctl_tcp_syncookies __read_mostly = 1;
@@ -723,8 +724,10 @@ int tcp_child_process(struct sock *parent, struct sock *child,
 		ret = tcp_rcv_state_process(child, skb, tcp_hdr(skb),
 					    skb->len);
 		/* Wakeup parent, send SIGIO */
-		if (state == TCP_SYN_RECV && child->sk_state != state)
-			parent->sk_data_ready(parent, 0);
+		if (state == TCP_SYN_RECV && child->sk_state != state) {
+			if (ma_lb_data_ready(parent, 0) != 0)
+				parent->sk_data_ready(parent, 0);
+		}
 	} else {
 		/* Alas, it is possible again, because we do lookup
 		 * in main socket hash table and lock on listening

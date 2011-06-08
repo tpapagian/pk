@@ -94,6 +94,18 @@ int ma_lb_listen_poll(const struct sock *sk, unsigned int *ret)
 	return r;
 }
 
+int ma_lb_data_ready(struct sock *sk, int bytes)
+{
+	int r = -1;
+	rcu_read_lock();
+	if (ma_ops && ma_ops->data_ready) {
+		ma_ops->data_ready(sk, bytes);
+		r = 0;
+	}
+	rcu_read_unlock();
+	return r;
+}
+
 static void ma_handler(unsigned long a)
 {
 	struct sock *sk = (struct sock *) a;
