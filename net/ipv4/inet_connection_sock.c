@@ -1067,4 +1067,18 @@ int inet_csk_compat_setsockopt(struct sock *sk, int level, int optname,
 
 EXPORT_SYMBOL_GPL(inet_csk_compat_setsockopt);
 
+unsigned int inet_csk_listen_poll(struct sock *sk)
+{
+	if (ma_sk(sk)) {
+		unsigned int ret;
+		sk = ma_get_local_sk(sk);
+		if (ma_lb_listen_poll(sk, &ret) == 0)
+			return ret;
+	}
+
+	return !reqsk_queue_empty(&inet_csk(sk)->icsk_accept_queue) ?
+			(POLLIN | POLLRDNORM) : 0;
+}
+EXPORT_SYMBOL_GPL(inet_csk_listen_poll);
+
 #endif

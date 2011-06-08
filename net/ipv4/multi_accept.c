@@ -82,6 +82,18 @@ void ma_lb_reset(struct sock *sk, int cpu)
 	rcu_read_unlock();
 }
 
+int ma_lb_listen_poll(const struct sock *sk, unsigned int *ret)
+{
+	int r = -1;
+	rcu_read_lock();
+	if (ma_ops && ma_ops->poll) {
+		*ret = ma_ops->poll(sk);
+		r = 0;
+	}
+	rcu_read_unlock();
+	return r;
+}
+
 static void ma_handler(unsigned long a)
 {
 	struct sock *sk = (struct sock *) a;

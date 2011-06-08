@@ -325,11 +325,7 @@ extern void inet_csk_destroy_sock(struct sock *sk);
 /*
  * LISTEN is a special case for poll..
  */
-static inline unsigned int inet_csk_listen_poll(const struct sock *sk)
-{
-	return !reqsk_queue_empty(&inet_csk(sk)->icsk_accept_queue) ?
-			(POLLIN | POLLRDNORM) : 0;
-}
+extern unsigned int inet_csk_listen_poll(struct sock *sk);
 
 extern int  inet_csk_listen_start(struct sock *sk, const int nr_table_entries);
 extern void inet_csk_listen_stop(struct sock *sk);
