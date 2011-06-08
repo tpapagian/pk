@@ -377,11 +377,16 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 {
 	unsigned int mask;
 	struct sock *sk = sock->sk;
-	struct tcp_sock *tp = tcp_sk(sk);
+	struct tcp_sock *tp;
+
+	if (sk->sk_state == TCP_LISTEN && ma_sk(sk))
+		sk = ma_get_local_sk(sk);
 
 	sock_poll_wait(file, sk_sleep(sk), wait);
 	if (sk->sk_state == TCP_LISTEN)
 		return inet_csk_listen_poll(sk);
+
+	tp = tcp_sk(sk);
 
 	/* Socket is not locked. We are protected from async events
 	 * by poll logic and correct handling of state changes
