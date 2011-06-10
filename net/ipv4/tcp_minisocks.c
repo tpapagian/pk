@@ -725,7 +725,7 @@ int tcp_child_process(struct sock *parent, struct sock *child,
 					    skb->len);
 		/* Wakeup parent, send SIGIO */
 		if (state == TCP_SYN_RECV && child->sk_state != state) {
-			if (ma_lb_data_ready(parent, 0) != 0)
+			if (!(ma_sk(parent) && ma_lb_data_ready(parent, 0) == 0))
 				parent->sk_data_ready(parent, 0);
 		}
 	} else {
