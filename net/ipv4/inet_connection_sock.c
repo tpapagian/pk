@@ -755,6 +755,8 @@ void inet_csk_destroy_sock(struct sock *sk)
 			kfree(tsock);
 		}
 
+		ma_stop_per_cpu_timer(sk, 0);
+
 		ma_stop_timer(sk);
 		kfree(icsk->icsk_ma);
 		icsk->icsk_ma = NULL;

@@ -10,7 +10,7 @@ EXPORT_SYMBOL_GPL(sysctl_multi_accept_lb);
 int sysctl_multi_accept_debug __read_mostly = 0;
 EXPORT_SYMBOL_GPL(sysctl_multi_accept_debug);
 
-int sysctl_multi_accept_c __read_mostly = 1;
+int sysctl_multi_accept_c __read_mostly = 0;
 EXPORT_SYMBOL_GPL(sysctl_multi_accept_c);
 
 int ma_init(struct sock *sk)
