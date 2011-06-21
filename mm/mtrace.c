@@ -13,7 +13,7 @@
 #include <linux/ptrace.h>
 
 #include <asm/traps.h>
-
+#include <asm/vgtod.h>
 #include <asm/mtrace-magic.h>
 
 static DEFINE_PER_CPU_ALIGNED(atomic64_t, mtrace_call_tag);
@@ -439,6 +439,18 @@ int mtrace_atomic_dec_and_lock(atomic_t *atomic,
 	return 0;
 }
 
+void __init mtrace_init_missing(void)
+{
+	pg_data_t *pgdat;
+	for_each_online_pgdat(pgdat)
+		mtrace_label_register(mtrace_label_heap, pgdat, sizeof(*pgdat),
+				      "pglist_data", strlen("pglist_data"), 0);
+
+	mtrace_label_register(mtrace_label_static, 
+			      &vsyscall_gtod_data, sizeof(vsyscall_gtod_data),
+			      "vsyscall_gtod_data", strlen("vsyscall_gtod_data"), 0);
+}
+
 void __init mtrace_init(void)
 {
 #define REG(name) BUG_ON(register_trace_##name(mtrace_##name, NULL))
@@ -475,6 +487,8 @@ void __init mtrace_init(void)
 	REG(lock_release);
 	debug_locks = 0;
 #endif
+
+	mtrace_init_missing();
 
 #undef REG
 }
