@@ -177,7 +177,7 @@ static inline void reqsk_queue_add(struct request_sock_queue *queue,
 				   struct sock *child)
 {
 	reqsk_hist_update(queue);
-	ma_lb_add_queue(parent, reqsk_queue_len(queue));
+	ma_lb_add_queue(parent, parent->sk_ack_backlog);
 
 	req->sk = child;
 	sk_acceptq_added(parent);
