@@ -68,6 +68,18 @@ void ma_lb_add_queue(struct sock *sk, int len)
 	rcu_read_unlock();
 }
 
+void ma_lb_overflow(struct sock *sk)
+{
+	if (!inet_csk(sk)->icsk_ma)
+		return;
+
+	rcu_read_lock();
+	if (ma_ops && ma_ops->overflow)
+		ma_ops->overflow(sk);
+	rcu_read_unlock();
+}
+
+
 void ma_lb_print(struct sock *sk, int cpu, struct seq_file *f)
 {
 	rcu_read_lock();

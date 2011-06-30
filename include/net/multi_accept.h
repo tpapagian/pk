@@ -24,6 +24,7 @@ struct multi_accept_lb_ops {
 	void		(*balance) (struct sock *);
 	struct sock 	*(*accept)(struct sock *, int flags, int *err);
 	void		(*add_queue) (struct sock *, int len);
+	void		(*overflow) (struct sock *);
 	unsigned int	(*poll)(const struct sock *sk);
 	void		(*data_ready)(struct sock *sk, int bytes);
 
@@ -47,6 +48,7 @@ void ma_lb_unregister(void);
 int  ma_lb_accept(struct sock *sk, int flags, int *err, struct sock **newsk);
 void ma_lb_balance(struct sock *sk);
 void ma_lb_add_queue(struct sock *sk, int);
+void ma_lb_overflow(struct sock *sk);
 void ma_lb_print(struct sock *sk, int, struct seq_file *f);
 void ma_lb_reset(struct sock *sk, int);
 int ma_lb_listen_poll(const struct sock *sk, unsigned int *ret);

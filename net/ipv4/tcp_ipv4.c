@@ -1413,6 +1413,9 @@ struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 #endif
 
 	if (sk_acceptq_is_full(sk))
+		ma_lb_overflow(sk);
+
+	if (sk_acceptq_is_full(sk))
 		goto exit_overflow;
 
 	if (!dst && (dst = inet_csk_route_req(sk, req)) == NULL)
