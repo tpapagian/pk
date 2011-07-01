@@ -618,7 +618,15 @@ EXPORT_SYMBOL_GPL(inet_csk_clone);
 
 static struct sock *inet_csk_listen_clone(struct sock *sk, const gfp_t priority, int node)
 {
-	struct sock *newsk = sk_clone_node(sk, priority, node);
+	struct sock *newsk;
+
+	// AP: XXX TODO The problem with sk_clone_node is that it expects to
+	// run in a BH context only. I HACKED AROUND THIS BY DISABLING IRQs.
+	newsk = sk_clone_node(sk, priority, node);
+
+	// AP: XXX TODO The newsk's sk_lock is still held at this point and so
+	// if a BH slips in here, lockdep thinks there will be a deadlock; I do
+	// not think this is in any way possible, but lockdep is pessimistic.
 
 	if (newsk != NULL) {
 		struct tcp_sock *newtp = tcp_sk(newsk);
@@ -801,16 +809,22 @@ static struct sock *ma_alloc_node(struct sock *sk, int cpu)
 	if (!newsock)
 		return NULL;
 
-	// AP: TODO is this the right alloc flag?
-	newsk = inet_csk_listen_clone(sk, GFP_ATOMIC, cpu_to_node(cpu));
-	if (!newsk) {
+	newsock->wq = kmalloc_node(sizeof(struct socket_wq), GFP_KERNEL, cpu_to_node(cpu));
+	if (!newsock->wq) {
 		kfree(newsock);
 		return NULL;
 	}
 
-	newsock->wq = kmalloc_node(sizeof(struct socket_wq), GFP_KERNEL, cpu_to_node(cpu));
-	if (!newsock->wq) {
-		__inet_csk_destroy_sock_one(newsk);
+	// AP: XXX TODO This is a hack to immitate a BH context
+	// becuase sk_clone_node thinks it should always run in
+	// a BH context. A better solution is to change sk_clone?
+	local_irq_disable();
+
+	// AP: TODO is this the right alloc flag?
+	newsk = inet_csk_listen_clone(sk, GFP_ATOMIC, cpu_to_node(cpu));
+	if (!newsk) {
+		local_irq_enable();
+		kfree(newsock->wq);
 		kfree(newsock);
 		return NULL;
 	}
@@ -840,6 +854,8 @@ static struct sock *ma_alloc_node(struct sock *sk, int cpu)
 
 	bh_unlock_sock(newsk);
 	sock_put(newsk);
+
+	local_irq_enable();
 
 	return newsk;
 }
