@@ -151,7 +151,7 @@ static void __mtrace_stack_state(struct mtrace_call_stack *stack,
 
 	if (task)
 		tid = task_pid_nr(task);
-	mtrace_fcall_register(tid, stack->stack[i].pc, 
+	mtrace_fcall_register(tid, stack->stack[i].pc, stack->stack[i].tag, 
 			      i, state);
 	call_enable = (state == mtrace_start || state == mtrace_resume);
 	mtrace_call_set(call_enable, smp_processor_id());
