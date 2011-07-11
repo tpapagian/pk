@@ -1524,7 +1524,9 @@ struct task_struct {
 	/* Pause for the tracing */
 	atomic_t tracing_graph_pause;
 #endif
+#ifdef CONFIG_MTRACE
 	struct mtrace_call_stack mtrace_stack;
+#endif
 #ifdef CONFIG_TRACING
 	/* state flags for use by tracers */
 	unsigned long trace;

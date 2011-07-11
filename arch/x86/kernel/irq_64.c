@@ -16,6 +16,7 @@
 #include <linux/ftrace.h>
 #include <linux/uaccess.h>
 #include <linux/smp.h>
+#include <linux/mtrace.h>
 #include <asm/io_apic.h>
 #include <asm/idle.h>
 #include <asm/apic.h>
@@ -64,9 +65,6 @@ bool handle_irq(unsigned irq, struct pt_regs *regs)
 
 
 extern void call_softirq(void);
-
-extern void mtrace_end_do_irq(void);
-extern void mtrace_start_do_irq(unsigned long pc);
 
 asmlinkage void do_softirq(void)
 {

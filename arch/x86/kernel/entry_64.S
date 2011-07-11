@@ -727,7 +727,9 @@ ENTRY(stub_execve)
 	RESTORE_TOP_OF_STACK %r11
 	movq %rax,RAX(%rsp)
 	RESTORE_REST
+#ifdef CONFIG_MTRACE
 	call mtrace_end_entry
+#endif
 	jmp int_ret_from_sys_call
 	CFI_ENDPROC
 END(stub_execve)
@@ -746,7 +748,9 @@ ENTRY(stub_rt_sigreturn)
 	call sys_rt_sigreturn
 	movq %rax,RAX(%rsp) # fixme, this could be done at the higher layer
 	RESTORE_REST
+#ifdef CONFIG_MTRACE
 	call mtrace_end_entry
+#endif
 	jmp int_ret_from_sys_call
 	CFI_ENDPROC
 END(stub_rt_sigreturn)
@@ -806,7 +810,9 @@ END(interrupt)
 	call save_args
 	push %rdi
 	mov $\func, %rdi
+#ifdef CONFIG_MTRACE
 	call mtrace_start_do_irq
+#endif
 	pop %rdi
 	PARTIAL_FRAME 0
 	call \func
@@ -827,7 +833,9 @@ common_interrupt:
 	interrupt do_IRQ
 	/* 0(%rsp): old_rsp-ARGOFFSET */
 ret_from_intr:
+#ifdef CONFIG_MTRACE
 	call mtrace_end_do_irq
+#endif
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
 	decl PER_CPU_VAR(irq_count)
