@@ -1638,7 +1638,8 @@ static struct dentry *__d_alloc_single(const struct qstr *name, struct inode *in
 		entry->d_flags |= DCACHE_SINGLE | DCACHE_DISCONNECTED;
 		entry->d_inode = inode;
 
-		fsnotify_d_instantiate_helper(entry, inode);
+		if (per_cpu)
+			fsnotify_d_instantiate_helper(entry, inode);
 		security_d_instantiate(entry, inode);
 	}
 	return entry;
