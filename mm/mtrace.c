@@ -290,34 +290,15 @@ void mtrace_end_entry(void)
 
 static int mtrace_task_cmdline(struct task_struct *task, char *buffer, int n)
 {
-	/* Copied from/inspired by fs/proc/base.c:proc_pid_cmdline */
-	int res = 0;
-	unsigned int len;
-	struct mm_struct *mm = get_task_mm(task);
-	if (!mm)
-		goto out;
-	if (!mm->arg_end)
-		goto out_mm;	/* Shh! No looking before we're done */
-
- 	len = mm->arg_end - mm->arg_start;
- 
-	if (len > n - 1)
-		len = n - 1;
- 
-	res = access_process_vm(task, mm->arg_start, buffer, len, 0);
-	buffer[n - 1] = 0;
-	
-	/* NB ignore non-standard extensions (e.g. setproctitle) */
-out_mm:
-	mmput(mm);
-out:
-	return res;
+	strncpy(buffer, task->comm, n);
+	return 0;
 }
 
 static void __mtrace_register_task(struct task_struct *tsk, mtrace_task_t type)
 {
 	char buffer[32];
 	buffer[0] = 0;
+
 	mtrace_task_cmdline(tsk, buffer, sizeof(buffer));
 	mtrace_task_register(task_pid_nr(tsk), task_tgid_nr(tsk), type, buffer);
 }
