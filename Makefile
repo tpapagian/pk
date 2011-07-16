@@ -683,6 +683,9 @@ mod_strip_cmd = true
 endif # INSTALL_MOD_STRIP
 export mod_strip_cmd
 
+.PHONY: mosbench-gmake-*
+mosbench-gmake-%:
+	$(MAKE) $(build)=$(patsubst mosbench-gmake-%,%,$@)
 
 ifeq ($(KBUILD_EXTMOD),)
 core-y		+= kernel/ mm/ fs/ ipc/ security/ crypto/ block/
