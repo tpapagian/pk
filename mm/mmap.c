@@ -1630,6 +1630,7 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 			if (vma)
 				mm->mmap_cache = vma;
 #endif
+			AMDRAGON_MM_STAT_INC(mmap_cache_miss);
 		} else
 			AMDRAGON_MM_STAT_INC(mmap_cache_hit);
 	}

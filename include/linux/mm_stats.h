@@ -3,6 +3,7 @@
 
 #define AMDRAGON_FOR_MM_STAT(__x)		\
 	__x(mmap_cache_hit)			\
+	__x(mmap_cache_miss)			\
 	__x(pud_alloc)				\
 	__x(pud_alloc_race)			\
 	__x(pmd_alloc)				\
