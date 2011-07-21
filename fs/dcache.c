@@ -1259,7 +1259,6 @@ static struct shrinker dcache_shrinker = {
  
 struct dentry *d_alloc(struct dentry * parent, const struct qstr *name)
 {
-	static struct lock_class_key d_count_key;
 	struct dentry *dentry;
 	char *dname;
 
