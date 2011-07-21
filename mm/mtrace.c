@@ -3,6 +3,7 @@
 #include <linux/tracepoint.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
+#include <linux/module.h>
 
 #include <trace/events/kmem.h>
 #include <trace/events/syscalls.h>
@@ -342,33 +343,58 @@ static void mtrace_sched_switch(void *unused, struct task_struct *prev,
 }
 
 #ifdef CONFIG_LOCKDEP
-static void mtrace_lock_acquire(void *unused, struct lockdep_map *lock,
-                                unsigned int subclass, int trylock, int read,
-                                int check, struct lockdep_map *next_lock,
-                                unsigned long ip)
+void mtrace_lock_acquire(struct lockdep_map *lock, unsigned long ip,
+                         int read)
 {
-	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_acquire, read);
-	/* 
-	 * static int i;
-	 * if (++i % 1000 == 0)
-	 * printk(KERN_INFO "lock_acquire(%s, %lu)\n",
-	 *	  lock->name, ip);
-	 */
-}
+	unsigned long flags;
 
-static void mtrace_lock_release(void *unused, struct lockdep_map *lock,
-				unsigned long ip)
-{
-	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_release, 0);
+	if (unlikely(current->lockdep_recursion))
+                return;
+
+	local_irq_save(flags);
+        mtrace_disable_count();
+        
+	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_acquire, read);
+
+        mtrace_enable_count();
+	local_irq_restore(flags);
 }
+EXPORT_SYMBOL_GPL(mtrace_lock_acquire);
+
+void mtrace_lock_release(struct lockdep_map *lock,
+                         unsigned long ip)
+{
+	unsigned long flags;
+
+	if (unlikely(current->lockdep_recursion))
+                return;
+
+	local_irq_save(flags);
+        mtrace_disable_count();
+
+	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_release, 0);
+
+        mtrace_enable_count();
+	local_irq_restore(flags);
+}
+EXPORT_SYMBOL_GPL(mtrace_lock_release);
 
 void mtrace_lock_acquired(struct lockdep_map *lock, unsigned long ip)
 {
+	unsigned long flags;
+
 	if (unlikely(current->lockdep_recursion))
-		return;
+                return;
+
+	local_irq_save(flags);
+        mtrace_disable_count();
 
 	mtrace_lock_register(ip, lock, lock->name, mtrace_lockop_acquired, 0);	
+
+        mtrace_enable_count();
+	local_irq_restore(flags);
 }
+EXPORT_SYMBOL_GPL(mtrace_lock_acquired);
 #endif
 
 static inline int mtrace_atomic_add_unless(atomic_t *v, int a, int u, 
@@ -464,8 +490,6 @@ void __init mtrace_init(void)
 	REG(sched_switch);
 
 #ifdef CONFIG_LOCKDEP
-	REG(lock_acquire);
-	REG(lock_release);
 	debug_locks = 0;
 #endif
 

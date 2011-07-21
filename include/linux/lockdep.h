@@ -312,12 +312,14 @@ static inline int lockdep_match_key(struct lockdep_map *lock,
  *   1: simple checks (freeing, held-at-exit-time, etc.)
  *   2: full validation
  */
+#ifndef CONFIG_MTRACE
 extern void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 			 int trylock, int read, int check,
 			 struct lockdep_map *nest_lock, unsigned long ip);
 
 extern void lock_release(struct lockdep_map *lock, int nested,
 			 unsigned long ip);
+#endif
 
 #define lockdep_is_held(lock)	lock_is_held(&(lock)->dep_map)
 
@@ -472,6 +474,34 @@ static inline void print_irqtrace_events(struct task_struct *curr)
  * on the per lock-class debug mode:
  */
 
+#ifdef CONFIG_MTRACE
+#define lock_acquire(lock, subclass, trylock, read, check, nest_lock, ip) \
+        mtrace_lock_acquire(lock, ip, read)
+#define lock_release(lock, nested, ip) \
+        mtrace_lock_release(lock, ip)
+
+extern void mtrace_lock_acquire(struct lockdep_map *lock, unsigned long ip,
+                                int read);
+
+extern void mtrace_lock_release(struct lockdep_map *lock,
+                                unsigned long ip);
+
+#define spin_acquire(l, s, t, i)		mtrace_lock_acquire(l, i, 0)
+#define spin_acquire_nest(l, s, t, n, i)	mtrace_lock_acquire(l, i, 0)
+#define spin_release(l, n, i)			mtrace_lock_release(l, i)
+#define rwlock_acquire(l, s, t, i)		mtrace_lock_acquire(l, i, 0)
+#define rwlock_acquire_read(l, s, t, i)	        mtrace_lock_acquire(l, i, 1)
+#define rwlock_release(l, n, i)		        mtrace_lock_release(l, i)
+#define mutex_acquire(l, s, t, i)		mtrace_lock_acquire(l, i, 0)
+#define mutex_release(l, n, i)			mtrace_lock_release(l, i)
+#define rwsem_acquire(l, s, t, i)		mtrace_lock_acquire(l, i, 0)
+#define rwsem_acquire_read(l, s, t, i)	        mtrace_lock_acquire(l, i, 1)
+#define rwsem_release(l, n, i)			mtrace_lock_release(l, i)
+#define lock_map_acquire(l)		        mtrace_lock_acquire(l, _THIS_IP_, 0)
+#define lock_map_acquire_read(l)	        mtrace_lock_acquire(l, _THIS_IP_, 1)
+#define lock_map_release(l)			mtrace_lock_release(l, _THIS_IP_)
+#else /* !CONFIG_MTRACE */
+
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 # ifdef CONFIG_PROVE_LOCKING
 #  define spin_acquire(l, s, t, i)		lock_acquire(l, s, t, 0, 2, NULL, i)
@@ -542,6 +572,8 @@ static inline void print_irqtrace_events(struct task_struct *curr)
 # define lock_map_acquire_read(l)		do { } while (0)
 # define lock_map_release(l)			do { } while (0)
 #endif
+
+#endif /* CONFIG_MTRACE */
 
 #ifdef CONFIG_PROVE_LOCKING
 # define might_lock(lock) 						\

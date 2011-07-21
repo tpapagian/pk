@@ -2887,6 +2887,7 @@ print_unlock_inbalance_bug(struct task_struct *curr, struct lockdep_map *lock,
 	return 0;
 }
 
+#ifndef CONFIG_MTRACE
 /*
  * Common debugging checks for both nested and non-nested unlock:
  */
@@ -2903,6 +2904,7 @@ static int check_unlock(struct task_struct *curr, struct lockdep_map *lock,
 
 	return 1;
 }
+#endif
 
 static int match_held_lock(struct held_lock *hlock, struct lockdep_map *lock)
 {
@@ -2980,6 +2982,7 @@ found_it:
 	return 1;
 }
 
+#ifndef CONFIG_MTRACE
 /*
  * Remove the lock to the list of currently held locks in a
  * potentially non-nested (out of order) manner. This is a
@@ -3121,6 +3124,7 @@ __lock_release(struct lockdep_map *lock, int nested, unsigned long ip)
 
 	check_chain_key(curr);
 }
+#endif
 
 static int __lock_is_held(struct lockdep_map *lock)
 {
@@ -3193,6 +3197,7 @@ void lock_set_class(struct lockdep_map *lock, const char *name,
 }
 EXPORT_SYMBOL_GPL(lock_set_class);
 
+#ifndef CONFIG_MTRACE
 /*
  * We are not always called with irqs disabled - do that here,
  * and also avoid lockdep recursion:
@@ -3201,9 +3206,6 @@ void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 			  int trylock, int read, int check,
 			  struct lockdep_map *nest_lock, unsigned long ip)
 {
-#ifdef CONFIG_MTRACE
-	trace_lock_acquire(lock, subclass, trylock, read, check, nest_lock, ip);
-#else
 	unsigned long flags;
 
 	if (unlikely(current->lockdep_recursion))
@@ -3218,16 +3220,12 @@ void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 		       irqs_disabled_flags(flags), nest_lock, ip, 0);
 	current->lockdep_recursion = 0;
 	raw_local_irq_restore(flags);
-#endif
 }
 EXPORT_SYMBOL_GPL(lock_acquire);
 
 void lock_release(struct lockdep_map *lock, int nested,
 			  unsigned long ip)
 {
-#ifdef CONFIG_MTRACE
-	trace_lock_release(lock, ip);
-#else
 	unsigned long flags;
 
 	if (unlikely(current->lockdep_recursion))
@@ -3240,9 +3238,9 @@ void lock_release(struct lockdep_map *lock, int nested,
 	__lock_release(lock, nested, ip);
 	current->lockdep_recursion = 0;
 	raw_local_irq_restore(flags);
-#endif
 }
 EXPORT_SYMBOL_GPL(lock_release);
+#endif
 
 int lock_is_held(struct lockdep_map *lock)
 {
