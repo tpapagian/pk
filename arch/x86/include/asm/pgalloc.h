@@ -75,6 +75,24 @@ static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmd,
 	set_pmd(pmd, __pmd(((pteval_t)pfn << PAGE_SHIFT) | _PAGE_TABLE));
 }
 
+#ifdef CONFIG_AMDRAGON_ATOMIC_PGD_UPDATE
+static inline int pmd_populate_if_clear(struct mm_struct *mm, pmd_t *pmd, struct page *pte)
+{
+	unsigned long pfn = page_to_pfn(pte);
+	pmd_t val = __pmd(((pteval_t)pfn << PAGE_SHIFT) | _PAGE_TABLE);
+	pmd_t cur = cmpxchg(pmd, native_make_pmd(0), val);
+	// All we actually care about is the present bit, so if we
+	// failed, try an atomic update after checking the present
+	// bit.
+	while (val.pmd != cur.pmd) {
+		if (pmd_present(cur))
+			return 0;
+		cur = cmpxchg(pmd, cur, val);
+	}
+	return 1;
+}
+#endif
+
 #define pmd_pgtable(pmd) pmd_page(pmd)
 
 #if PAGETABLE_LEVELS > 2
@@ -105,6 +123,23 @@ static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 	paravirt_alloc_pmd(mm, __pa(pmd) >> PAGE_SHIFT);
 	set_pud(pud, __pud(_PAGE_TABLE | __pa(pmd)));
 }
+
+#ifdef CONFIG_AMDRAGON_ATOMIC_PGD_UPDATE
+static inline int pud_populate_if_clear(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
+{
+	pud_t val = __pud(_PAGE_TABLE | __pa(pmd));
+	pud_t cur = cmpxchg(pud, native_make_pud(0), val);
+	// All we actually care about is the present bit, so if we
+	// failed, try an atomic update after checking the present
+	// bit.
+	while (val.pud != cur.pud) {
+		if (pud_present(cur))
+			return 0;
+		cur = cmpxchg(pud, cur, val);
+	}
+	return 1;
+}
+#endif
 #endif	/* CONFIG_X86_PAE */
 
 #if PAGETABLE_LEVELS > 3
@@ -113,6 +148,23 @@ static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, pud_t *pud)
 	paravirt_alloc_pud(mm, __pa(pud) >> PAGE_SHIFT);
 	set_pgd(pgd, __pgd(_PAGE_TABLE | __pa(pud)));
 }
+
+#ifdef CONFIG_AMDRAGON_ATOMIC_PGD_UPDATE
+static inline int pgd_populate_if_clear(struct mm_struct *mm, pgd_t *pgd, pud_t *pud)
+{
+	pgd_t val = __pgd(_PAGE_TABLE | __pa(pud));
+	pgd_t cur = cmpxchg(pgd, native_make_pgd(0), val);
+	// All we actually care about is the present bit, so if we
+	// failed, try an atomic update after checking the present
+	// bit.
+	while (val.pgd != cur.pgd) {
+		if (pgd_present(cur))
+			return 0;
+		cur = cmpxchg(pgd, cur, val);
+	}
+	return 1;
+}
+#endif
 
 static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 {

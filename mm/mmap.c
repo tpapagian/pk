@@ -30,6 +30,7 @@
 #include <linux/mmu_notifier.h>
 #include <linux/perf_event.h>
 #include <linux/audit.h>
+#include <linux/mm_stats.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
@@ -504,8 +505,10 @@ __vma_unlink(struct mm_struct *mm, struct vm_area_struct *vma,
 	if (next)
 		next->vm_prev = prev;
 	rb_erase(&vma->vm_rb, &mm->mm_rb);
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 	if (mm->mmap_cache == vma)
 		mm->mmap_cache = prev;
+#endif
 }
 
 /*
@@ -1133,6 +1136,7 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 {
 	struct file *file = NULL;
 	unsigned long retval = -EBADF;
+	struct mm_stat_time mm_stat_time;
 
 	if (!(flags & MAP_ANONYMOUS)) {
 		audit_mmap_fd(fd, flags);
@@ -1159,7 +1163,9 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
 	mm_lock(current->mm);
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
 	retval = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, mmap);
 	mm_unlock(current->mm);
 
 	if (file)
@@ -1624,7 +1630,9 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 	if (mm) {
 		/* Check the cache first. */
 		/* (Cache hit rate is typically around 35%.) */
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 		vma = mm->mmap_cache;
+#endif
 		if (!(vma && vma->vm_end > addr && vma->vm_start <= addr)) {
 			struct rb_node * rb_node;
 
@@ -1645,9 +1653,13 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 				} else
 					rb_node = rb_node->rb_right;
 			}
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 			if (vma)
 				mm->mmap_cache = vma;
-		}
+#endif
+			AMDRAGON_MM_STAT_INC(mmap_cache_miss);
+		} else
+			AMDRAGON_MM_STAT_INC(mmap_cache_hit);
 	}
 	return vma;
 }
@@ -1968,7 +1980,9 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	else
 		addr = vma ?  vma->vm_start : mm->mmap_base;
 	mm->unmap_area(mm, addr);
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 	mm->mmap_cache = NULL;		/* Kill the cache. */
+#endif
 }
 
 /*
@@ -2157,10 +2171,15 @@ SYSCALL_DEFINE2(munmap, unsigned long, addr, size_t, len)
 {
 	int ret;
 	struct mm_struct *mm = current->mm;
+	struct mm_stat_time mm_stat_time;
 
 	profile_munmap(addr);
 
-	ret = do_munmap_locked(mm, addr, len);
+	mm_lock(mm);
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
+	ret = do_munmap(mm, addr, len);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, munmap);
+	mm_unlock(mm);
 	return ret;
 }
 

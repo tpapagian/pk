@@ -320,7 +320,9 @@ static int dup_mmap(struct mm_struct *mm, struct mm_struct *oldmm)
 
 	mm->locked_vm = 0;
 	mm->mmap = NULL;
+#ifndef CONFIG_AMDRAGON_DISABLE_MMAP_CACHE
 	mm->mmap_cache = NULL;
+#endif
 	mm->free_area_cache = oldmm->mmap_base;
 	mm->cached_hole_size = ~0UL;
 	mm->map_count = 0;

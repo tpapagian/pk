@@ -16,12 +16,17 @@
 /*
  * lock for reading
  */
-void __sched down_read(struct rw_semaphore *sem)
+int __sched down_read(struct rw_semaphore *sem)
 {
 	might_sleep();
 	rwsem_acquire_read(&sem->dep_map, 0, 0, _RET_IP_);
 
+#ifdef CONFIG_AMDRAGON_CONTENTION_STATS
+	return __down_read(sem);
+#else
 	LOCK_CONTENDED(sem, __down_read_trylock, __down_read);
+	return 0;
+#endif
 }
 
 EXPORT_SYMBOL(down_read);
@@ -43,12 +48,17 @@ EXPORT_SYMBOL(down_read_trylock);
 /*
  * lock for writing
  */
-void __sched down_write(struct rw_semaphore *sem)
+int __sched down_write(struct rw_semaphore *sem)
 {
 	might_sleep();
 	rwsem_acquire(&sem->dep_map, 0, 0, _RET_IP_);
 
+#ifdef CONFIG_AMDRAGON_CONTENTION_STATS
+	return __down_write(sem);
+#else
 	LOCK_CONTENDED(sem, __down_write_trylock, __down_write);
+	return 0;
+#endif
 }
 
 EXPORT_SYMBOL(down_write);

@@ -184,6 +184,10 @@ static void sched_info_arrive(struct task_struct *t)
 {
 	unsigned long long now = task_rq(t)->clock, delta = 0;
 
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	t->last_run_start = get_cycles();
+#endif
+
 	if (t->sched_info.last_queued)
 		delta = now - t->sched_info.last_queued;
 	sched_info_reset_dequeued(t);
@@ -222,6 +226,10 @@ static inline void sched_info_depart(struct task_struct *t)
 
 	if (t->state == TASK_RUNNING)
 		sched_info_queued(t);
+
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	t->run_accum += get_cycles() - t->last_run_start;
+#endif
 }
 
 /*

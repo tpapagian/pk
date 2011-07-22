@@ -13,6 +13,7 @@
 #include <linux/perf_event.h>		/* perf_sw_event		*/
 #include <linux/hugetlb.h>		/* hstate_index_to_shift	*/
 #include <linux/mm_lock.h>
+#include <linux/mm_stats.h>
 
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
@@ -962,8 +963,15 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY |
 					(write ? FAULT_FLAG_WRITE : 0);
 
+	struct mm_stat_time mm_stat_time;
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t find_vma_start, find_vma_end;
+#endif
+
 	tsk = current;
 	mm = tsk->mm;
+
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, tsk);
 
 	/* Get the faulting address: */
 	address = read_cr2();
@@ -1082,7 +1090,13 @@ retry:
 		might_sleep();
 	}
 
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	find_vma_start = get_cycles();
+#endif
 	vma = find_vma(mm, address);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	find_vma_end = get_cycles();
+#endif
 	if (unlikely(!vma)) {
 		bad_area(regs, error_code, address);
 		return;
@@ -1158,4 +1172,7 @@ good_area:
 	check_v8086_mode(regs, address, tsk);
 
 	mm_pf_unlock_read(mm);
+
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, tsk, pf);
+	AMDRAGON_MM_STAT_ADD(pf_find_vma_cycles, find_vma_end - find_vma_start);
 }
