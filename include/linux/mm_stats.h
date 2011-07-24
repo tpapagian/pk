@@ -4,6 +4,12 @@
 #define AMDRAGON_FOR_MM_STAT(__x)		\
 	__x(mmap_cache_hit)			\
 	__x(mmap_cache_miss)			\
+	__x(mmap_sem_read_contended)		\
+	__x(mmap_sem_read_contended_cycles)	\
+	__x(mmap_sem_read_uncontended)		\
+	__x(mmap_sem_read_uncontended_cycles)	\
+	__x(mmap_sem_read_release_cycles)	\
+	__x(mmap_sem_read_release)		\
 	__x(pud_alloc)				\
 	__x(pud_alloc_race)			\
 	__x(pmd_alloc)				\
@@ -13,6 +19,12 @@
 	__x(mmap_count)				\
 	__x(mmap_run_cycles)			\
 	__x(mmap_wall_cycles)			\
+	__x(mmap_down_count)				\
+	__x(mmap_down_run_cycles)			\
+	__x(mmap_down_wall_cycles)			\
+	__x(mmap_up_count)				\
+	__x(mmap_up_run_cycles)			\
+	__x(mmap_up_wall_cycles)			\
 	__x(munmap_count)			\
 	__x(munmap_run_cycles)			\
 	__x(munmap_wall_cycles)			\

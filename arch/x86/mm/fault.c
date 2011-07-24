@@ -964,6 +964,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 
 	struct mm_stat_time mm_stat_time;
 #ifdef CONFIG_AMDRAGON_MM_STATS
+	cycles_t lock_start, lock_end;
 	cycles_t find_vma_start, find_vma_end;
 #endif
 
@@ -1072,6 +1073,9 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	 * validate the source. If this is invalid we can skip the address
 	 * space check, thus avoiding the deadlock:
 	 */
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	lock_start = get_cycles();
+#endif
 	if (unlikely(!down_read_trylock(&mm->mmap_sem))) {
 		if ((error_code & PF_USER) == 0 &&
 		    !search_exception_tables(regs->ip)) {
@@ -1079,8 +1083,23 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 			return;
 		}
 retry:
+#ifdef CONFIG_AMDRAGON_MM_STATS
+		if (lock_start == 0)
+			lock_start = get_cycles();
+#endif
 		down_read(&mm->mmap_sem);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+		lock_end = get_cycles();
+		AMDRAGON_MM_STAT_INC(mmap_sem_read_contended);
+		AMDRAGON_MM_STAT_ADD(mmap_sem_read_contended_cycles, lock_end-lock_start);
+		lock_start = 0;
+#endif
 	} else {
+#ifdef CONFIG_AMDRAGON_MM_STATS
+		lock_end = get_cycles();
+		AMDRAGON_MM_STAT_INC(mmap_sem_read_uncontended);
+		AMDRAGON_MM_STAT_ADD(mmap_sem_read_uncontended_cycles, lock_end-lock_start);
+#endif
 		/*
 		 * The above down_read_trylock() might have succeeded in
 		 * which case we'll have missed the might_sleep() from
@@ -1170,7 +1189,16 @@ good_area:
 
 	check_v8086_mode(regs, address, tsk);
 
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	lock_start = get_cycles();
+#endif
 	up_read(&mm->mmap_sem);
+#ifdef CONFIG_AMDRAGON_MM_STATS
+	lock_end = get_cycles();
+	// XXX There are several other return paths
+	AMDRAGON_MM_STAT_INC(mmap_sem_read_release);
+	AMDRAGON_MM_STAT_ADD(mmap_sem_read_release_cycles, lock_end-lock_start);
+#endif
 
 	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, tsk, pf);
 	AMDRAGON_MM_STAT_ADD(pf_find_vma_cycles, find_vma_end - find_vma_start);

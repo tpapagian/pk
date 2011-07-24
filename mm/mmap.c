@@ -1136,11 +1136,15 @@ SYSCALL_DEFINE6(mmap_pgoff, unsigned long, addr, unsigned long, len,
 
 	flags &= ~(MAP_EXECUTABLE | MAP_DENYWRITE);
 
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
 	down_write(&current->mm->mmap_sem);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, mmap_down);
 	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
 	retval = do_mmap_pgoff(file, addr, len, prot, flags, pgoff);
 	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, mmap);
+	AMDRAGON_MM_STAT_TIME(&mm_stat_time, current);
 	up_write(&current->mm->mmap_sem);
+	AMDRAGON_MM_STAT_TIME_END(&mm_stat_time, current, mmap_up);
 
 	if (file)
 		fput(file);
