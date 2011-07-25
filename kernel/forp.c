@@ -146,8 +146,7 @@ void forp_exit_task(struct task_struct *t)
 		__forp_pop();
 }
 
-static void forp_probe_sched_switch(void *ignore, struct task_struct *prev, 
-				    struct task_struct *next)
+void forp_sched_switch(struct task_struct *prev, struct task_struct *next)
 {
 	u64 timestamp;
 	int index;
@@ -207,14 +206,7 @@ int forp_init(int enable)
 {
 	struct task_struct *g, *t;
 	unsigned long flags;
-	int r, i, cpu;
-
-	r = register_trace_sched_switch(forp_probe_sched_switch, NULL);
-	if (r) {
-		printk(KERN_ERR "Couldn't activate tracepoint"
-		       " probe to kernel_sched_switch: %d\n", r);
-		return r;
-	}
+	int i, cpu;
 
 	idle_notifier_register(&idle_block);
 
@@ -242,7 +234,6 @@ int forp_init(int enable)
 
 void forp_deinit(void)
 {
-	unregister_trace_sched_switch(forp_probe_sched_switch, NULL);
 	idle_notifier_unregister(&idle_block);
 	forp_enable = 0;
 }

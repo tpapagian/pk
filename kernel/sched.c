@@ -2778,6 +2778,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 
 	prepare_task_switch(rq, prev, next);
 	trace_sched_switch(prev, next);
+	forp_sched_switch(prev, next);
 	mm = next->mm;
 	oldmm = prev->active_mm;
 	/*
