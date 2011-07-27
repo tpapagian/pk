@@ -7,6 +7,7 @@ struct forp_rec {
 	u64 time;
 	u64 count;
 	u64 sched;
+	u64 irq;
 };
 
 struct forp_label {
@@ -15,6 +16,7 @@ struct forp_label {
 };
 
 typedef u8 forp_flags_t;
+struct forp_stack;
 
 extern forp_flags_t __forp_push(unsigned int id);
 extern void __forp_pop(void);
@@ -58,6 +60,16 @@ enum {
 #define FORP_ENTRY_PGFAULT	(FORP_ENTRY_BASE + 0)
 #define FORP_ENTRY_SOFTIRQD	(FORP_ENTRY_BASE + 1)
 #define FORP_ENTRY_IDLE		(FORP_ENTRY_BASE + 2)
+#define FORP_HI_SOFTIRQ		(FORP_ENTRY_BASE + 3)
+#define FORP_TIMER_SOFTIRQ	(FORP_ENTRY_BASE + 4)
+#define FORP_NET_TX_SOFTIRQ	(FORP_ENTRY_BASE + 5)
+#define FORP_NET_RX_SOFTIRQ	(FORP_ENTRY_BASE + 6)
+#define FORP_BLOCK_SOFTIRQ	(FORP_ENTRY_BASE + 7)
+#define FORP_BLOCK_IOPOLL_SOFTIRQ	(FORP_ENTRY_BASE + 8)
+#define FORP_TASKLET_SOFTIRQ	(FORP_ENTRY_BASE + 9)
+#define FORP_SCHED_SOFTIRQ	(FORP_ENTRY_BASE + 10)
+#define FORP_HRTIMER_SOFTIRQ	(FORP_ENTRY_BASE + 11)
+#define FORP_RCU_SOFTIRQ	(FORP_ENTRY_BASE + 12)
 
 #define FORP_ENABLE_DYN   	0x01
 #define FORP_ENABLE_ENTRY  	0x02

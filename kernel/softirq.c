@@ -219,7 +219,9 @@ restart:
 			kstat_incr_softirqs_this_cpu(h - softirq_vec);
 
 			trace_softirq_entry(h, softirq_vec);
+			forp_irq_enter(h - softirq_vec);
 			h->action(h);
+			forp_irq_exit();
 			trace_softirq_exit(h, softirq_vec);
 			if (unlikely(prev_count != preempt_count())) {
 				printk(KERN_ERR "huh, entered softirq %td %s %p"

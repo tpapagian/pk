@@ -43,6 +43,8 @@ unsigned long forp_flags __read_mostly;
 static unsigned long static_enable;
 static unsigned long static_to_id[sizeof(static_enable)];
 
+static void __forp_pop_stack(struct forp_stack *stack);
+
 static inline u64 forp_time(void)
 {
 	return __native_read_tsc();
@@ -52,6 +54,7 @@ static inline void forp_stamp(struct forp_call_stamp *f, unsigned long id)
 {
 	f->calltime = forp_time();
 	f->sched = 0;
+	f->irq = 0;
 	f->id = id;
 }
 
@@ -65,6 +68,7 @@ static inline void __forp_add_stamp(struct forp_call_stamp *f)
 	rec->time += forp_time() - f->calltime;
 	rec->count++;
 	rec->sched += f->sched;
+	rec->irq += f->irq;
 }
 
 void forp_stamp_static(unsigned long static_id, struct forp_call_stamp *f)
@@ -85,52 +89,63 @@ void forp_add_stamp(struct forp_call_stamp *f)
 }
 
 static inline void __forp_start_entry(unsigned long entry, 
-				      struct task_struct *t)
+				      struct forp_stack *stack)
 {
 	if (forp_enable & FORP_ENABLE_ENTRY) {
-		t->forp_entry.calltime = forp_time();
-		t->forp_entry.sched = 0;
-		t->forp_entry.id = entry;
-		t->forp_entry_start = 1;
+		stack->forp_entry.calltime = forp_time();
+		stack->forp_entry.sched = 0;
+		stack->forp_entry.irq = 0;
+		stack->forp_entry.id = entry;
+		stack->forp_entry_start = 1;
 	}
 }
 
 void forp_start_entry(unsigned long entry)
 {
+	struct forp_stack *stack;
+
 	if (!current)
 		return;
 
-	__forp_start_entry(entry, current);
+	stack = current->forp_in_irq ?
+		&current->forp_irq_stack : &current->forp_call_stack;
+
+	__forp_start_entry(entry, stack);
 }
 
-static inline void __forp_end_entry(struct task_struct *tsk)
+static inline void __forp_end_entry(struct forp_stack *stack)
 {
         struct forp_rec *rec;
         unsigned long entry;
 
-        if (!tsk || !(forp_enable & FORP_ENABLE_ENTRY))
+        if (!(forp_enable & FORP_ENABLE_ENTRY))
                 return;
 
-        if (tsk->forp_entry_start) {
-		unsigned long elp = forp_time() - tsk->forp_entry.calltime;
+        if (stack->forp_entry_start) {
+		unsigned long elp = forp_time() - stack->forp_entry.calltime;
 		/* Entry recs start after Dynamic recs */
-                entry = tsk->forp_entry.id + FORP_DYN_REC_SIZE;
+                entry = stack->forp_entry.id + FORP_DYN_REC_SIZE;
                 rec = &get_cpu_var(forp_recs[entry]);
 		rec->time += elp;
 		rec->count++;
-		rec->sched += tsk->forp_entry.sched;
+		rec->sched += stack->forp_entry.sched;
+		rec->irq += stack->forp_entry.irq;
                 put_cpu_var(rec);
         }
-        tsk->forp_entry_start = 0;
+        stack->forp_entry_start = 0;
 }
+
 void forp_end_entry(void)
 {
-        __forp_end_entry(current);
+	struct forp_stack *stack = current->forp_in_irq ?
+		&current->forp_irq_stack : &current->forp_call_stack;
+        __forp_end_entry(stack);
 }
 
 void forp_init_task(struct task_struct *t)
 {
-	t->forp_curr_stack = -1;
+	t->forp_call_stack.depth = -1;
+	t->forp_irq_stack.depth = -1;
 }
 
 void forp_exit_task(struct task_struct *t)
@@ -141,41 +156,95 @@ void forp_exit_task(struct task_struct *t)
         if (current == NULL)
                 return;
 
-	__forp_end_entry(t);
-        while (current->forp_curr_stack >= 0)
-		__forp_pop();
+	if (t)
+		__forp_end_entry(&t->forp_call_stack);
+        while (current->forp_call_stack.depth >= 0)
+		__forp_pop_stack(&current->forp_call_stack);
+
+	WARN_ON(current->forp_irq_stack.depth >= 0);
 }
 
 void forp_sched_switch(struct task_struct *prev, struct task_struct *next)
 {
 	u64 timestamp;
 	int index;
+	struct forp_stack *pstack = &prev->forp_call_stack;
+	struct forp_stack *nstack = &next->forp_call_stack;
 
-	if (prev->forp_entry_start)
-		prev->forp_entry.sched++;
-	for (index = prev->forp_curr_stack; index >= 0; index--)
-		prev->forp_stack[index].sched++;
+	WARN_ON(prev->forp_in_irq);
+
+	if (pstack->forp_entry_start)
+		pstack->forp_entry.sched++;
+	for (index = pstack->depth; index >= 0; index--)
+		pstack->forp_stack[index].sched++;
 
 	if (forp_flags & FORP_FLAG_SLEEP_TIME)
 		return;
 
 	timestamp = forp_time();
-	prev->forp_switchstamp = timestamp;
+	pstack->forp_switchstamp = timestamp;
 
 	/* only process tasks that we timestamped */
-	if (!next->forp_switchstamp)
+	if (!nstack->forp_switchstamp)
 		return;
 
 	/*
 	 * Update all the counters in next to make up for the
 	 * time next was sleeping.
 	 */
-	timestamp -= next->forp_switchstamp;
+	timestamp -= nstack->forp_switchstamp;
 
-	if (next->forp_entry_start)
-		next->forp_entry.calltime += timestamp; 
-	for (index = next->forp_curr_stack; index >= 0; index--)
-		next->forp_stack[index].calltime += timestamp;
+	if (nstack->forp_entry_start)
+		nstack->forp_entry.calltime += timestamp; 
+	for (index = nstack->depth; index >= 0; index--)
+		nstack->forp_stack[index].calltime += timestamp;
+}
+
+void forp_irq_enter(int irq)
+{
+	struct forp_stack *cstack = &current->forp_call_stack;
+	struct forp_stack *istack = &current->forp_irq_stack;
+	u64 timestamp;
+	int index;
+
+	WARN_ON(current->forp_in_irq);
+
+	if (cstack->forp_entry_start)
+		cstack->forp_entry.irq++;
+	for (index = cstack->depth; index >= 0; index--)
+		cstack->forp_stack[index].irq++;
+
+	timestamp = forp_time();
+	istack->forp_switchstamp = timestamp;
+	current->forp_in_irq = 1;
+
+	forp_start_entry(FORP_HI_SOFTIRQ + irq);
+}
+
+void forp_irq_exit(void)
+{
+	struct forp_stack *cstack = &current->forp_call_stack;
+	struct forp_stack *istack = &current->forp_irq_stack;
+	u64 timestamp;
+	int index;
+
+	WARN_ON(!current->forp_in_irq);
+
+	forp_end_entry();
+
+	/*
+	 * Update all the counters in current to make up for the
+	 * time processing irqs.
+	 */
+	timestamp = forp_time();
+	timestamp -= istack->forp_switchstamp;
+
+	if (cstack->forp_entry_start)
+		cstack->forp_entry.calltime += timestamp; 
+	for (index = cstack->depth; index >= 0; index--)
+		cstack->forp_stack[index].calltime += timestamp;
+
+	current->forp_in_irq = 0;
 }
 
 static int idle_notifier(struct notifier_block *this, 
@@ -185,10 +254,10 @@ static int idle_notifier(struct notifier_block *this,
 	switch(event) {
 	case IDLE_START:
 		__forp_start_entry(FORP_ENTRY_IDLE, 
-				   idle_task(smp_processor_id()));
+				   &idle_task(smp_processor_id())->forp_call_stack);
 		break;
 	case IDLE_END:
-		__forp_end_entry(idle_task(smp_processor_id()));
+		__forp_end_entry(&idle_task(smp_processor_id())->forp_call_stack);
 		break;
 	default:
 		printk_once(KERN_WARNING "forp: idle_notifier event %lu\n", 
@@ -218,14 +287,18 @@ int forp_init(int enable)
 	/* reset per-task state */
 	read_lock_irqsave(&tasklist_lock, flags);
 	do_each_thread(g, t) {
-		t->forp_curr_stack = -1;
-		t->forp_entry_start = 0;
+		t->forp_call_stack.depth = -1;
+		t->forp_call_stack.forp_entry_start = 0;
+		t->forp_irq_stack.depth = -1;
+		t->forp_irq_stack.forp_entry_start = 0;
 	} while_each_thread(g, t);
 	read_unlock_irqrestore(&tasklist_lock, flags);
 
 	for_each_online_cpu(cpu) {
-		idle_task(cpu)->forp_entry_start = 0;
-		idle_task(cpu)->forp_curr_stack = -1;
+		idle_task(cpu)->forp_call_stack.depth = -1;
+		idle_task(cpu)->forp_call_stack.forp_entry_start = 0;
+		idle_task(cpu)->forp_irq_stack.depth = -1;
+		idle_task(cpu)->forp_irq_stack.forp_entry_start = 0;
 	}
 
 	forp_enable = enable;
@@ -268,30 +341,44 @@ void forp_register(struct forp_label *labels, int n)
 	mutex_unlock(&forp_mu);
 }
 
-forp_flags_t __forp_push(unsigned int id)
+static forp_flags_t __forp_push_stack(unsigned int id, struct forp_stack *stack)
 {
-	int depth = current->forp_curr_stack + 1;
+	int depth = stack->depth + 1;
 	/* XXX could easily index off the end of forp_dyn_labels ...*/
 	if ((forp_enable & FORP_ENABLE_DYN) && forp_dyn_labels[id].depth == depth) {
-		int i = ++current->forp_curr_stack;
-		forp_stamp(&current->forp_stack[i], id);
+		int i = ++stack->depth;
+		forp_stamp(&stack->forp_stack[i], id);
 		return 1;
 	}
 	return 0;
 }
 
-void __forp_pop(void)
+forp_flags_t __forp_push(unsigned int id)
+{
+	struct forp_stack *stack = current->forp_in_irq ?
+		&current->forp_irq_stack : &current->forp_call_stack;
+	return __forp_push_stack(id, stack);
+}
+
+static void __forp_pop_stack(struct forp_stack *stack)
 {
 	struct forp_call_stamp *f;	
 	int i;
 
 	if (forp_enable & FORP_ENABLE_DYN) {
-		i = current->forp_curr_stack;
+		i = stack->depth;
 		if (i < 0)
 			return;
 
-		f = &current->forp_stack[i];
+		f = &stack->forp_stack[i];
 		__forp_add_stamp(f);
-		current->forp_curr_stack--;
+		stack->depth--;
 	}
+}
+
+void __forp_pop(void)
+{
+	struct forp_stack *stack = current->forp_in_irq ?
+		&current->forp_irq_stack : &current->forp_call_stack;
+	__forp_pop_stack(stack);
 }

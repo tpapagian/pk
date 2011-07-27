@@ -1477,13 +1477,9 @@ struct task_struct {
 	struct list_head	*scm_work_list;
 #ifdef CONFIG_FORP
 	/* For dynamic/ksplice forp */
-	int forp_curr_stack;
-	struct forp_call_stamp forp_stack[FORP_RETSTACK_DEPTH];
-	u64 forp_switchstamp;
-
-	/* For kernel entry points */
-	int forp_entry_start;
-	struct forp_call_stamp forp_entry;
+	struct forp_stack forp_call_stack;
+	struct forp_stack forp_irq_stack;
+	int forp_in_irq;
 #endif
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 	/* Index of current stored address in ret_stack */

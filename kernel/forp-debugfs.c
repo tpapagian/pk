@@ -54,16 +54,16 @@ static int forp_snprintf_recs(struct forp_rec *recs, char *buf, int sz)
 	e = p + sz;
 
 	p += snprintf(p, e - p, "# Function                          "
-		      "Depth         Hit         Sched    Time\n");
+		      "Depth         Hit         Sched   IRQ     Time\n");
 
 	for (i = 0; i < FORP_REC_SIZE; i++) {
 		struct forp_rec *rec = &recs[i];
 		if (rec->count) {
 			struct forp_label *label = forp_get_label(i);
 			p += snprintf(p, e - p, 
-				      "  %-30.30s      %3u  %10llu    %10llu    %-10llu\n",
+				      "  %-30.30s      %3u  %10llu    %10llu    %10llu    %-10llu\n",
 				      label->name, label->depth, rec->count, 
-				      rec->sched, rec->time);
+				      rec->sched, rec->irq, rec->time);
 		}
 	}
 
@@ -139,6 +139,7 @@ static ssize_t forp_read_aggregate(char __user *ubuf, size_t cnt,
 			recs[i].time += r->time;
 			recs[i].count += r->count;		
 			recs[i].sched += r->sched;
+			recs[i].irq += r->irq;
 		}
 	}
 	mutex_unlock(&forp_mu);
