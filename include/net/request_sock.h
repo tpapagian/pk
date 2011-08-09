@@ -131,8 +131,10 @@ struct request_sock_queue {
 	/* 3 bytes hole, try to pack */
 	struct listen_sock	*listen_opt;
 
+#ifdef CONFIG_REQUEST_SOCK_HIST
 	struct Hist		histogram;
 	struct stat_data	stats;
+#endif
 
 	struct ewma		queue_len_ewma;
 	struct ewma		conn_per_sec_ewma;
@@ -269,6 +271,7 @@ static inline void reqsk_queue_hash_req(struct request_sock_queue *queue,
 	write_unlock(&queue->syn_wait_lock);
 }
 
+#ifdef CONFIG_REQUEST_SOCK_HIST
 static inline void reqsk_hist_update(struct request_sock_queue *queue)
 {
 	int len = reqsk_queue_len(queue);
@@ -284,5 +287,10 @@ static inline void reqsk_queue_hash_print(struct request_sock_queue *queue, stru
 {
 	_stp_stat_print_histogram_seq(&queue->histogram, &queue->stats, f);
 }
+#else /* !CONFIG_REQUEST_SOCK_HIST */
+static inline void reqsk_hist_update(struct request_sock_queue *queue) {}
+static inline void reqsk_hist_clear(struct request_sock_queue *queue) {}
+static inline void reqsk_queue_hash_print(struct request_sock_queue *queue, struct seq_file *f) {}
+#endif /* CONFIG_REQUEST_SOCK_HIST */
 
 #endif /* _REQUEST_SOCK_H */

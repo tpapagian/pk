@@ -20,6 +20,7 @@
 
 #include <net/request_sock.h>
 
+#ifdef CONFIG_REQUEST_SOCK_HIST
 static inline void reqsk_hist_init(struct request_sock_queue *queue)
 {
 	queue->histogram.type = HIST_LINEAR;
@@ -28,6 +29,11 @@ static inline void reqsk_hist_init(struct request_sock_queue *queue)
 	queue->histogram.interval = 1;
 	queue->histogram.buckets = _stp_stat_calc_buckets(64, 0, 1);
 }
+#else /* !CONFIG_REQUEST_SOCK_HIST */
+static inline void reqsk_hist_init(struct request_sock_queue *queue) {
+	_stp_stat_calc_buckets(64, 0, 1); // AP: TODO: HACK TO FORCE _stp_stat_calc_buckets to be included in kallsysms
+}
+#endif /* CONFIG_REQUEST_SOCK_HIST */
 
 /*
  * Maximum number of SYN_RECV sockets in queue per LISTEN socket.
