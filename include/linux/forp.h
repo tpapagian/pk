@@ -34,6 +34,8 @@ extern void forp_start_entry(unsigned long entry);
 extern void forp_end_entry(void);
 extern void forp_stamp_static(unsigned long static_id, struct forp_call_stamp *f);
 extern void forp_add_stamp(struct forp_call_stamp *f);
+extern int forp_get_context(void);
+extern struct forp_label *forp_get_context_label(int i);
 #else /* !CONFIG_FORP */
 #define INIT_FORP
 static inline void forp_init_task(struct task_struct *t) { }
@@ -46,5 +48,7 @@ static inline void forp_end_entry(void) { }
 static inline void forp_stamp_static(unsigned long static_id, 
 				     struct forp_call_stamp *f) { }
 static inline void forp_add_stamp(struct forp_call_stamp *f) { }
+static inline int forp_get_context(void) { return -1; }
+static inline forp_label *forp_get_context_label(int i) {return NULL; }
 #endif /* CONFIG_FORP */
 #endif /* _LINUX_FORP_H_ */

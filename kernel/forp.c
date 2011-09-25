@@ -27,6 +27,7 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <asm/idle.h>
+#include <linux/module.h>
 
 #include <trace/events/sched.h>
 
@@ -382,3 +383,20 @@ void __forp_pop(void)
 		&current->forp_irq_stack : &current->forp_call_stack;
 	__forp_pop_stack(stack);
 }
+
+int forp_get_context(void)
+{
+	struct forp_stack *stack;
+
+	if (!(forp_enable & FORP_ENABLE_ENTRY))
+		return -1;
+
+	if (!current)
+		return -1;
+
+	stack = current->forp_in_irq ?
+		&current->forp_irq_stack : &current->forp_call_stack;
+
+	return stack->forp_entry.id;
+}
+EXPORT_SYMBOL(forp_get_context);

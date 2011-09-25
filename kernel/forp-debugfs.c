@@ -23,10 +23,20 @@
 
 #include <linux/debugfs.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <linux/uaccess.h>
 
 #include "forp.h"
 #include "forp-entry-label.h"
+
+char *forp_get_context_label(int i)
+{
+	static char *no_label = "---";
+	if (i >= FORP_ENTRY_END)
+		return no_label;
+	return forp_entry_label[i].name;
+}
+EXPORT_SYMBOL(forp_get_context_label);
 
 static inline struct forp_label *forp_get_label(int i)
 {
