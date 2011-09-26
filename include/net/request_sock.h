@@ -101,9 +101,18 @@ struct listen_sock {
 	/* 3 bytes hole, try to use */
 	int			qlen;
 	int			qlen_young;
-	int			clock_hand;
+	struct listen_sock_table* table;
+};
+
+struct listen_sock_table {
+	// Read mostly
+	u32			nr_table_entries; 
 	u32			hash_rnd;
-	u32			nr_table_entries;
+	u32			num_req_to_destroy;
+
+	// Read/Wrtie
+	spinlock_t		lock ____cacheline_aligned_in_smp;
+	int			clock_hand; // AP: XXX TODO not sure wether this should go here or in listen_sock
 	struct request_sock	*syn_table[0];
 };
 
@@ -126,7 +135,11 @@ struct listen_sock {
 struct request_sock_queue {
 	struct request_sock	*rskq_accept_head;
 	struct request_sock	*rskq_accept_tail;
-	rwlock_t		syn_wait_lock;
+	rwlock_t		syn_wait_lock; // AP: XXX TODO This lock is now
+					       // useless because it does not
+					       // protect the ltable anymore
+					       // and there are many of these
+					       // locks. MUST FIX.
 	u8			rskq_defer_accept;
 	/* 3 bytes hole, try to pack */
 	struct listen_sock	*listen_opt;
@@ -141,7 +154,10 @@ struct request_sock_queue {
 };
 
 extern int reqsk_queue_alloc(struct request_sock_queue *queue,
-			     unsigned int nr_table_entries, int node);
+		             struct listen_sock_table *ltable, int node);
+extern struct listen_sock_table *
+reqsk_queue_table_alloc(unsigned int nr_table_entries, int node);
+extern void reqsk_queue_table_destroy(struct listen_sock_table *ltable);
 
 extern void __reqsk_queue_destroy(struct request_sock_queue *queue);
 extern void reqsk_queue_destroy(struct request_sock_queue *queue);
@@ -259,16 +275,21 @@ static inline void reqsk_queue_hash_req(struct request_sock_queue *queue,
 					u32 hash, struct request_sock *req,
 					unsigned long timeout)
 {
-	struct listen_sock *lopt = queue->listen_opt;
+	struct listen_sock_table *ltable = queue->listen_opt->table;
 
 	req->expires = jiffies + timeout;
 	req->retrans = 0;
 	req->sk = NULL;
-	req->dl_next = lopt->syn_table[hash];
+
+	spin_lock(&ltable->lock);
+
+	req->dl_next = ltable->syn_table[hash];
 
 	write_lock(&queue->syn_wait_lock);
-	lopt->syn_table[hash] = req;
+	ltable->syn_table[hash] = req;
 	write_unlock(&queue->syn_wait_lock);
+
+	spin_unlock(&ltable->lock);
 }
 
 #ifdef CONFIG_REQUEST_SOCK_HIST

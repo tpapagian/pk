@@ -6,6 +6,7 @@
 extern int sysctl_multi_accept_lb;
 extern int sysctl_multi_accept_debug;
 extern int sysctl_multi_accept_c;
+extern int sysctl_multi_accept_private_ltable;
 
 struct ma_per_cpu {
 	int 			mapc_cpu;
@@ -18,6 +19,7 @@ struct multi_accept {
 	struct ma_per_cpu 	ma_pc[NR_CPUS];
 	struct timer_list       ma_timer;
 	void 			*ma_priv;
+	int			private_ltable;
 };
 
 struct multi_accept_lb_ops {

@@ -610,7 +610,11 @@ nlmsg_failure:
 	nlmsg_trim(skb, b);
 	return -1;
 }
-
+ 
+//AP: XXX TODO Accesses to icsk->icsk_accept_queue.listen_opt->table are not
+//protected by any lock!!!!!!!!!!!
+//
+//read_lock_bh(&icsk->icsk_accept_queue.syn_wait_lock) no longer works
 static int inet_diag_dump_reqs(struct sk_buff *skb, struct sock *sk,
 			       struct netlink_callback *cb)
 {
@@ -644,8 +648,8 @@ static int inet_diag_dump_reqs(struct sk_buff *skb, struct sock *sk,
 		entry.userlocks = sk->sk_userlocks;
 	}
 
-	for (j = s_j; j < lopt->nr_table_entries; j++) {
-		struct request_sock *req, *head = lopt->syn_table[j];
+	for (j = s_j; j < lopt->table->nr_table_entries; j++) {
+		struct request_sock *req, *head = lopt->table->syn_table[j];
 
 		reqnum = 0;
 		for (req = head; req; reqnum++, req = req->dl_next) {

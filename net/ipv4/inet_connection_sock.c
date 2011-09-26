@@ -419,17 +419,19 @@ static inline u32 inet_synq_hash(const __be32 raddr, const __be16 rport,
 #define AF_INET_FAMILY(fam) 1
 #endif
 
-struct request_sock *inet_csk_search_req(const struct sock *sk,
+//AP: The caller must hold the ltable->lock becuase it needs to protect the
+//    returned prevp.
+struct request_sock *__inet_csk_search_req(const struct sock *sk,
 					 struct request_sock ***prevp,
 					 const __be16 rport, const __be32 raddr,
 					 const __be32 laddr)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
-	struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;
+	struct listen_sock_table *ltable = icsk->icsk_accept_queue.listen_opt->table;
 	struct request_sock *req, **prev;
 
-	for (prev = &lopt->syn_table[inet_synq_hash(raddr, rport, lopt->hash_rnd,
-						    lopt->nr_table_entries)];
+	for (prev = &ltable->syn_table[inet_synq_hash(raddr, rport, ltable->hash_rnd,
+						    ltable->nr_table_entries)];
 	     (req = *prev) != NULL;
 	     prev = &req->dl_next) {
 		const struct inet_request_sock *ireq = inet_rsk(req);
@@ -447,15 +449,15 @@ struct request_sock *inet_csk_search_req(const struct sock *sk,
 	return req;
 }
 
-EXPORT_SYMBOL_GPL(inet_csk_search_req);
+EXPORT_SYMBOL_GPL(__inet_csk_search_req);
 
 void inet_csk_reqsk_queue_hash_add(struct sock *sk, struct request_sock *req,
 				   unsigned long timeout)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
-	struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;
+	struct listen_sock_table *ltable = icsk->icsk_accept_queue.listen_opt->table;
 	const u32 h = inet_synq_hash(inet_rsk(req)->rmt_addr, inet_rsk(req)->rmt_port,
-				     lopt->hash_rnd, lopt->nr_table_entries);
+				     ltable->hash_rnd, ltable->nr_table_entries);
 
 	reqsk_queue_hash_req(&icsk->icsk_accept_queue, h, req, timeout);
 	inet_csk_reqsk_queue_added(sk, timeout);
@@ -488,6 +490,7 @@ static inline void syn_ack_recalc(struct request_sock *req, const int thresh,
 		  req->retrans >= rskq_defer_accept - 1;
 }
 
+// AP: XXX TODO How will this work with the shared request socket hash table?
 void inet_csk_reqsk_queue_prune(struct sock *parent,
 				const unsigned long interval,
 				const unsigned long timeout,
@@ -496,6 +499,7 @@ void inet_csk_reqsk_queue_prune(struct sock *parent,
 	struct inet_connection_sock *icsk = inet_csk(parent);
 	struct request_sock_queue *queue = &icsk->icsk_accept_queue;
 	struct listen_sock *lopt = queue->listen_opt;
+	struct listen_sock_table *ltable = lopt->table;
 	int max_retries = icsk->icsk_syn_retries ? : sysctl_tcp_synack_retries;
 	int thresh = max_retries;
 	unsigned long now = jiffies;
@@ -504,6 +508,8 @@ void inet_csk_reqsk_queue_prune(struct sock *parent,
 
 	if (lopt == NULL || lopt->qlen == 0)
 		return;
+
+	spin_lock(&ltable->lock);
 
 	/* Normally all the openreqs are young and become mature
 	 * (i.e. converted to established socket) for first timeout.
@@ -536,11 +542,11 @@ void inet_csk_reqsk_queue_prune(struct sock *parent,
 	if (queue->rskq_defer_accept)
 		max_retries = queue->rskq_defer_accept;
 
-	budget = 2 * (lopt->nr_table_entries / (timeout / interval));
-	i = lopt->clock_hand;
+	budget = 2 * (ltable->nr_table_entries / (timeout / interval));
+	i = ltable->clock_hand;
 
 	do {
-		reqp=&lopt->syn_table[i];
+		reqp = &ltable->syn_table[i];
 		while ((req = *reqp) != NULL) {
 			if (time_after_eq(now, req->expires)) {
 				int expire = 0, resend = 0;
@@ -573,14 +579,16 @@ void inet_csk_reqsk_queue_prune(struct sock *parent,
 			reqp = &req->dl_next;
 		}
 
-		i = (i + 1) & (lopt->nr_table_entries - 1);
+		i = (i + 1) & (ltable->nr_table_entries - 1);
 
 	} while (--budget > 0);
 
-	lopt->clock_hand = i;
+	ltable->clock_hand = i;
 
 	if (lopt->qlen)
 		inet_csk_reset_keepalive_timer(parent, interval);
+
+	spin_unlock(&ltable->lock);
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_reqsk_queue_prune);
@@ -776,10 +784,10 @@ void inet_csk_destroy_sock(struct sock *sk)
 EXPORT_SYMBOL(inet_csk_destroy_sock);
 
 static inline int __inet_csk_listen_start_one(struct sock *sk,
-		const int nr_table_entries, int node)
+	        struct listen_sock_table *ltable, int node)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
-	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, nr_table_entries, node);
+	int rc = reqsk_queue_alloc(&icsk->icsk_accept_queue, ltable, node);
 
 	if (rc != 0)
 		return rc;
@@ -866,6 +874,8 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct listen_sock_table *ltable = NULL;
+	int private_ltable = 0;
 	int num_sockets = 1;
 	int c, s;
 	int err;
@@ -890,6 +900,21 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 
 		for (c = sysctl_multi_accept_c; c < num_sockets; c++)
 			ma_start_per_cpu_timer(sk, c);
+
+		private_ltable = sysctl_multi_accept_private_ltable;
+		icsk->icsk_ma->private_ltable = private_ltable;
+	}
+
+	//AP: TODO need to free the tables if there is an allocation error.
+	if (!private_ltable) {
+		printk("allocating public ltable\n");
+
+		ltable = reqsk_queue_table_alloc(nr_table_entries, -1);
+		if (ltable == NULL) {
+			BUG();
+			//handle error ...
+			//return -ENOMEM;
+		}
 	}
 
 	for (s = 0; s < num_sockets; s++) {
@@ -897,8 +922,17 @@ int inet_csk_listen_start(struct sock *sk, const int nr_table_entries)
 
 		printk("starting socket %d\n", s);
 
-		err = __inet_csk_listen_start_one(start_sk,
-				nr_table_entries, cpu_to_node(s));
+		if (private_ltable) {
+			printk("allocating private ltable\n");
+			ltable = reqsk_queue_table_alloc(nr_table_entries, -1);
+			if (ltable == NULL) {
+				BUG();
+				//handle error ...
+				//return -ENOMEM;
+			}
+		}
+
+		err = __inet_csk_listen_start_one(start_sk, ltable, cpu_to_node(s));
 		if (err)
 			goto start_error;
 
@@ -1026,20 +1060,34 @@ static void __inet_csk_listen_stop_one(struct sock *sk)
 void inet_csk_listen_stop(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct listen_sock_table *ltable = NULL;
 
 	printk("inet_csk_listen_stop sk=%p\n", sk);
 
 	if (icsk->icsk_ma) {
+		const int private_ltable = icsk->icsk_ma->private_ltable;
 		int i;
+
 		for (i = 1; i < num_possible_cpus(); i++) {
+			if (private_ltable)
+				ltable = inet_csk(ma_get_sk(sk, i))->icsk_accept_queue.listen_opt->table;
+
 			printk("inet_csk_listen_stop stopping slave %d\n", i);
 			__inet_csk_listen_stop_one(ma_get_sk(sk, i));
+
+			if (private_ltable) {
+				printk("freeing private ltable\n");
+				reqsk_queue_table_destroy(ltable);
+			}
 		}
 	}
 
 	printk("inet_csk_listen_stop stopping master\n");
 
+	ltable = inet_csk(sk)->icsk_accept_queue.listen_opt->table;
 	__inet_csk_listen_stop_one(sk);
+	printk("freeing public ltable\n");
+	reqsk_queue_table_destroy(ltable);
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_listen_stop);

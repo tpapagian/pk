@@ -381,6 +381,13 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec,
 	},
 	{
+		.procname	= "multi_accept_private_ltable",
+		.data		= &sysctl_multi_accept_private_ltable,
+		.maxlen		= sizeof(sysctl_multi_accept_private_ltable),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
 		.procname	= "tcp_orphan_retries",
 		.data		= &sysctl_tcp_orphan_retries,
 		.maxlen		= sizeof(int),

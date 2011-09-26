@@ -13,6 +13,9 @@ EXPORT_SYMBOL_GPL(sysctl_multi_accept_debug);
 int sysctl_multi_accept_c __read_mostly = 0;
 EXPORT_SYMBOL_GPL(sysctl_multi_accept_c);
 
+int sysctl_multi_accept_private_ltable __read_mostly = 0;
+EXPORT_SYMBOL_GPL(sysctl_multi_accept_private_ltable);
+
 int ma_init(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
