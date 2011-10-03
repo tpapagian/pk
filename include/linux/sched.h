@@ -1503,6 +1503,7 @@ struct task_struct {
 		unsigned long memsw_bytes; /* uncharged mem+swap usage */
 	} memcg_batch;
 #endif
+	int network_bound;
 };
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */

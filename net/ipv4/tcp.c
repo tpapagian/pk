@@ -1419,6 +1419,9 @@ int tcp_recvmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 	if (sk->sk_state == TCP_LISTEN)
 		goto out;
 
+	if (current)
+		current->network_bound++;
+
 	timeo = sock_rcvtimeo(sk, nonblock);
 
 	/* Urgent data needs to be handled specially. */
