@@ -45,6 +45,7 @@ config COMPAT_NETLINK_MESSAGES
 
 menu "Networking options"
 
+source "net/core/Kconfig"
 source "net/packet/Kconfig"
 source "net/unix/Kconfig"
 source "net/xfrm/Kconfig"

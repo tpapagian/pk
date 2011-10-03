@@ -2342,6 +2342,15 @@ do {								\
 })
 #endif
 
+struct netdev_lb_ops {
+	unsigned long (*move)(struct net_device *netdev, int from, int to);
+	unsigned long (*num_buckets)(struct net_device *netdev, int cpu);
+};
+
+void netdev_lb_register(struct net_device *netdev, const struct netdev_lb_ops *ops);
+unsigned long netdev_lb_move(int from, int to);
+unsigned long netdev_lb_num_buckets(int this_cpu);
+
 #endif /* __KERNEL__ */
 
 #endif	/* _LINUX_NETDEVICE_H */

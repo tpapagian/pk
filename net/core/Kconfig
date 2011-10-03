@@ -1,0 +1,6 @@
+#
+# Core configuration
+#
+
+config NETDEVICES_LB
+	bool "Load balancing of connection buckets"
