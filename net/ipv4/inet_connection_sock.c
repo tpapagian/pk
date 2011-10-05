@@ -419,20 +419,22 @@ static inline u32 inet_synq_hash(const __be32 raddr, const __be16 rport,
 #define AF_INET_FAMILY(fam) 1
 #endif
 
-//AP: The caller must hold the ltable->lock becuase it needs to protect the
-//    returned prevp.
-struct request_sock *__inet_csk_search_req(const struct sock *sk,
+struct request_sock *inet_csk_search_req(const struct sock *sk,
 					 struct request_sock ***prevp,
+					 spinlock_t **lock,
 					 const __be16 rport, const __be32 raddr,
 					 const __be32 laddr)
 {
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 	struct listen_sock_table *ltable = icsk->icsk_accept_queue.listen_opt->table;
 	struct request_sock *req, **prev;
+	u32 hash = inet_synq_hash(raddr, rport, ltable->hash_rnd, ltable->nr_table_entries);
 
-	for (prev = &ltable->syn_table[inet_synq_hash(raddr, rport, ltable->hash_rnd,
-						    ltable->nr_table_entries)];
-	     (req = *prev) != NULL;
+	*lock = &ltable->syn_table[hash].lock;
+
+	spin_lock(*lock);
+
+	for (prev = &ltable->syn_table[hash].head; (req = *prev) != NULL;
 	     prev = &req->dl_next) {
 		const struct inet_request_sock *ireq = inet_rsk(req);
 
@@ -449,7 +451,7 @@ struct request_sock *__inet_csk_search_req(const struct sock *sk,
 	return req;
 }
 
-EXPORT_SYMBOL_GPL(__inet_csk_search_req);
+EXPORT_SYMBOL_GPL(inet_csk_search_req);
 
 void inet_csk_reqsk_queue_hash_add(struct sock *sk, struct request_sock *req,
 				   unsigned long timeout)
@@ -509,8 +511,6 @@ void inet_csk_reqsk_queue_prune(struct sock *parent,
 	if (lopt == NULL || lopt->qlen == 0)
 		return;
 
-	spin_lock(&ltable->lock);
-
 	/* Normally all the openreqs are young and become mature
 	 * (i.e. converted to established socket) for first timeout.
 	 * If synack was not acknowledged for 3 seconds, it means
@@ -546,7 +546,10 @@ void inet_csk_reqsk_queue_prune(struct sock *parent,
 	i = ltable->clock_hand;
 
 	do {
-		reqp = &ltable->syn_table[i];
+		struct listen_sock_bucket *lbucket = &ltable->syn_table[i];
+
+		spin_lock(&lbucket->lock);
+		reqp = &lbucket->head;
 		while ((req = *reqp) != NULL) {
 			if (time_after_eq(now, req->expires)) {
 				int expire = 0, resend = 0;
@@ -567,28 +570,30 @@ void inet_csk_reqsk_queue_prune(struct sock *parent,
 					timeo = min((timeout << req->retrans), max_rto);
 					req->expires = now + timeo;
 					reqp = &req->dl_next;
-					continue;
+					goto cont;
 				}
 
 				/* Drop this request */
 				inet_csk_reqsk_queue_unlink(parent, req, reqp);
 				reqsk_queue_removed(queue, req);
 				reqsk_free(req);
-				continue;
+				goto cont;
 			}
 			reqp = &req->dl_next;
 		}
 
 		i = (i + 1) & (ltable->nr_table_entries - 1);
 
+cont:
+		spin_unlock(&lbucket->lock);
 	} while (--budget > 0);
 
+	spin_lock(&ltable->lock);
 	ltable->clock_hand = i;
+	spin_unlock(&ltable->lock);
 
 	if (lopt->qlen)
 		inet_csk_reset_keepalive_timer(parent, interval);
-
-	spin_unlock(&ltable->lock);
 }
 
 EXPORT_SYMBOL_GPL(inet_csk_reqsk_queue_prune);
@@ -1084,7 +1089,7 @@ void inet_csk_listen_stop(struct sock *sk)
 
 	printk("inet_csk_listen_stop stopping master\n");
 
-	ltable = inet_csk(sk)->icsk_accept_queue.listen_opt->table;
+	ltable = icsk->icsk_accept_queue.listen_opt->table;
 	__inet_csk_listen_stop_one(sk);
 	printk("freeing public ltable\n");
 	reqsk_queue_table_destroy(ltable);

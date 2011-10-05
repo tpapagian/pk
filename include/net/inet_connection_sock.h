@@ -244,8 +244,9 @@ static inline void inet_csk_reset_xmit_timer(struct sock *sk, const int what,
 
 extern struct sock *inet_csk_accept(struct sock *sk, int flags, int *err);
 
-extern struct request_sock *__inet_csk_search_req(const struct sock *sk,
+extern struct request_sock *inet_csk_search_req(const struct sock *sk,
 						struct request_sock ***prevp,
+						spinlock_t **lock,
 						const __be16 rport,
 						const __be32 raddr,
 						const __be32 laddr);

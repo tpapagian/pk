@@ -649,7 +649,7 @@ static int inet_diag_dump_reqs(struct sk_buff *skb, struct sock *sk,
 	}
 
 	for (j = s_j; j < lopt->table->nr_table_entries; j++) {
-		struct request_sock *req, *head = lopt->table->syn_table[j];
+		struct request_sock *req, *head = lopt->table->syn_table[j].head;
 
 		reqnum = 0;
 		for (req = head; req; reqnum++, req = req->dl_next) {

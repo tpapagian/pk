@@ -83,6 +83,7 @@ reqsk_queue_table_alloc(unsigned int nr_table_entries, int node)
 {
 	struct listen_sock_table *ltable;
 	size_t ltable_size = sizeof(struct listen_sock_table);
+	int i;
 
 	// AP: TODO disable this check for multi-accept code. nr_table_entries
 	// is passed in as the size of the backlog queue for one core. However,
@@ -94,7 +95,7 @@ reqsk_queue_table_alloc(unsigned int nr_table_entries, int node)
 	//nr_table_entries = min_t(u32, nr_table_entries, sysctl_max_syn_backlog);
 	nr_table_entries = max_t(u32, nr_table_entries, 8);
 	nr_table_entries = roundup_pow_of_two(nr_table_entries + 1);
-	ltable_size += nr_table_entries * sizeof(struct request_sock *);
+	ltable_size += nr_table_entries * sizeof(struct listen_sock_bucket);
 	if (ltable_size > PAGE_SIZE)
 		ltable = __vmalloc_node(ltable_size,
 			GFP_KERNEL | __GFP_HIGHMEM | __GFP_ZERO,
@@ -107,7 +108,9 @@ reqsk_queue_table_alloc(unsigned int nr_table_entries, int node)
 	ltable->nr_table_entries = nr_table_entries;
 	get_random_bytes(&ltable->hash_rnd, sizeof(ltable->hash_rnd));
 	ltable->num_req_to_destroy = 0;
-	spin_lock_init(&ltable->lock);
+
+	for (i = 0; i < nr_table_entries; i++)
+		spin_lock_init(&ltable->syn_table[i].lock);
 
 	return ltable;
 }
@@ -189,8 +192,8 @@ void reqsk_queue_table_destroy(struct listen_sock_table *ltable)
 		for (i = 0; i < ltable->nr_table_entries; i++) {
 			struct request_sock *req;
 
-			while ((req = ltable->syn_table[i]) != NULL) {
-				ltable->syn_table[i] = req->dl_next;
+			while ((req = ltable->syn_table[i].head) != NULL) {
+				ltable->syn_table[i].head = req->dl_next;
 				ltable->num_req_to_destroy--;
 				reqsk_free(req);
 			}

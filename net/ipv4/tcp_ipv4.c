@@ -447,16 +447,12 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 
 	switch (sk->sk_state) {
 		struct request_sock *req, **prev;
-		struct listen_sock_table *ltable;
+		spinlock_t *lock;
 	case TCP_LISTEN:
 		if (sock_owned_by_user(sk))
 			goto out;
 
-		ltable = inet_csk(sk)->icsk_accept_queue.listen_opt->table;
-
-		spin_lock(&ltable->lock);
-
-		req = __inet_csk_search_req(sk, &prev, th->dest,
+		req = inet_csk_search_req(sk, &prev, &lock, th->dest,
 					  iph->daddr, iph->saddr);
 		if (!req)
 			goto listen_out;
@@ -480,7 +476,7 @@ void tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 		inet_csk_reqsk_queue_drop(sk, req, prev);
 
 listen_out:
-		spin_unlock(&ltable->lock);
+		spin_unlock(lock);
 		goto out;
 
 	case TCP_SYN_SENT:
@@ -1497,20 +1493,18 @@ static struct sock *tcp_v4_hnd_req(struct sock *sk, struct sk_buff *skb)
 	const struct iphdr *iph = ip_hdr(skb);
 	struct sock *nsk;
 	struct request_sock **prev;
-	struct listen_sock_table *ltable = inet_csk(sk)->icsk_accept_queue.listen_opt->table;
 	struct request_sock *req;
+	spinlock_t *lock;
 
-	spin_lock(&ltable->lock);
-		
 	/* Find possible connection requests. */
-	req = __inet_csk_search_req(sk, &prev, th->source, iph->saddr, iph->daddr);
+	req = inet_csk_search_req(sk, &prev, &lock, th->source, iph->saddr, iph->daddr);
 	if (req) {
 		struct sock *ret = tcp_check_req(sk, skb, req, prev);
-		spin_unlock(&ltable->lock);
+		spin_unlock(lock);
 		return ret;
 	}
 
-	spin_unlock(&ltable->lock);
+	spin_unlock(lock);
 
 	nsk = inet_lookup_established(sock_net(sk), &tcp_hashinfo, iph->saddr,
 			th->source, iph->daddr, th->dest, inet_iif(skb));
@@ -2038,7 +2032,7 @@ static void *listening_get_next(struct seq_file *seq, void *cur)
 			if (++st->sbucket >= icsk->icsk_accept_queue.listen_opt->table->nr_table_entries)
 				break;
 get_req:
-			req = icsk->icsk_accept_queue.listen_opt->table->syn_table[st->sbucket];
+			req = icsk->icsk_accept_queue.listen_opt->table->syn_table[st->sbucket].head;
 		}
 		sk	  = sk_next(st->syn_wait_sk);
 		st->state = TCP_SEQ_STATE_LISTENING;

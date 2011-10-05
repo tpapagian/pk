@@ -104,6 +104,12 @@ struct listen_sock {
 	struct listen_sock_table* table;
 };
 
+struct listen_sock_bucket {
+	spinlock_t		lock;
+	struct request_sock	*head;
+	char __pad[0] __attribute__((aligned(SMP_CACHE_BYTES)));
+};
+
 struct listen_sock_table {
 	// Read mostly
 	u32			nr_table_entries; 
@@ -113,7 +119,7 @@ struct listen_sock_table {
 	// Read/Wrtie
 	spinlock_t		lock ____cacheline_aligned_in_smp;
 	int			clock_hand; // AP: XXX TODO not sure wether this should go here or in listen_sock
-	struct request_sock	*syn_table[0];
+	struct listen_sock_bucket syn_table[0];
 };
 
 /** struct request_sock_queue - queue of request_socks
@@ -276,20 +282,21 @@ static inline void reqsk_queue_hash_req(struct request_sock_queue *queue,
 					unsigned long timeout)
 {
 	struct listen_sock_table *ltable = queue->listen_opt->table;
+	struct listen_sock_bucket *lbucket = &ltable->syn_table[hash];
 
 	req->expires = jiffies + timeout;
 	req->retrans = 0;
 	req->sk = NULL;
 
-	spin_lock(&ltable->lock);
+	spin_lock(&lbucket->lock);
 
-	req->dl_next = ltable->syn_table[hash];
+	req->dl_next = ltable->syn_table[hash].head;
 
 	write_lock(&queue->syn_wait_lock);
-	ltable->syn_table[hash] = req;
+	ltable->syn_table[hash].head = req;
 	write_unlock(&queue->syn_wait_lock);
 
-	spin_unlock(&ltable->lock);
+	spin_unlock(&lbucket->lock);
 }
 
 #ifdef CONFIG_REQUEST_SOCK_HIST
