@@ -1,19 +1,19 @@
 #ifndef _LINUX_FORP_H_
 #define _LINUX_FORP_H_
 
-#ifdef CONFIG_FORP
-
-#define FORP_RETSTACK_DEPTH 50
-
-#define INIT_FORP		.forp_call_stack.depth = -1, \
-				.forp_irq_stack.depth = -1,
-
 struct forp_call_stamp {
 	unsigned int id;
 	unsigned long long calltime;
 	unsigned long long sched;
 	unsigned long long irq;
 };
+
+#ifdef CONFIG_FORP
+
+#define FORP_RETSTACK_DEPTH 50
+
+#define INIT_FORP		.forp_call_stack.depth = -1, \
+				.forp_irq_stack.depth = -1,
 
 struct forp_stack {
 	int depth;
@@ -49,6 +49,6 @@ static inline void forp_stamp_static(unsigned long static_id,
 				     struct forp_call_stamp *f) { }
 static inline void forp_add_stamp(struct forp_call_stamp *f) { }
 static inline int forp_get_context(void) { return -1; }
-static inline forp_label *forp_get_context_label(int i) {return NULL; }
+static inline struct forp_label *forp_get_context_label(int i) {return NULL; }
 #endif /* CONFIG_FORP */
 #endif /* _LINUX_FORP_H_ */
