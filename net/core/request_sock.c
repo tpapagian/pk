@@ -131,7 +131,7 @@ void __reqsk_queue_destroy(struct request_sock_queue *queue)
 static inline int get_ltable_size(struct listen_sock_table *ltable)
 {
 	return sizeof(struct listen_sock_table) +
-		ltable->nr_table_entries * sizeof(struct request_sock *);
+		ltable->nr_table_entries * sizeof(struct listen_sock_bucket);
 }
 
 //AP: TODO make sure locking is not needed here.
