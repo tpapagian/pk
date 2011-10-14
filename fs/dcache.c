@@ -2250,9 +2250,14 @@ static void dentry_lock_for_move(struct dentry *dentry, struct dentry *target,
 	/*
 	 * XXXX: do we really need to take target->d_lock?
 	 */
-	if (IS_ROOT(dentry) || dentry->d_parent == target->d_parent)
-		mcs_lock(&target->d_parent->d_mcslock, target_parent_mcs_arg);
-	else {
+	if (IS_ROOT(dentry) || dentry->d_parent == target->d_parent) {
+                /*
+                 * NB we use dentry_parent_mcs_arg instead of
+                 * target_parent_mcs_arg, because we swap dentry_parent_mcs_arg
+                 * with target_parent_mcs_arg, then release target.
+                 */
+		mcs_lock(&target->d_parent->d_mcslock, dentry_parent_mcs_arg);
+        } else {
 		if (d_ancestor(dentry->d_parent, target->d_parent)) {
 			mcs_lock(&dentry->d_parent->d_mcslock,
                                  dentry_parent_mcs_arg);
@@ -2281,12 +2286,14 @@ static void dentry_unlock_parents_for_move(struct dentry *dentry,
                                            mcs_arg_t *target_parent_mcs_arg,
                                            mcs_arg_t *dentry_parent_mcs_arg)
 {
-	if (target->d_parent != dentry->d_parent)
+	if (target->d_parent != dentry->d_parent) {
 		mcs_unlock(&dentry->d_parent->d_mcslock,
                            dentry_parent_mcs_arg);
-	if (target->d_parent != target)
+        }
+	if (target->d_parent != target) {
 		mcs_unlock(&target->d_parent->d_mcslock,
                            target_parent_mcs_arg);
+        }
 }
 
 /*
@@ -2310,10 +2317,12 @@ static void dentry_unlock_parents_for_move(struct dentry *dentry,
  */
 void d_move(struct dentry * dentry, struct dentry * target)
 {
-        mcs_arg_t target_parent_mcs_arg;
-        mcs_arg_t dentry_parent_mcs_arg;
+        mcs_arg_t pre_target_parent_mcs_arg;
+        mcs_arg_t pre_dentry_parent_mcs_arg;
         mcs_arg_t target_mcs_arg;
         mcs_arg_t dentry_mcs_arg;
+        mcs_arg_t *post_target_parent_mcs_arg;
+        mcs_arg_t *post_dentry_parent_mcs_arg;
 
 	if (!dentry->d_inode)
 		printk(KERN_WARNING "VFS: moving negative dcache entry\n");
@@ -2324,8 +2333,8 @@ void d_move(struct dentry * dentry, struct dentry * target)
 	write_seqlock(&rename_lock);
 
 	dentry_lock_for_move(dentry, target,
-                             &target_parent_mcs_arg,
-                             &dentry_parent_mcs_arg,
+                             &pre_target_parent_mcs_arg,
+                             &pre_dentry_parent_mcs_arg,
                              &target_mcs_arg,
                              &dentry_mcs_arg);
         
@@ -2353,10 +2362,14 @@ void d_move(struct dentry * dentry, struct dentry * target)
 
 	/* ... and switch the parents */
 	if (IS_ROOT(dentry)) {
+                post_dentry_parent_mcs_arg = &pre_target_parent_mcs_arg;
+                post_target_parent_mcs_arg = &target_mcs_arg;
 		dentry->d_parent = target->d_parent;
 		target->d_parent = target;
 		INIT_LIST_HEAD(&target->d_u.d_child);
 	} else {
+                post_dentry_parent_mcs_arg = &pre_target_parent_mcs_arg;
+                post_target_parent_mcs_arg = &pre_dentry_parent_mcs_arg;
 		swap(dentry->d_parent, target->d_parent);
 
 		/* And add them back to the (new) parent lists */
@@ -2369,8 +2382,8 @@ void d_move(struct dentry * dentry, struct dentry * target)
 	write_seqcount_end(&dentry->d_seq);
 
 	dentry_unlock_parents_for_move(dentry, target,
-                                       &target_parent_mcs_arg,
-                                       &dentry_parent_mcs_arg);
+                                       post_target_parent_mcs_arg,
+                                       post_dentry_parent_mcs_arg);
 
 	mcs_unlock(&target->d_mcslock, &target_mcs_arg);
 	fsnotify_d_move(dentry);
@@ -2451,13 +2464,15 @@ static void __d_materialise_dentry(struct dentry *dentry, struct dentry *anon,
                                    mcs_arg_t *anon_mcs_arg)
 {
 	struct dentry *dparent, *aparent;
-        mcs_arg_t dentry_parent_mcs_arg;
-        mcs_arg_t anon_parent_mcs_arg;
+        mcs_arg_t pre_dentry_parent_mcs_arg;
+        mcs_arg_t pre_anon_parent_mcs_arg;
         mcs_arg_t dentry_mcs_arg;
+        mcs_arg_t *post_dentry_parent_mcs_arg;
+        mcs_arg_t *post_anon_parent_mcs_arg;
 
 	dentry_lock_for_move(anon, dentry,
-                             &dentry_parent_mcs_arg,
-                             &anon_parent_mcs_arg,
+                             &pre_dentry_parent_mcs_arg,
+                             &pre_anon_parent_mcs_arg,
                              &dentry_mcs_arg,
                              anon_mcs_arg);
 
@@ -2470,6 +2485,8 @@ static void __d_materialise_dentry(struct dentry *dentry, struct dentry *anon,
 	switch_names(dentry, anon);
 	swap(dentry->d_name.hash, anon->d_name.hash);
 
+        post_dentry_parent_mcs_arg = (aparent == anon) ? 
+                &dentry_mcs_arg : &pre_anon_parent_mcs_arg;
 	dentry->d_parent = (aparent == anon) ? dentry : aparent;
 	list_del(&dentry->d_u.d_child);
 	if (!IS_ROOT(dentry))
@@ -2477,6 +2494,8 @@ static void __d_materialise_dentry(struct dentry *dentry, struct dentry *anon,
 	else
 		INIT_LIST_HEAD(&dentry->d_u.d_child);
 
+        post_anon_parent_mcs_arg = (dparent == dentry) ?
+                &pre_anon_parent_mcs_arg : &pre_dentry_parent_mcs_arg;
 	anon->d_parent = (dparent == dentry) ? anon : dparent;
 	list_del(&anon->d_u.d_child);
 	if (!IS_ROOT(anon))
@@ -2488,8 +2507,8 @@ static void __d_materialise_dentry(struct dentry *dentry, struct dentry *anon,
 	write_seqcount_end(&anon->d_seq);
 
 	dentry_unlock_parents_for_move(anon, dentry,
-                                       &dentry_parent_mcs_arg,
-                                       &anon_parent_mcs_arg);
+                                       post_dentry_parent_mcs_arg,
+                                       post_anon_parent_mcs_arg);
 	mcs_unlock(&dentry->d_mcslock, &dentry_mcs_arg);
 
 	/* anon->d_lock still locked, returns locked */
