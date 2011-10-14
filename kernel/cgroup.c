@@ -878,31 +878,35 @@ static void remove_dir(struct dentry *d)
 static void cgroup_clear_directory(struct dentry *dentry)
 {
 	struct list_head *node;
+        DEFINE_MCS_ARG(dentry);
 
 	BUG_ON(!mutex_is_locked(&dentry->d_inode->i_mutex));
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	node = dentry->d_subdirs.next;
 	while (node != &dentry->d_subdirs) {
 		struct dentry *d = list_entry(node, struct dentry, d_u.d_child);
+                DEFINE_MCS_ARG(d);
 
-		spin_lock_nested(&d->d_lock, DENTRY_D_LOCK_NESTED);
+		mcs_lock_nested(&d->d_mcslock,
+                                &d_mcs_arg,
+                                DENTRY_D_LOCK_NESTED);
 		list_del_init(node);
 		if (d->d_inode) {
 			/* This should never be called on a cgroup
 			 * directory with child cgroups */
 			BUG_ON(d->d_inode->i_mode & S_IFDIR);
 			dget_dlock(d);
-			spin_unlock(&d->d_lock);
-			spin_unlock(&dentry->d_lock);
+			dentry_unlock(d);
+			dentry_unlock(dentry);
 			d_delete(d);
 			simple_unlink(dentry->d_inode, d);
 			dput(d);
-			spin_lock(&dentry->d_lock);
+			dentry_lock(dentry);
 		} else
-			spin_unlock(&d->d_lock);
+			dentry_unlock(d);
 		node = dentry->d_subdirs.next;
 	}
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 }
 
 /*
@@ -911,15 +915,19 @@ static void cgroup_clear_directory(struct dentry *dentry)
 static void cgroup_d_remove_dir(struct dentry *dentry)
 {
 	struct dentry *parent;
+        DEFINE_MCS_ARG(dentry);
+        DEFINE_MCS_ARG(parent);
 
 	cgroup_clear_directory(dentry);
 
 	parent = dentry->d_parent;
-	spin_lock(&parent->d_lock);
-	spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
+	dentry_lock(parent);
+	mcs_lock_nested(&dentry->d_mcslock,
+                        &dentry_mcs_arg,
+                        DENTRY_D_LOCK_NESTED);
 	list_del_init(&dentry->d_u.d_child);
-	spin_unlock(&dentry->d_lock);
-	spin_unlock(&parent->d_lock);
+	dentry_unlock(dentry);
+	dentry_unlock(parent);
 	remove_dir(dentry);
 }
 
