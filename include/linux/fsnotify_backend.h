@@ -329,7 +329,7 @@ static inline void __fsnotify_update_dcache_flags(struct dentry *dentry)
 {
 	struct dentry *parent;
 
-	assert_spin_locked(&dentry->d_lock);
+	assert_mcs_locked(&dentry->d_mcslock);
 
 	/*
 	 * Serialisation of setting PARENT_WATCHED on the dentries is provided
@@ -350,12 +350,14 @@ static inline void __fsnotify_update_dcache_flags(struct dentry *dentry)
  */
 static inline void __fsnotify_d_instantiate(struct dentry *dentry, struct inode *inode)
 {
+        DEFINE_MCS_ARG(dentry);
+
 	if (!inode)
 		return;
 
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	__fsnotify_update_dcache_flags(dentry);
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 }
 
 /* called from fsnotify listeners, such as fanotify or dnotify */
