@@ -33,11 +33,12 @@
  */
 static int vfat_revalidate_shortname(struct dentry *dentry)
 {
-	int ret = 1;
-	spin_lock(&dentry->d_lock);
+        DEFINE_MCS_ARG(dentry);
+        int ret = 1;
+	dentry_lock(dentry);
 	if (dentry->d_time != dentry->d_parent->d_inode->i_version)
 		ret = 0;
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 	return ret;
 }
 

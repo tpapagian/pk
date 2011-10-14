@@ -342,20 +342,24 @@ static inline int usbfs_positive (struct dentry *dentry)
 static int usbfs_empty (struct dentry *dentry)
 {
 	struct list_head *list;
+        DEFINE_MCS_ARG(dentry);
 
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	list_for_each(list, &dentry->d_subdirs) {
 		struct dentry *de = list_entry(list, struct dentry, d_u.d_child);
+                DEFINE_MCS_ARG(de);
 
-		spin_lock_nested(&de->d_lock, DENTRY_D_LOCK_NESTED);
+		mcs_lock_nested(&de->d_mcslock,
+                                &de_mcs_arg,
+                                DENTRY_D_LOCK_NESTED);
 		if (usbfs_positive(de)) {
-			spin_unlock(&de->d_lock);
-			spin_unlock(&dentry->d_lock);
+                        dentry_unlock(de);
+			dentry_unlock(dentry);
 			return 0;
 		}
-		spin_unlock(&de->d_lock);
+		dentry_unlock(de);
 	}
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 	return 1;
 }
 

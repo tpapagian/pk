@@ -91,6 +91,7 @@ static void hash_dcookie(struct dcookie_struct * dcs)
 
 static struct dcookie_struct *alloc_dcookie(struct path *path)
 {
+        DEFINE_MCS_ARG(d);
 	struct dcookie_struct *dcs = kmem_cache_alloc(dcookie_cache,
 							GFP_KERNEL);
 	struct dentry *d;
@@ -98,9 +99,9 @@ static struct dcookie_struct *alloc_dcookie(struct path *path)
 		return NULL;
 
 	d = path->dentry;
-	spin_lock(&d->d_lock);
+	dentry_lock(d);
 	d->d_flags |= DCACHE_COOKIE;
-	spin_unlock(&d->d_lock);
+	dentry_unlock(d);
 
 	dcs->path = *path;
 	path_get(path);
@@ -263,10 +264,11 @@ out_kmem:
 static void free_dcookie(struct dcookie_struct * dcs)
 {
 	struct dentry *d = dcs->path.dentry;
+        DEFINE_MCS_ARG(d);
 
-	spin_lock(&d->d_lock);
+	dentry_lock(d);
 	d->d_flags &= ~DCACHE_COOKIE;
-	spin_unlock(&d->d_lock);
+	dentry_unlock(d);
 
 	path_put(&dcs->path);
 	kmem_cache_free(dcookie_cache, dcs);

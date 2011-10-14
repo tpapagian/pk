@@ -755,6 +755,7 @@ fat_encode_fh(struct dentry *de, __u32 *fh, int *lenp, int connectable)
 	int len = *lenp;
 	struct inode *inode =  de->d_inode;
 	u32 ipos_h, ipos_m, ipos_l;
+        DEFINE_MCS_ARG(de);
 
 	if (len < 5) {
 		*lenp = 5;
@@ -769,9 +770,9 @@ fat_encode_fh(struct dentry *de, __u32 *fh, int *lenp, int connectable)
 	fh[1] = inode->i_generation;
 	fh[2] = ipos_h;
 	fh[3] = ipos_m | MSDOS_I(inode)->i_logstart;
-	spin_lock(&de->d_lock);
+	dentry_lock(de);
 	fh[4] = ipos_l | MSDOS_I(de->d_parent->d_inode)->i_logstart;
-	spin_unlock(&de->d_lock);
+	dentry_unlock(de);
 	return 3;
 }
 
