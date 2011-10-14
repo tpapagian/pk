@@ -51,6 +51,7 @@ void __fsnotify_vfsmount_delete(struct vfsmount *mnt)
 void __fsnotify_update_child_dentry_flags(struct inode *inode)
 {
 	struct dentry *alias;
+        DEFINE_MCS_ARG(alias);
 	int watched;
 
 	if (!S_ISDIR(inode->i_mode))
@@ -64,23 +65,26 @@ void __fsnotify_update_child_dentry_flags(struct inode *inode)
 	 * directory, there damn well better only be one item on this list */
 	list_for_each_entry(alias, &inode->i_dentry, d_alias) {
 		struct dentry *child;
+                DEFINE_MCS_ARG(child);
 
 		/* run all of the children of the original inode and fix their
 		 * d_flags to indicate parental interest (their parent is the
 		 * original inode) */
-		spin_lock(&alias->d_lock);
+		dentry_lock(alias);
 		list_for_each_entry(child, &alias->d_subdirs, d_u.d_child) {
 			if (!child->d_inode)
 				continue;
 
-			spin_lock_nested(&child->d_lock, DENTRY_D_LOCK_NESTED);
+			mcs_lock_nested(&child->d_mcslock,
+                                        &child_mcs_arg,
+                                        DENTRY_D_LOCK_NESTED);
 			if (watched)
 				child->d_flags |= DCACHE_FSNOTIFY_PARENT_WATCHED;
 			else
 				child->d_flags &= ~DCACHE_FSNOTIFY_PARENT_WATCHED;
-			spin_unlock(&child->d_lock);
+			dentry_unlock(child);
 		}
-		spin_unlock(&alias->d_lock);
+		dentry_unlock(alias);
 	}
 	spin_unlock(&inode->i_lock);
 }

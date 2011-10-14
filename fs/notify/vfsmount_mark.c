@@ -34,14 +34,15 @@ void fsnotify_clear_marks_by_mount(struct vfsmount *mnt)
 	struct fsnotify_mark *mark, *lmark;
 	struct hlist_node *pos, *n;
 	LIST_HEAD(free_list);
+        DEFINE_MCS_ARG(mnt);
 
-	spin_lock(&mnt->mnt_root->d_lock);
+	mcs_lock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 	hlist_for_each_entry_safe(mark, pos, n, &mnt->mnt_fsnotify_marks, m.m_list) {
 		list_add(&mark->m.free_m_list, &free_list);
 		hlist_del_init_rcu(&mark->m.m_list);
 		fsnotify_get_mark(mark);
 	}
-	spin_unlock(&mnt->mnt_root->d_lock);
+	mcs_unlock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 
 	list_for_each_entry_safe(mark, lmark, &free_list, m.free_m_list) {
 		fsnotify_destroy_mark(mark);
@@ -63,7 +64,7 @@ static void fsnotify_recalc_vfsmount_mask_locked(struct vfsmount *mnt)
 	struct hlist_node *pos;
 	__u32 new_mask = 0;
 
-	assert_spin_locked(&mnt->mnt_root->d_lock);
+	assert_mcs_locked(&mnt->mnt_root->d_mcslock);
 
 	hlist_for_each_entry(mark, pos, &mnt->mnt_fsnotify_marks, m.m_list)
 		new_mask |= mark->mask;
@@ -76,26 +77,28 @@ static void fsnotify_recalc_vfsmount_mask_locked(struct vfsmount *mnt)
  */
 void fsnotify_recalc_vfsmount_mask(struct vfsmount *mnt)
 {
-	spin_lock(&mnt->mnt_root->d_lock);
+        DEFINE_MCS_ARG(mnt);
+	mcs_lock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 	fsnotify_recalc_vfsmount_mask_locked(mnt);
-	spin_unlock(&mnt->mnt_root->d_lock);
+	mcs_unlock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 }
 
 void fsnotify_destroy_vfsmount_mark(struct fsnotify_mark *mark)
 {
 	struct vfsmount *mnt = mark->m.mnt;
+        DEFINE_MCS_ARG(mnt);
 
 	assert_spin_locked(&mark->lock);
 	assert_spin_locked(&mark->group->mark_lock);
 
-	spin_lock(&mnt->mnt_root->d_lock);
+	mcs_lock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 
 	hlist_del_init_rcu(&mark->m.m_list);
 	mark->m.mnt = NULL;
 
 	fsnotify_recalc_vfsmount_mask_locked(mnt);
 
-	spin_unlock(&mnt->mnt_root->d_lock);
+	mcs_unlock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 }
 
 static struct fsnotify_mark *fsnotify_find_vfsmount_mark_locked(struct fsnotify_group *group,
@@ -104,7 +107,7 @@ static struct fsnotify_mark *fsnotify_find_vfsmount_mark_locked(struct fsnotify_
 	struct fsnotify_mark *mark;
 	struct hlist_node *pos;
 
-	assert_spin_locked(&mnt->mnt_root->d_lock);
+	assert_mcs_locked(&mnt->mnt_root->d_mcslock);
 
 	hlist_for_each_entry(mark, pos, &mnt->mnt_fsnotify_marks, m.m_list) {
 		if (mark->group == group) {
@@ -123,10 +126,11 @@ struct fsnotify_mark *fsnotify_find_vfsmount_mark(struct fsnotify_group *group,
 						  struct vfsmount *mnt)
 {
 	struct fsnotify_mark *mark;
+        DEFINE_MCS_ARG(mnt);
 
-	spin_lock(&mnt->mnt_root->d_lock);
+	mcs_lock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 	mark = fsnotify_find_vfsmount_mark_locked(group, mnt);
-	spin_unlock(&mnt->mnt_root->d_lock);
+	mcs_unlock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 
 	return mark;
 }
@@ -142,6 +146,7 @@ int fsnotify_add_vfsmount_mark(struct fsnotify_mark *mark,
 {
 	struct fsnotify_mark *lmark;
 	struct hlist_node *node, *last = NULL;
+        DEFINE_MCS_ARG(mnt);
 	int ret = 0;
 
 	mark->flags |= FSNOTIFY_MARK_FLAG_VFSMOUNT;
@@ -149,7 +154,7 @@ int fsnotify_add_vfsmount_mark(struct fsnotify_mark *mark,
 	assert_spin_locked(&mark->lock);
 	assert_spin_locked(&group->mark_lock);
 
-	spin_lock(&mnt->mnt_root->d_lock);
+	mcs_lock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 
 	mark->m.mnt = mnt;
 
@@ -184,7 +189,7 @@ int fsnotify_add_vfsmount_mark(struct fsnotify_mark *mark,
 	hlist_add_after_rcu(last, &mark->m.m_list);
 out:
 	fsnotify_recalc_vfsmount_mask_locked(mnt);
-	spin_unlock(&mnt->mnt_root->d_lock);
+	mcs_unlock(&mnt->mnt_root->d_mcslock, &mnt_mcs_arg);
 
 	return ret;
 }
