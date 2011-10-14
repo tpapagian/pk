@@ -410,6 +410,7 @@ EXPORT_SYMBOL(path_put);
  */
 static int nameidata_drop_rcu(struct nameidata *nd)
 {
+        DEFINE_MCS_ARG(dentry);
 	struct fs_struct *fs = current->fs;
 	struct dentry *dentry = nd->path.dentry;
 	int want_root = 0;
@@ -422,11 +423,11 @@ static int nameidata_drop_rcu(struct nameidata *nd)
 				nd->root.dentry != fs->root.dentry)
 			goto err_root;
 	}
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	if (!__d_rcu_to_refcount(dentry, nd->seq))
 		goto err;
 	BUG_ON(nd->inode != dentry->d_inode);
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 	if (want_root) {
 		path_get(&nd->root);
 		spin_unlock(&fs->lock);
@@ -438,7 +439,7 @@ static int nameidata_drop_rcu(struct nameidata *nd)
 	nd->flags &= ~LOOKUP_RCU;
 	return 0;
 err:
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 err_root:
 	if (want_root)
 		spin_unlock(&fs->lock);
@@ -465,6 +466,8 @@ static inline int nameidata_drop_rcu_maybe(struct nameidata *nd)
  */
 static int nameidata_dentry_drop_rcu(struct nameidata *nd, struct dentry *dentry)
 {
+        DEFINE_MCS_ARG(dentry);
+        DEFINE_MCS_ARG(parent);
 	struct fs_struct *fs = current->fs;
 	struct dentry *parent = nd->path.dentry;
 	int want_root = 0;
@@ -477,8 +480,8 @@ static int nameidata_dentry_drop_rcu(struct nameidata *nd, struct dentry *dentry
 				nd->root.dentry != fs->root.dentry)
 			goto err_root;
 	}
-	spin_lock(&parent->d_lock);
-	spin_lock_nested(&dentry->d_lock, DENTRY_D_LOCK_NESTED);
+	dentry_lock(parent);
+	dentry_lock_nested(dentry, DENTRY_D_LOCK_NESTED);
 	if (!__d_rcu_to_refcount(dentry, nd->seq))
 		goto err;
 	/*
@@ -489,8 +492,8 @@ static int nameidata_dentry_drop_rcu(struct nameidata *nd, struct dentry *dentry
 	BUG_ON(!IS_ROOT(dentry) && dentry->d_parent != parent);
 	BUG_ON(!parent->d_count);
 	parent->d_count++;
-	spin_unlock(&dentry->d_lock);
-	spin_unlock(&parent->d_lock);
+	dentry_unlock(dentry);
+	dentry_unlock(parent);
 	if (want_root) {
 		path_get(&nd->root);
 		spin_unlock(&fs->lock);
@@ -502,8 +505,8 @@ static int nameidata_dentry_drop_rcu(struct nameidata *nd, struct dentry *dentry
 	nd->flags &= ~LOOKUP_RCU;
 	return 0;
 err:
-	spin_unlock(&dentry->d_lock);
-	spin_unlock(&parent->d_lock);
+	dentry_unlock(dentry);
+	dentry_unlock(parent);
 err_root:
 	if (want_root)
 		spin_unlock(&fs->lock);
@@ -537,17 +540,18 @@ static inline int nameidata_dentry_drop_rcu_maybe(struct nameidata *nd, struct d
  */
 static int nameidata_drop_rcu_last(struct nameidata *nd)
 {
+        DEFINE_MCS_ARG(dentry);
 	struct dentry *dentry = nd->path.dentry;
 
 	BUG_ON(!(nd->flags & LOOKUP_RCU));
 	nd->flags &= ~LOOKUP_RCU;
 	if (!(nd->flags & LOOKUP_ROOT))
 		nd->root.mnt = NULL;
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	if (!__d_rcu_to_refcount(dentry, nd->seq))
 		goto err_unlock;
 	BUG_ON(nd->inode != dentry->d_inode);
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 
 	mntget(nd->path.mnt);
 
@@ -557,7 +561,7 @@ static int nameidata_drop_rcu_last(struct nameidata *nd)
 	return 0;
 
 err_unlock:
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 	rcu_read_unlock();
 	br_read_unlock(vfsmount_lock);
 	return -ECHILD;
@@ -2645,12 +2649,14 @@ SYSCALL_DEFINE2(mkdir, const char __user *, pathname, int, mode)
  */
 void dentry_unhash(struct dentry *dentry)
 {
+        DEFINE_MCS_ARG(dentry);
+
 	dget(dentry);
 	shrink_dcache_parent(dentry);
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	if (dentry->d_count == 2)
 		__d_drop(dentry);
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 }
 
 int vfs_rmdir(struct inode *dir, struct dentry *dentry)

@@ -550,6 +550,7 @@ static void __touch_mnt_namespace(struct mnt_namespace *ns)
  */
 static void dentry_reset_mounted(struct vfsmount *mnt, struct dentry *dentry)
 {
+        DEFINE_MCS_ARG(dentry);
 	unsigned u;
 
 	for (u = 0; u < HASH_SIZE; u++) {
@@ -560,9 +561,9 @@ static void dentry_reset_mounted(struct vfsmount *mnt, struct dentry *dentry)
 				return;
 		}
 	}
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	dentry->d_flags &= ~DCACHE_MOUNTED;
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 }
 
 /*
@@ -585,11 +586,13 @@ static void detach_mnt(struct vfsmount *mnt, struct path *old_path)
 void mnt_set_mountpoint(struct vfsmount *mnt, struct dentry *dentry,
 			struct vfsmount *child_mnt)
 {
+        DEFINE_MCS_ARG(dentry);
+
 	child_mnt->mnt_parent = mntget(mnt);
 	child_mnt->mnt_mountpoint = dget(dentry);
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	dentry->d_flags |= DCACHE_MOUNTED;
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 }
 
 /*

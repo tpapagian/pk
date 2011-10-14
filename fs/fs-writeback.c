@@ -971,12 +971,13 @@ void wakeup_flusher_threads(long nr_pages)
 static noinline void block_dump___mark_inode_dirty(struct inode *inode)
 {
 	if (inode->i_ino || strcmp(inode->i_sb->s_id, "bdev")) {
+                DEFINE_MCS_ARG(dentry);
 		struct dentry *dentry;
 		const char *name = "?";
 
 		dentry = d_find_alias(inode);
 		if (dentry) {
-			spin_lock(&dentry->d_lock);
+			dentry_lock(dentry);
 			name = (const char *) dentry->d_name.name;
 		}
 		printk(KERN_DEBUG
@@ -984,7 +985,7 @@ static noinline void block_dump___mark_inode_dirty(struct inode *inode)
 		       current->comm, task_pid_nr(current), inode->i_ino,
 		       name, inode->i_sb->s_id);
 		if (dentry) {
-			spin_unlock(&dentry->d_lock);
+			dentry_unlock(dentry);
 			dput(dentry);
 		}
 	}

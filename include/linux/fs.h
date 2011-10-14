@@ -2483,15 +2483,16 @@ extern void replace_mount_options(struct super_block *sb, char *options);
 
 static inline ino_t parent_ino(struct dentry *dentry)
 {
+        DEFINE_MCS_ARG(dentry);
 	ino_t res;
 
 	/*
 	 * Don't strictly need d_lock here? If the parent ino could change
 	 * then surely we'd have a deeper race in the caller?
 	 */
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	res = dentry->d_parent->d_inode->i_ino;
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 	return res;
 }
 

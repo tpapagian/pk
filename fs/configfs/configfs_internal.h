@@ -120,8 +120,9 @@ static inline struct configfs_attribute * to_attr(struct dentry * dentry)
 static inline struct config_item *configfs_get_config_item(struct dentry *dentry)
 {
 	struct config_item * item = NULL;
+        DEFINE_MCS_ARG(dentry);
 
-	spin_lock(&dentry->d_lock);
+	dentry_lock(dentry);
 	if (!d_unhashed(dentry)) {
 		struct configfs_dirent * sd = dentry->d_fsdata;
 		if (sd->s_type & CONFIGFS_ITEM_LINK) {
@@ -130,7 +131,7 @@ static inline struct config_item *configfs_get_config_item(struct dentry *dentry
 		} else
 			item = config_item_get(sd->s_element);
 	}
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 
 	return item;
 }

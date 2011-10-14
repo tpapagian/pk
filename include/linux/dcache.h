@@ -9,6 +9,25 @@
 #include <linux/seqlock.h>
 #include <linux/cache.h>
 #include <linux/rcupdate.h>
+#include <asm/mcs.h>
+
+#define DEFINE_MCS_ARG(name) mcs_arg_t name##_mcs_arg
+
+#define dentry_lock(name)                                       \
+        do {                                                    \
+                mcs_lock(&name->d_mcslock, &name ## _mcs_arg);  \
+        } while (0) 
+
+#define dentry_unlock(name)                                     \
+        do {                                                    \
+                mcs_unlock(&name->d_mcslock, &name ## _mcs_arg);\
+        } while (0)
+
+#define dentry_lock_nested(name, level)                         \
+        do {                                                    \
+                mcs_lock_nested(&name->d_mcslock,               \
+                                &name ## _mcs_arg, level);      \
+        } while (0)
 
 struct nameidata;
 struct path;
@@ -126,7 +145,7 @@ struct dentry {
 
 	/* Ref lookup also touches following */
 	unsigned int d_count;		/* protected by d_lock */
-	spinlock_t d_lock;		/* per dentry lock */
+	mcslock_t d_mcslock;		/* per dentry lock */
 	const struct dentry_operations *d_op;
 	struct super_block *d_sb;	/* The root of the dentry tree */
 	unsigned long d_time;		/* used by d_revalidate */
@@ -323,7 +342,7 @@ static inline int __d_rcu_to_refcount(struct dentry *dentry, unsigned seq)
 {
 	int ret = 0;
 
-	assert_spin_locked(&dentry->d_lock);
+	assert_mcs_locked(&dentry->d_mcslock);
 	if (!read_seqcount_retry(&dentry->d_seq, seq)) {
 		ret = 1;
 		dentry->d_count++;
@@ -366,9 +385,10 @@ static inline struct dentry *dget_dlock(struct dentry *dentry)
 static inline struct dentry *dget(struct dentry *dentry)
 {
 	if (dentry) {
-		spin_lock(&dentry->d_lock);
+                DEFINE_MCS_ARG(dentry);
+		dentry_lock(dentry);
 		dget_dlock(dentry);
-		spin_unlock(&dentry->d_lock);
+		dentry_unlock(dentry);
 	}
 	return dentry;
 }
@@ -399,9 +419,10 @@ static inline int cant_mount(struct dentry *dentry)
 
 static inline void dont_mount(struct dentry *dentry)
 {
-	spin_lock(&dentry->d_lock);
+        DEFINE_MCS_ARG(dentry);
+	dentry_lock(dentry);
 	dentry->d_flags |= DCACHE_CANT_MOUNT;
-	spin_unlock(&dentry->d_lock);
+	dentry_unlock(dentry);
 }
 
 extern void dput(struct dentry *);

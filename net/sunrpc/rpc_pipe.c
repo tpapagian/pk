@@ -371,20 +371,24 @@ rpc_show_info(struct seq_file *m, void *v)
 static int
 rpc_info_open(struct inode *inode, struct file *file)
 {
+        DEFINE_MCS_ARG(dentry);
 	struct rpc_clnt *clnt = NULL;
 	int ret = single_open(file, rpc_show_info, NULL);
 
 	if (!ret) {
 		struct seq_file *m = file->private_data;
 
-		spin_lock(&file->f_path.dentry->d_lock);
+		mcs_lock(&file->f_path.dentry->d_mcslock,
+                        &dentry_mcs_arg);
 		if (!d_unhashed(file->f_path.dentry))
 			clnt = RPC_I(inode)->private;
 		if (clnt != NULL && atomic_inc_not_zero(&clnt->cl_count)) {
-			spin_unlock(&file->f_path.dentry->d_lock);
+			mcs_unlock(&file->f_path.dentry->d_mcslock,
+                                   &dentry_mcs_arg);
 			m->private = clnt;
 		} else {
-			spin_unlock(&file->f_path.dentry->d_lock);
+			mcs_unlock(&file->f_path.dentry->d_mcslock,
+                                   &dentry_mcs_arg);
 			single_release(inode, file);
 			ret = -EINVAL;
 		}

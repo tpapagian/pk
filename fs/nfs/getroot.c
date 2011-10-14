@@ -47,6 +47,7 @@
  */
 static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *inode)
 {
+        DEFINE_MCS_ARG(root);
 	/* The mntroot acts as the dummy root dentry for this superblock */
 	if (sb->s_root == NULL) {
 		sb->s_root = d_alloc_root(inode);
@@ -64,9 +65,11 @@ static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *i
 		 * Oops, since the test for IS_ROOT() will fail.
 		 */
 		spin_lock(&sb->s_root->d_inode->i_lock);
-		spin_lock(&sb->s_root->d_lock);
+		mcs_lock(&sb->s_root->d_mcslock,
+                        &root_mcs_arg);
 		list_del_init(&sb->s_root->d_alias);
-		spin_unlock(&sb->s_root->d_lock);
+		mcs_unlock(&sb->s_root->d_mcslock,
+                           &root_mcs_arg);
 		spin_unlock(&sb->s_root->d_inode->i_lock);
 	}
 	return 0;
@@ -78,6 +81,7 @@ static int nfs_superblock_set_dummy_root(struct super_block *sb, struct inode *i
 struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 			    const char *devname)
 {
+        DEFINE_MCS_ARG(ret);
 	struct nfs_server *server = NFS_SB(sb);
 	struct nfs_fsinfo fsinfo;
 	struct dentry *ret;
@@ -126,12 +130,12 @@ struct dentry *nfs_get_root(struct super_block *sb, struct nfs_fh *mntfh,
 	}
 
 	security_d_instantiate(ret, inode);
-	spin_lock(&ret->d_lock);
+	dentry_lock(ret);
 	if (IS_ROOT(ret) && !(ret->d_flags & DCACHE_NFSFS_RENAMED)) {
 		ret->d_fsdata = name;
 		name = NULL;
 	}
-	spin_unlock(&ret->d_lock);
+	dentry_unlock(ret);
 out:
 	if (name)
 		kfree(name);
