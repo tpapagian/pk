@@ -113,16 +113,18 @@ reconnect_path(struct vfsmount *mnt, struct dentry *target_dir, char *nbuf)
 		struct dentry *pd = find_disconnected_root(target_dir);
 
 		if (!IS_ROOT(pd)) {
+                        DEFINE_MCS_ARG(pd);
 			/* must have found a connected parent - great */
-			spin_lock(&pd->d_lock);
+			dentry_lock(pd);
 			pd->d_flags &= ~DCACHE_DISCONNECTED;
-			spin_unlock(&pd->d_lock);
+			dentry_unlock(pd);
 			noprogress = 0;
 		} else if (pd == mnt->mnt_sb->s_root) {
+                        DEFINE_MCS_ARG(pd);
 			printk(KERN_ERR "export: Eeek filesystem root is not connected, impossible\n");
-			spin_lock(&pd->d_lock);
+			dentry_lock(pd);
 			pd->d_flags &= ~DCACHE_DISCONNECTED;
-			spin_unlock(&pd->d_lock);
+			dentry_unlock(pd);
 			noprogress = 0;
 		} else {
 			/*
@@ -334,12 +336,13 @@ static int export_encode_fh(struct dentry *dentry, struct fid *fid,
 	fid->i32.gen = inode->i_generation;
 	if (connectable && !S_ISDIR(inode->i_mode)) {
 		struct inode *parent;
+                DEFINE_MCS_ARG(dentry);
 
-		spin_lock(&dentry->d_lock);
+		dentry_lock(dentry);
 		parent = dentry->d_parent->d_inode;
 		fid->i32.parent_ino = parent->i_ino;
 		fid->i32.parent_gen = parent->i_generation;
-		spin_unlock(&dentry->d_lock);
+		dentry_unlock(dentry);
 		len = 4;
 		type = FILEID_INO32_GEN_PARENT;
 	}
