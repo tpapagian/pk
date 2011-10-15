@@ -1,6 +1,8 @@
 #ifndef _ASM_MCS_H_
 #define _ASM_MCS_H_
 
+#include <asm/atomic.h>
+
 struct qnode {
         volatile void *next;
         volatile char locked;
