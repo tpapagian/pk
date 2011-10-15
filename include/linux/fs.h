@@ -10,6 +10,10 @@
 #include <linux/ioctl.h>
 #include <linux/blk_types.h>
 #include <linux/types.h>
+#include <asm/mcs.h>
+
+#define as_lock(name)   mcs_lock(&name->private_mcslock, &name ## _mcs_arg)
+#define as_unlock(name) mcs_unlock(&name->private_mcslock, &name ## _mcs_arg)
 
 /*
  * It's silly to have NR_OPEN bigger than NR_FILE, but you can change
@@ -641,7 +645,7 @@ struct address_space {
 	const struct address_space_operations *a_ops;	/* methods */
 	unsigned long		flags;		/* error bits/gfp mask */
 	struct backing_dev_info *backing_dev_info; /* device readahead, etc */
-	spinlock_t		private_lock;	/* for use by the address_space */
+	mcslock_t	        private_mcslock;/* for use by the address_space */
 	struct list_head	private_list;	/* ditto */
 	struct address_space	*assoc_mapping;	/* ditto */
 	struct mutex		unmap_mutex;    /* to protect unmapping */

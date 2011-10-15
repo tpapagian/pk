@@ -42,7 +42,7 @@
 #include <linux/mpage.h>
 #include <linux/bit_spinlock.h>
 
-static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
+static int fsync_buffers_list(mcslock_t *mcslock, struct list_head *list);
 
 #define BH_ENTRY(list) list_entry((list), struct buffer_head, b_assoc_buffers)
 
@@ -184,13 +184,14 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 	struct buffer_head *head;
 	struct page *page;
 	int all_mapped = 1;
+        DEFINE_MCS_ARG(bd_mapping);
 
 	index = block >> (PAGE_CACHE_SHIFT - bd_inode->i_blkbits);
 	page = find_get_page(bd_mapping, index);
 	if (!page)
 		goto out;
 
-	spin_lock(&bd_mapping->private_lock);
+	as_lock(bd_mapping);
 	if (!page_has_buffers(page))
 		goto out_unlock;
 	head = page_buffers(page);
@@ -221,7 +222,7 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 		printk("device blocksize: %d\n", 1 << bd_inode->i_blkbits);
 	}
 out_unlock:
-	spin_unlock(&bd_mapping->private_lock);
+	as_unlock(bd_mapping);
 	page_cache_release(page);
 out:
 	return ret;
@@ -528,28 +529,29 @@ int inode_has_buffers(struct inode *inode)
  * completion.  Any other dirty buffers which are not yet queued for
  * write will not be flushed to disk by the osync.
  */
-static int osync_buffers_list(spinlock_t *lock, struct list_head *list)
+static int osync_buffers_list(mcslock_t *mcslock, struct list_head *list)
 {
+        mcs_arg_t mcs_arg;
 	struct buffer_head *bh;
 	struct list_head *p;
 	int err = 0;
 
-	spin_lock(lock);
+	mcs_lock(mcslock, &mcs_arg);
 repeat:
 	list_for_each_prev(p, list) {
 		bh = BH_ENTRY(p);
 		if (buffer_locked(bh)) {
 			get_bh(bh);
-			spin_unlock(lock);
+			mcs_unlock(mcslock, &mcs_arg);
 			wait_on_buffer(bh);
 			if (!buffer_uptodate(bh))
 				err = -EIO;
 			brelse(bh);
-			spin_lock(lock);
+			mcs_lock(mcslock, &mcs_arg);
 			goto repeat;
 		}
 	}
-	spin_unlock(lock);
+	mcs_unlock(mcslock, &mcs_arg);
 	return err;
 }
 
@@ -602,8 +604,8 @@ int sync_mapping_buffers(struct address_space *mapping)
 	if (buffer_mapping == NULL || list_empty(&mapping->private_list))
 		return 0;
 
-	return fsync_buffers_list(&buffer_mapping->private_lock,
-					&mapping->private_list);
+	return fsync_buffers_list(&buffer_mapping->private_mcslock,
+                                  &mapping->private_list);
 }
 EXPORT_SYMBOL(sync_mapping_buffers);
 
@@ -628,6 +630,7 @@ void mark_buffer_dirty_inode(struct buffer_head *bh, struct inode *inode)
 {
 	struct address_space *mapping = inode->i_mapping;
 	struct address_space *buffer_mapping = bh->b_page->mapping;
+        DEFINE_MCS_ARG(buffer_mapping);
 
 	mark_buffer_dirty(bh);
 	if (!mapping->assoc_mapping) {
@@ -636,11 +639,11 @@ void mark_buffer_dirty_inode(struct buffer_head *bh, struct inode *inode)
 		BUG_ON(mapping->assoc_mapping != buffer_mapping);
 	}
 	if (!bh->b_assoc_map) {
-		spin_lock(&buffer_mapping->private_lock);
+		as_lock(buffer_mapping);
 		list_move_tail(&bh->b_assoc_buffers,
 				&mapping->private_list);
 		bh->b_assoc_map = mapping;
-		spin_unlock(&buffer_mapping->private_lock);
+		as_unlock(buffer_mapping);
 	}
 }
 EXPORT_SYMBOL(mark_buffer_dirty_inode);
@@ -695,11 +698,12 @@ int __set_page_dirty_buffers(struct page *page)
 {
 	int newly_dirty;
 	struct address_space *mapping = page_mapping(page);
+        DEFINE_MCS_ARG(mapping);
 
 	if (unlikely(!mapping))
 		return !TestSetPageDirty(page);
 
-	spin_lock(&mapping->private_lock);
+	as_lock(mapping);
 	if (page_has_buffers(page)) {
 		struct buffer_head *head = page_buffers(page);
 		struct buffer_head *bh = head;
@@ -710,7 +714,7 @@ int __set_page_dirty_buffers(struct page *page)
 		} while (bh != head);
 	}
 	newly_dirty = !TestSetPageDirty(page);
-	spin_unlock(&mapping->private_lock);
+	as_unlock(mapping);
 
 	if (newly_dirty)
 		__set_page_dirty(page, mapping, 1);
@@ -737,18 +741,19 @@ EXPORT_SYMBOL(__set_page_dirty_buffers);
  * the osync code to catch these locked, dirty buffers without requeuing
  * any newly dirty buffers for write.
  */
-static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
+static int fsync_buffers_list(mcslock_t *mcslock, struct list_head *list)
 {
 	struct buffer_head *bh;
 	struct list_head tmp;
 	struct address_space *mapping;
 	int err = 0, err2;
 	struct blk_plug plug;
+        mcs_arg_t mcs_arg;
 
 	INIT_LIST_HEAD(&tmp);
 	blk_start_plug(&plug);
 
-	spin_lock(lock);
+	mcs_lock(mcslock, &mcs_arg);
 	while (!list_empty(list)) {
 		bh = BH_ENTRY(list->next);
 		mapping = bh->b_assoc_map;
@@ -761,7 +766,7 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 			bh->b_assoc_map = mapping;
 			if (buffer_dirty(bh)) {
 				get_bh(bh);
-				spin_unlock(lock);
+				mcs_unlock(mcslock, &mcs_arg);
 				/*
 				 * Ensure any pending I/O completes so that
 				 * write_dirty_buffer() actually writes the
@@ -778,14 +783,14 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 				 * through sync_buffer().
 				 */
 				brelse(bh);
-				spin_lock(lock);
+				mcs_lock(mcslock, &mcs_arg);
 			}
 		}
 	}
 
-	spin_unlock(lock);
+	mcs_unlock(mcslock, &mcs_arg);
 	blk_finish_plug(&plug);
-	spin_lock(lock);
+	mcs_lock(mcslock, &mcs_arg);
 
 	while (!list_empty(&tmp)) {
 		bh = BH_ENTRY(tmp.prev);
@@ -800,16 +805,16 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 				 &mapping->private_list);
 			bh->b_assoc_map = mapping;
 		}
-		spin_unlock(lock);
+		mcs_unlock(mcslock, &mcs_arg);
 		wait_on_buffer(bh);
 		if (!buffer_uptodate(bh))
 			err = -EIO;
 		brelse(bh);
-		spin_lock(lock);
+		mcs_lock(mcslock, &mcs_arg);
 	}
 	
-	spin_unlock(lock);
-	err2 = osync_buffers_list(lock, list);
+	mcs_unlock(mcslock, &mcs_arg);
+	err2 = osync_buffers_list(mcslock, list);
 	if (err)
 		return err;
 	else
@@ -831,11 +836,12 @@ void invalidate_inode_buffers(struct inode *inode)
 		struct address_space *mapping = &inode->i_data;
 		struct list_head *list = &mapping->private_list;
 		struct address_space *buffer_mapping = mapping->assoc_mapping;
+                DEFINE_MCS_ARG(buffer_mapping);
 
-		spin_lock(&buffer_mapping->private_lock);
+		as_lock(buffer_mapping);
 		while (!list_empty(list))
 			__remove_assoc_queue(BH_ENTRY(list->next));
-		spin_unlock(&buffer_mapping->private_lock);
+		as_unlock(buffer_mapping);
 	}
 }
 EXPORT_SYMBOL(invalidate_inode_buffers);
@@ -854,8 +860,9 @@ int remove_inode_buffers(struct inode *inode)
 		struct address_space *mapping = &inode->i_data;
 		struct list_head *list = &mapping->private_list;
 		struct address_space *buffer_mapping = mapping->assoc_mapping;
+                DEFINE_MCS_ARG(buffer_mapping);
 
-		spin_lock(&buffer_mapping->private_lock);
+		as_lock(buffer_mapping);
 		while (!list_empty(list)) {
 			struct buffer_head *bh = BH_ENTRY(list->next);
 			if (buffer_dirty(bh)) {
@@ -864,7 +871,7 @@ int remove_inode_buffers(struct inode *inode)
 			}
 			__remove_assoc_queue(bh);
 		}
-		spin_unlock(&buffer_mapping->private_lock);
+		as_unlock(buffer_mapping);
 	}
 	return ret;
 }
@@ -990,6 +997,7 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	struct inode *inode = bdev->bd_inode;
 	struct page *page;
 	struct buffer_head *bh;
+        mcs_arg_t mcs_arg;
 
 	page = find_or_create_page(inode->i_mapping, index,
 		(mapping_gfp_mask(inode->i_mapping) & ~__GFP_FS)|__GFP_MOVABLE);
@@ -1020,10 +1028,10 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	 * lock to be atomic wrt __find_get_block(), which does not
 	 * run under the page lock.
 	 */
-	spin_lock(&inode->i_mapping->private_lock);
+	mcs_lock(&inode->i_mapping->private_mcslock, &mcs_arg);
 	link_dev_buffers(page, bh);
 	init_page_buffers(page, bdev, block, size);
-	spin_unlock(&inode->i_mapping->private_lock);
+	mcs_unlock(&inode->i_mapping->private_mcslock, &mcs_arg);
 	return page;
 
 failed:
@@ -1193,11 +1201,12 @@ void __bforget(struct buffer_head *bh)
 	clear_buffer_dirty(bh);
 	if (bh->b_assoc_map) {
 		struct address_space *buffer_mapping = bh->b_page->mapping;
+                DEFINE_MCS_ARG(buffer_mapping);
 
-		spin_lock(&buffer_mapping->private_lock);
+		as_lock(buffer_mapping);
 		list_del_init(&bh->b_assoc_buffers);
 		bh->b_assoc_map = NULL;
-		spin_unlock(&buffer_mapping->private_lock);
+		as_unlock(buffer_mapping);
 	}
 	__brelse(bh);
 }
@@ -1524,6 +1533,7 @@ void create_empty_buffers(struct page *page,
 			unsigned long blocksize, unsigned long b_state)
 {
 	struct buffer_head *bh, *head, *tail;
+        mcs_arg_t mcs_arg;
 
 	head = alloc_page_buffers(page, blocksize, 1);
 	bh = head;
@@ -1534,7 +1544,7 @@ void create_empty_buffers(struct page *page,
 	} while (bh);
 	tail->b_this_page = head;
 
-	spin_lock(&page->mapping->private_lock);
+	mcs_lock(&page->mapping->private_mcslock, &mcs_arg);
 	if (PageUptodate(page) || PageDirty(page)) {
 		bh = head;
 		do {
@@ -1546,7 +1556,7 @@ void create_empty_buffers(struct page *page,
 		} while (bh != head);
 	}
 	attach_page_buffers(page, head);
-	spin_unlock(&page->mapping->private_lock);
+	mcs_unlock(&page->mapping->private_mcslock, &mcs_arg);
 }
 EXPORT_SYMBOL(create_empty_buffers);
 
@@ -2393,10 +2403,11 @@ static void end_buffer_read_nobh(struct buffer_head *bh, int uptodate)
 static void attach_nobh_buffers(struct page *page, struct buffer_head *head)
 {
 	struct buffer_head *bh;
+        mcs_arg_t mcs_arg;
 
 	BUG_ON(!PageLocked(page));
 
-	spin_lock(&page->mapping->private_lock);
+	mcs_lock(&page->mapping->private_mcslock, &mcs_arg);
 	bh = head;
 	do {
 		if (PageDirty(page))
@@ -2406,7 +2417,7 @@ static void attach_nobh_buffers(struct page *page, struct buffer_head *head)
 		bh = bh->b_this_page;
 	} while (bh != head);
 	attach_page_buffers(page, head);
-	spin_unlock(&page->mapping->private_lock);
+	mcs_unlock(&page->mapping->private_mcslock, &mcs_arg);
 }
 
 /*
@@ -3081,6 +3092,7 @@ int try_to_free_buffers(struct page *page)
 {
 	struct address_space * const mapping = page->mapping;
 	struct buffer_head *buffers_to_free = NULL;
+        DEFINE_MCS_ARG(mapping);
 	int ret = 0;
 
 	BUG_ON(!PageLocked(page));
@@ -3092,7 +3104,7 @@ int try_to_free_buffers(struct page *page)
 		goto out;
 	}
 
-	spin_lock(&mapping->private_lock);
+	as_lock(mapping);
 	ret = drop_buffers(page, &buffers_to_free);
 
 	/*
@@ -3111,7 +3123,7 @@ int try_to_free_buffers(struct page *page)
 	 */
 	if (ret)
 		cancel_dirty_page(page, PAGE_CACHE_SIZE);
-	spin_unlock(&mapping->private_lock);
+	as_unlock(mapping);
 out:
 	if (buffers_to_free) {
 		struct buffer_head *bh = buffers_to_free;
