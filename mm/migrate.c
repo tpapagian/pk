@@ -717,11 +717,12 @@ static int unmap_and_move(new_page_t get_new_page, unsigned long private,
 	 * just care Anon page here.
 	 */
 	if (PageAnon(page)) {
+                DEFINE_MCS_ARG(anon_vma);
 		/*
 		 * Only page_lock_anon_vma() understands the subtleties of
 		 * getting a hold on an anon_vma from outside one of its mms.
 		 */
-		anon_vma = page_lock_anon_vma(page);
+                anon_vma = page_mcs_lock_anon_vma(page, anon_vma);
 		if (anon_vma) {
 			/*
 			 * Take a reference count on the anon_vma if the
@@ -729,7 +730,7 @@ static int unmap_and_move(new_page_t get_new_page, unsigned long private,
 			 * exist when the page is remapped later
 			 */
 			get_anon_vma(anon_vma);
-			page_unlock_anon_vma(anon_vma);
+			page_mcs_unlock_anon_vma(anon_vma);
 		} else if (PageSwapCache(page)) {
 			/*
 			 * We cannot be sure that the anon_vma of an unmapped
@@ -858,10 +859,11 @@ static int unmap_and_move_huge_page(new_page_t get_new_page,
 	}
 
 	if (PageAnon(hpage)) {
-		anon_vma = page_lock_anon_vma(hpage);
+                DEFINE_MCS_ARG(anon_vma);
+		anon_vma = page_mcs_lock_anon_vma(hpage, anon_vma);
 		if (anon_vma) {
 			get_anon_vma(anon_vma);
-			page_unlock_anon_vma(anon_vma);
+			page_mcs_unlock_anon_vma(anon_vma);
 		}
 	}
 

@@ -9,6 +9,20 @@
 #include <linux/mm.h>
 #include <linux/spinlock.h>
 #include <linux/memcontrol.h>
+#include <asm/mcs.h>
+
+#define anon_vma_mcs_lock(name) \
+        anon_vma_lock(name, &name ## _mcs_arg)
+#define anon_vma_mcs_unlock(name) \
+        anon_vma_unlock(name, &name ## _mcs_arg)
+#define vma_mcs_lock_anon_vma(name) \
+        vma_lock_anon_vma(name, &name ## _mcs_arg)
+#define vma_mcs_unlock_anon_vma(name) \
+        vma_unlock_anon_vma(name, &name ## _mcs_arg)
+#define page_mcs_lock_anon_vma(page, name) \
+        page_lock_anon_vma(page, &name ## _mcs_arg)
+#define page_mcs_unlock_anon_vma(name) \
+        page_unlock_anon_vma(name, &name ## _mcs_arg)
 
 /*
  * The anon_vma heads a list of private "related" vmas, to scan if
@@ -26,7 +40,7 @@
  */
 struct anon_vma {
 	struct anon_vma *root;	/* Root of this anon_vma tree */
-	spinlock_t lock;	/* Serialize access to vma list */
+        mcslock_t mcslock;	/* Serialize access to vma list */
 	/*
 	 * The refcount is taken on an anon_vma when there is no
 	 * guarantee that the vma of page tables will exist for
@@ -89,28 +103,32 @@ static inline struct anon_vma *page_anon_vma(struct page *page)
 	return page_rmapping(page);
 }
 
-static inline void vma_lock_anon_vma(struct vm_area_struct *vma)
+static inline void vma_lock_anon_vma(struct vm_area_struct *vma,
+                                     mcs_arg_t *anon_vma_mcs_arg)
 {
 	struct anon_vma *anon_vma = vma->anon_vma;
 	if (anon_vma)
-		spin_lock(&anon_vma->root->lock);
+                mcs_lock(&anon_vma->root->mcslock, anon_vma_mcs_arg);
 }
 
-static inline void vma_unlock_anon_vma(struct vm_area_struct *vma)
+static inline void vma_unlock_anon_vma(struct vm_area_struct *vma,
+                                       mcs_arg_t *anon_vma_mcs_arg)
 {
 	struct anon_vma *anon_vma = vma->anon_vma;
 	if (anon_vma)
-		spin_unlock(&anon_vma->root->lock);
+		mcs_unlock(&anon_vma->root->mcslock, anon_vma_mcs_arg);
 }
 
-static inline void anon_vma_lock(struct anon_vma *anon_vma)
+static inline void anon_vma_lock(struct anon_vma *anon_vma,
+                                 mcs_arg_t *anon_vma_mcs_arg)
 {
-	spin_lock(&anon_vma->root->lock);
+	mcs_lock(&anon_vma->root->mcslock, anon_vma_mcs_arg);
 }
 
-static inline void anon_vma_unlock(struct anon_vma *anon_vma)
+static inline void anon_vma_unlock(struct anon_vma *anon_vma,
+                                   mcs_arg_t *anon_vma_mcs_arg)
 {
-	spin_unlock(&anon_vma->root->lock);
+	mcs_unlock(&anon_vma->root->mcslock, anon_vma_mcs_arg);
 }
 
 /*
@@ -218,13 +236,15 @@ int try_to_munlock(struct page *);
 /*
  * Called by memory-failure.c to kill processes.
  */
-struct anon_vma *__page_lock_anon_vma(struct page *page);
+struct anon_vma *__page_lock_anon_vma(struct page *page,
+                                      mcs_arg_t *anon_vma_mcs_arg);
 
-static inline struct anon_vma *page_lock_anon_vma(struct page *page)
+static inline struct anon_vma *page_lock_anon_vma(struct page *page,
+                                                  mcs_arg_t *anon_vma_mcs_arg)
 {
 	struct anon_vma *anon_vma;
 
-	__cond_lock(RCU, anon_vma = __page_lock_anon_vma(page));
+	__cond_lock(RCU, anon_vma = __page_lock_anon_vma(page, anon_vma_mcs_arg));
 
 	/* (void) is needed to make gcc happy */
 	(void) __cond_lock(&anon_vma->root->lock, anon_vma);
@@ -232,7 +252,8 @@ static inline struct anon_vma *page_lock_anon_vma(struct page *page)
 	return anon_vma;
 }
 
-void page_unlock_anon_vma(struct anon_vma *anon_vma);
+void page_unlock_anon_vma(struct anon_vma *anon_vma,
+                          mcs_arg_t *anon_vma_mcs_arg);
 int page_mapped_in_vma(struct page *page, struct vm_area_struct *vma);
 
 /*

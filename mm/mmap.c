@@ -525,6 +525,7 @@ int vma_adjust(struct vm_area_struct *vma, unsigned long start,
 	struct address_space *mapping = NULL;
 	struct prio_tree_root *root = NULL;
 	struct anon_vma *anon_vma = NULL;
+        DEFINE_MCS_ARG(anon_vma);
 	struct file *file = vma->vm_file;
 	long adjust_next = 0;
 	int remove_next = 0;
@@ -607,7 +608,7 @@ again:			remove_next = 1 + (end > next->vm_end);
 	 */
 	if (vma->anon_vma && (insert || importer || start != vma->vm_start)) {
 		anon_vma = vma->anon_vma;
-		anon_vma_lock(anon_vma);
+		anon_vma_mcs_lock(anon_vma);
 	}
 
 	if (root) {
@@ -650,7 +651,7 @@ again:			remove_next = 1 + (end > next->vm_end);
 	}
 
 	if (anon_vma)
-		anon_vma_unlock(anon_vma);
+		anon_vma_mcs_unlock(anon_vma);
 	if (mapping)
 		spin_unlock(&mapping->i_mmap_lock);
 
@@ -1788,6 +1789,7 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 static int expand_downwards(struct vm_area_struct *vma,
 				   unsigned long address)
 {
+        DEFINE_MCS_ARG(vma);
 	int error;
 
 	/*
@@ -1802,7 +1804,7 @@ static int expand_downwards(struct vm_area_struct *vma,
 	if (error)
 		return error;
 
-	vma_lock_anon_vma(vma);
+	vma_mcs_lock_anon_vma(vma);
 
 	/*
 	 * vma->vm_start/vm_end cannot change under us because the caller
@@ -1827,7 +1829,7 @@ static int expand_downwards(struct vm_area_struct *vma,
 			}
 		}
 	}
-	vma_unlock_anon_vma(vma);
+	vma_mcs_unlock_anon_vma(vma);
 	khugepaged_enter_vma_merge(vma);
 	return error;
 }
@@ -2522,14 +2524,17 @@ out:
 
 static DEFINE_MUTEX(mm_all_locks_mutex);
 
-static void vm_lock_anon_vma(struct mm_struct *mm, struct anon_vma *anon_vma)
+static void vm_lock_anon_vma(struct mm_struct *mm, struct anon_vma *anon_vma,
+                             mcs_arg_t *anon_vma_mcs_arg)
 {
 	if (!test_bit(0, (unsigned long *) &anon_vma->root->head.next)) {
 		/*
 		 * The LSB of head.next can't change from under us
 		 * because we hold the mm_all_locks_mutex.
 		 */
-		spin_lock_nest_lock(&anon_vma->root->lock, &mm->mmap_sem);
+                mcs_lock_nest_lock(&anon_vma->root->mcslock,
+                                   anon_vma_mcs_arg,
+                                   &mm->mmap_sem);
 		/*
 		 * We can safely modify head.next after taking the
 		 * anon_vma->root->lock. If some other vma in this mm shares
@@ -2597,6 +2602,7 @@ static void vm_lock_mapping(struct mm_struct *mm, struct address_space *mapping)
  */
 int mm_take_all_locks(struct mm_struct *mm)
 {
+        DEFINE_MCS_ARG(anon_vma);
 	struct vm_area_struct *vma;
 	struct anon_vma_chain *avc;
 	int ret = -EINTR;
@@ -2617,7 +2623,8 @@ int mm_take_all_locks(struct mm_struct *mm)
 			goto out_unlock;
 		if (vma->anon_vma)
 			list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
-				vm_lock_anon_vma(mm, avc->anon_vma);
+				vm_lock_anon_vma(mm, avc->anon_vma,
+                                                 &anon_vma_mcs_arg);
 	}
 
 	ret = 0;
@@ -2629,7 +2636,8 @@ out_unlock:
 	return ret;
 }
 
-static void vm_unlock_anon_vma(struct anon_vma *anon_vma)
+static void vm_unlock_anon_vma(struct anon_vma *anon_vma,
+                               mcs_arg_t *anon_vma_mcs_arg)
 {
 	if (test_bit(0, (unsigned long *) &anon_vma->root->head.next)) {
 		/*
@@ -2647,7 +2655,7 @@ static void vm_unlock_anon_vma(struct anon_vma *anon_vma)
 		if (!__test_and_clear_bit(0, (unsigned long *)
 					  &anon_vma->root->head.next))
 			BUG();
-		anon_vma_unlock(anon_vma);
+		anon_vma_unlock(anon_vma, anon_vma_mcs_arg);
 	}
 }
 
@@ -2673,6 +2681,7 @@ void mm_drop_all_locks(struct mm_struct *mm)
 {
 	struct vm_area_struct *vma;
 	struct anon_vma_chain *avc;
+        DEFINE_MCS_ARG(anon_vma);
 
 	BUG_ON(down_read_trylock(&mm->mmap_sem));
 	BUG_ON(!mutex_is_locked(&mm_all_locks_mutex));
@@ -2680,7 +2689,8 @@ void mm_drop_all_locks(struct mm_struct *mm)
 	for (vma = mm->mmap; vma; vma = vma->vm_next) {
 		if (vma->anon_vma)
 			list_for_each_entry(avc, &vma->anon_vma_chain, same_vma)
-				vm_unlock_anon_vma(avc->anon_vma);
+				vm_unlock_anon_vma(avc->anon_vma,
+                                                   &anon_vma_mcs_arg);
 		if (vma->vm_file && vma->vm_file->f_mapping)
 			vm_unlock_mapping(vma->vm_file->f_mapping);
 	}

@@ -128,6 +128,7 @@ static void anon_vma_chain_free(struct anon_vma_chain *anon_vma_chain)
  */
 int anon_vma_prepare(struct vm_area_struct *vma)
 {
+        DEFINE_MCS_ARG(anon_vma);
 	struct anon_vma *anon_vma = vma->anon_vma;
 	struct anon_vma_chain *avc;
 
@@ -149,7 +150,7 @@ int anon_vma_prepare(struct vm_area_struct *vma)
 			allocated = anon_vma;
 		}
 
-		anon_vma_lock(anon_vma);
+		anon_vma_mcs_lock(anon_vma);
 		/* page_table_lock to protect against threads */
 		spin_lock(&mm->page_table_lock);
 		if (likely(!vma->anon_vma)) {
@@ -162,7 +163,7 @@ int anon_vma_prepare(struct vm_area_struct *vma)
 			avc = NULL;
 		}
 		spin_unlock(&mm->page_table_lock);
-		anon_vma_unlock(anon_vma);
+		anon_vma_mcs_unlock(anon_vma);
 
 		if (unlikely(allocated))
 			put_anon_vma(allocated);
@@ -181,17 +182,18 @@ static void anon_vma_chain_link(struct vm_area_struct *vma,
 				struct anon_vma_chain *avc,
 				struct anon_vma *anon_vma)
 {
+        DEFINE_MCS_ARG(anon_vma);
 	avc->vma = vma;
 	avc->anon_vma = anon_vma;
 	list_add(&avc->same_vma, &vma->anon_vma_chain);
 
-	anon_vma_lock(anon_vma);
+	anon_vma_mcs_lock(anon_vma);
 	/*
 	 * It's critical to add new vmas to the tail of the anon_vma,
 	 * see comment in huge_memory.c:__split_huge_page().
 	 */
 	list_add_tail(&avc->same_anon_vma, &anon_vma->head);
-	anon_vma_unlock(anon_vma);
+	anon_vma_mcs_unlock(anon_vma);
 }
 
 /*
@@ -271,18 +273,19 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 static void anon_vma_unlink(struct anon_vma_chain *anon_vma_chain)
 {
 	struct anon_vma *anon_vma = anon_vma_chain->anon_vma;
+        DEFINE_MCS_ARG(anon_vma);
 	int empty;
 
 	/* If anon_vma_fork fails, we can get an empty anon_vma_chain. */
 	if (!anon_vma)
 		return;
 
-	anon_vma_lock(anon_vma);
+	anon_vma_mcs_lock(anon_vma);
 	list_del(&anon_vma_chain->same_anon_vma);
 
 	/* We must garbage collect the anon_vma if it's empty */
 	empty = list_empty(&anon_vma->head);
-	anon_vma_unlock(anon_vma);
+	anon_vma_mcs_unlock(anon_vma);
 
 	if (empty)
 		put_anon_vma(anon_vma);
@@ -307,7 +310,7 @@ static void anon_vma_ctor(void *data)
 {
 	struct anon_vma *anon_vma = data;
 
-	spin_lock_init(&anon_vma->lock);
+	mcs_init(&anon_vma->mcslock);
 	atomic_set(&anon_vma->refcount, 0);
 	INIT_LIST_HEAD(&anon_vma->head);
 }
@@ -323,7 +326,8 @@ void __init anon_vma_init(void)
  * Getting a lock on a stable anon_vma from a page off the LRU is
  * tricky: page_lock_anon_vma rely on RCU to guard against the races.
  */
-struct anon_vma *__page_lock_anon_vma(struct page *page)
+struct anon_vma *__page_lock_anon_vma(struct page *page,
+                                      mcs_arg_t *root_anon_vma_mcs_arg)
 {
 	struct anon_vma *anon_vma, *root_anon_vma;
 	unsigned long anon_mapping;
@@ -337,7 +341,7 @@ struct anon_vma *__page_lock_anon_vma(struct page *page)
 
 	anon_vma = (struct anon_vma *) (anon_mapping - PAGE_MAPPING_ANON);
 	root_anon_vma = ACCESS_ONCE(anon_vma->root);
-	spin_lock(&root_anon_vma->lock);
+	mcs_lock(&root_anon_vma->mcslock, root_anon_vma_mcs_arg);
 
 	/*
 	 * If this page is still mapped, then its anon_vma cannot have been
@@ -350,17 +354,18 @@ struct anon_vma *__page_lock_anon_vma(struct page *page)
 	if (page_mapped(page))
 		return anon_vma;
 
-	spin_unlock(&root_anon_vma->lock);
+        mcs_unlock(&root_anon_vma->mcslock, root_anon_vma_mcs_arg);
 out:
 	rcu_read_unlock();
 	return NULL;
 }
 
-void page_unlock_anon_vma(struct anon_vma *anon_vma)
+void page_unlock_anon_vma(struct anon_vma *anon_vma,
+                          mcs_arg_t *anon_vma_mcs_arg)
 	__releases(&anon_vma->root->lock)
 	__releases(RCU)
 {
-	anon_vma_unlock(anon_vma);
+	anon_vma_unlock(anon_vma, anon_vma_mcs_arg);
 	rcu_read_unlock();
 }
 
@@ -579,12 +584,13 @@ static int page_referenced_anon(struct page *page,
 				struct mem_cgroup *mem_cont,
 				unsigned long *vm_flags)
 {
+        DEFINE_MCS_ARG(anon_vma);
 	unsigned int mapcount;
 	struct anon_vma *anon_vma;
 	struct anon_vma_chain *avc;
 	int referenced = 0;
 
-	anon_vma = page_lock_anon_vma(page);
+	anon_vma = page_lock_anon_vma(page, &anon_vma_mcs_arg);
 	if (!anon_vma)
 		return referenced;
 
@@ -607,7 +613,7 @@ static int page_referenced_anon(struct page *page,
 			break;
 	}
 
-	page_unlock_anon_vma(anon_vma);
+	page_unlock_anon_vma(anon_vma, &anon_vma_mcs_arg);
 	return referenced;
 }
 
@@ -1285,11 +1291,12 @@ bool is_vma_temporary_stack(struct vm_area_struct *vma)
  */
 static int try_to_unmap_anon(struct page *page, enum ttu_flags flags)
 {
+        DEFINE_MCS_ARG(anon_vma);
 	struct anon_vma *anon_vma;
 	struct anon_vma_chain *avc;
 	int ret = SWAP_AGAIN;
 
-	anon_vma = page_lock_anon_vma(page);
+	anon_vma = page_lock_anon_vma(page, &anon_vma_mcs_arg);
 	if (!anon_vma)
 		return ret;
 
@@ -1317,7 +1324,7 @@ static int try_to_unmap_anon(struct page *page, enum ttu_flags flags)
 			break;
 	}
 
-	page_unlock_anon_vma(anon_vma);
+	page_unlock_anon_vma(anon_vma, &anon_vma_mcs_arg);
 	return ret;
 }
 
@@ -1509,6 +1516,7 @@ void __put_anon_vma(struct anon_vma *anon_vma)
 static int rmap_walk_anon(struct page *page, int (*rmap_one)(struct page *,
 		struct vm_area_struct *, unsigned long, void *), void *arg)
 {
+        DEFINE_MCS_ARG(anon_vma);
 	struct anon_vma *anon_vma;
 	struct anon_vma_chain *avc;
 	int ret = SWAP_AGAIN;
@@ -1522,7 +1530,7 @@ static int rmap_walk_anon(struct page *page, int (*rmap_one)(struct page *,
 	anon_vma = page_anon_vma(page);
 	if (!anon_vma)
 		return ret;
-	anon_vma_lock(anon_vma);
+	anon_vma_mcs_lock(anon_vma);
 	list_for_each_entry(avc, &anon_vma->head, same_anon_vma) {
 		struct vm_area_struct *vma = avc->vma;
 		unsigned long address = vma_address(page, vma);
@@ -1532,7 +1540,7 @@ static int rmap_walk_anon(struct page *page, int (*rmap_one)(struct page *,
 		if (ret != SWAP_AGAIN)
 			break;
 	}
-	anon_vma_unlock(anon_vma);
+	anon_vma_mcs_unlock(anon_vma);
 	return ret;
 }
 
