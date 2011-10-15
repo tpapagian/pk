@@ -7,20 +7,18 @@ struct qnode {
         char __pad[0] __attribute__((aligned(64)));
 };
 
-typedef struct qnode mcs_arg_t;
-
 typedef struct {
         struct qnode *v __attribute__((aligned(64)));
 } mcslock_t;
 
-static void inline
-mcs_init(mcslock_t *l)
+static inline void
+arch_mcs_init(mcslock_t *l)
 {
         l->v = NULL;
 }
 
-static void inline
-mcs_lock(mcslock_t *l, volatile struct qnode *mynode)
+static inline void
+arch_mcs_lock(mcslock_t *l, volatile struct qnode *mynode)
 {
         struct qnode *predecessor;
 
@@ -36,8 +34,8 @@ mcs_lock(mcslock_t *l, volatile struct qnode *mynode)
         }
 }
 
-static int inline
-mcs_trylock(mcslock_t *l, volatile struct qnode *mynode)
+static inline int
+arch_mcs_trylock(mcslock_t *l, volatile struct qnode *mynode)
 {
         long r;
 
@@ -46,8 +44,8 @@ mcs_trylock(mcslock_t *l, volatile struct qnode *mynode)
         return r == 0;
 }
 
-static void inline
-mcs_unlock(mcslock_t *l, volatile struct qnode *mynode)
+static inline void
+arch_mcs_unlock(mcslock_t *l, volatile struct qnode *mynode)
 {
         if (!mynode->next) {
                 if (cmpxchg((long *)&l->v, (long)mynode, 0) == (long)mynode)
@@ -57,6 +55,17 @@ mcs_unlock(mcslock_t *l, volatile struct qnode *mynode)
         }
         ((struct qnode *)mynode->next)->locked = 0;
 }
+
+/*
+ * Kernel stuff
+ */
+
+typedef struct qnode mcs_arg_t;
+
+#define mcs_init arch_mcs_init
+#define mcs_lock arch_mcs_lock
+#define mcs_trylock arch_mcs_trylock
+#define mcs_unlock arch_mcs_unlock
 
 static inline void assert_mcs_locked(mcslock_t *l)
 {
