@@ -81,4 +81,8 @@ static inline void mcs_lock_nested(mcslock_t *l,
         mcs_lock(l, mynode);
 }
 
+/* XXX */
+#define mcs_lock_nest_lock(lock, mynode, nest_lock) \
+        arch_mcs_lock(lock, mynode)
+
 #endif
