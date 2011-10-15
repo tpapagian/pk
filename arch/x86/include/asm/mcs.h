@@ -61,6 +61,7 @@ arch_mcs_unlock(mcslock_t *l, volatile struct qnode *mynode)
  */
 
 typedef struct qnode mcs_arg_t;
+#define DEFINE_MCS_ARG(name) mcs_arg_t name##_mcs_arg
 
 #define mcs_init arch_mcs_init
 #define mcs_lock arch_mcs_lock
