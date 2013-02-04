@@ -49,6 +49,7 @@ struct sched_param {
 #include <linux/task_io_accounting.h>
 #include <linux/latencytop.h>
 #include <linux/cred.h>
+#include <linux/mtrace.h>
 #include <linux/llist.h>
 #include <linux/uidgid.h>
 
@@ -1583,6 +1584,9 @@ struct task_struct {
 	atomic_t trace_overrun;
 	/* Pause for the tracing */
 	atomic_t tracing_graph_pause;
+#endif
+#ifdef CONFIG_MTRACE
+	struct mtrace_call_stack mtrace_stack;
 #endif
 #ifdef CONFIG_TRACING
 	/* state flags for use by tracers */
