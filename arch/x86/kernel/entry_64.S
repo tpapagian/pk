@@ -1000,6 +1000,10 @@ END(interrupt)
 	subq $ORIG_RAX-RBP, %rsp
 	CFI_ADJUST_CFA_OFFSET ORIG_RAX-RBP
 	SAVE_ARGS_IRQ
+        push %rdi
+        mov $\func, %rdi
+        call mtrace_start_do_irq
+        pop %rdi
 	call \func
 	.endm
 
@@ -1019,6 +1023,7 @@ common_interrupt:
 	interrupt do_IRQ
 	/* 0(%rsp): old_rsp-ARGOFFSET */
 ret_from_intr:
+        call mtrace_end_do_irq
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
 	decl PER_CPU_VAR(irq_count)

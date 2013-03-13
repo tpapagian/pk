@@ -278,16 +278,6 @@ void mtrace_softirq_exit(void* ctx, unsigned int vec)
         mtrace_end_do_irq();
 }
 
-void mtrace_irq_entry(void* ctx, int irq, struct irqaction* action)
-{
-        mtrace_start_do_irq((unsigned long) action);
-}
-
-void mtrace_irq_exit(void* ctx, int irq, struct irqaction* action, int ret)
-{
-        mtrace_end_do_irq();
-}
-
 void mtrace_start_entry(unsigned long pc)
 {
 	unsigned long flags;
@@ -514,11 +504,6 @@ void __init mtrace_init(void)
         ret = register_trace_softirq_entry(mtrace_softirq_entry, NULL);
         BUG_ON(ret);
         ret = register_trace_softirq_exit(mtrace_softirq_exit, NULL);
-        BUG_ON(ret);
-
-        ret = register_trace_irq_handler_entry(mtrace_irq_entry, NULL);
-        BUG_ON(ret);
-        ret = register_trace_irq_handler_exit(mtrace_irq_exit, NULL);
         BUG_ON(ret);
 
 	REG(mm_page_free);
