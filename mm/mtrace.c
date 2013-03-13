@@ -310,10 +310,12 @@ void mtrace_end_entry(void)
 void mtrace_sys_enter(void* ctx, struct pt_regs* regs, long id)
 {
         mtrace_start_entry((unsigned long) &mtrace_sys_enter);
+        mtrace_ascope_register(0, "syscall:xx");
 }
 
 void mtrace_sys_exit(void* ctx, struct pt_regs* regs, long ret)
 {
+        mtrace_ascope_register(1, "syscall:xx");
         mtrace_end_entry();
 }
 
