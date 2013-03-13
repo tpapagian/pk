@@ -169,8 +169,11 @@ static void __mtrace_push_call(struct mtrace_call_stack *stack,
 	
 	cpu = smp_processor_id();
 
-	if (stack->curr + 1 == MTRACE_CALL_STACK_DEPTH)
+	if (stack->curr + 1 == MTRACE_CALL_STACK_DEPTH) {
+                for (i = 0 ; i < MTRACE_CALL_STACK_DEPTH; i++)
+                        printk(KERN_ERR "stack pc: %llx\n", stack->stack[i].pc);
 		panic("__mtrace_push_call: max depth exceeded");
+        }
 
 	i = ++stack->curr;
 	counter = &per_cpu(mtrace_call_tag, cpu);
