@@ -310,13 +310,13 @@ void mtrace_end_entry(void)
 	local_irq_restore(flags);
 }
 
-void mtrace_sys_enter(void* ctx, struct pt_regs* regs, long id)
+void mtrace_sys_enter(void)
 {
         mtrace_start_entry((unsigned long) &mtrace_sys_enter);
         mtrace_ascope_register(0, "syscall:xx");
 }
 
-void mtrace_sys_exit(void* ctx, struct pt_regs* regs, long ret)
+void mtrace_sys_exit(void)
 {
         mtrace_ascope_register(1, "syscall:xx");
         mtrace_end_entry();
@@ -519,11 +519,6 @@ void __init mtrace_init(void)
         ret = register_trace_irq_handler_entry(mtrace_irq_entry, NULL);
         BUG_ON(ret);
         ret = register_trace_irq_handler_exit(mtrace_irq_exit, NULL);
-        BUG_ON(ret);
-
-        ret = register_trace_sys_enter(mtrace_sys_enter, NULL);
-        BUG_ON(ret);
-        ret = register_trace_sys_exit(mtrace_sys_exit, NULL);
         BUG_ON(ret);
 
 	REG(mm_page_free);

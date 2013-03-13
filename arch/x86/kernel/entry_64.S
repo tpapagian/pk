@@ -640,9 +640,12 @@ system_call_fastpath:
 	cmpl $__NR_syscall_max,%eax
 #endif
 	ja badsys
+        call mtrace_sys_enter
+        RESTORE_ARGS 1, -ARG_SKIP, 0
 	movq %r10,%rcx
 	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
 	movq %rax,RAX-ARGOFFSET(%rsp)
+        call mtrace_sys_exit
 /*
  * Syscall return path ending with SYSRET (fast path)
  * Has incomplete stack frame and undefined top of stack.
@@ -889,6 +892,7 @@ ENTRY(stub_execve)
 	RESTORE_TOP_OF_STACK %r11
 	movq %rax,RAX(%rsp)
 	RESTORE_REST
+        call mtrace_sys_exit
 	jmp int_ret_from_sys_call
 	CFI_ENDPROC
 END(stub_execve)
@@ -907,6 +911,7 @@ ENTRY(stub_rt_sigreturn)
 	call sys_rt_sigreturn
 	movq %rax,RAX(%rsp) # fixme, this could be done at the higher layer
 	RESTORE_REST
+        call mtrace_sys_exit
 	jmp int_ret_from_sys_call
 	CFI_ENDPROC
 END(stub_rt_sigreturn)
