@@ -12,7 +12,7 @@ extern void mtrace_start_do_irq(unsigned long pc);
 extern void mtrace_start_entry(unsigned long pc);
 extern void mtrace_end_entry(void);
 
-#define INIT_MTRACE .mtrace_stack = { .curr = -1 }
+#define INIT_MTRACE .mtrace_stack = { .curr = -1 },
 #define MTRACE_CALL_STACK_DEPTH 50
 
 struct mtrace_call {

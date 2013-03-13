@@ -10,6 +10,7 @@
 #include <trace/events/syscalls.h>
 #include <trace/events/sched.h>
 #include <trace/events/lock.h>
+#include <trace/events/irq.h>
 
 #include <linux/kprobes.h>
 #include <linux/ptrace.h>
@@ -264,6 +265,26 @@ void mtrace_end_do_irq(void)
 	local_irq_restore(flags);
 }
 
+void mtrace_softirq_entry(void* ctx, unsigned int vec)
+{
+        mtrace_start_do_irq((unsigned long) &mtrace_softirq_entry);
+}
+
+void mtrace_softirq_exit(void* ctx, unsigned int vec)
+{
+        mtrace_end_do_irq();
+}
+
+void mtrace_irq_entry(void* ctx, int irq, struct irqaction* action)
+{
+        mtrace_start_do_irq((unsigned long) action);
+}
+
+void mtrace_irq_exit(void* ctx, int irq, struct irqaction* action, int ret)
+{
+        mtrace_end_do_irq();
+}
+
 void mtrace_start_entry(unsigned long pc)
 {
 	unsigned long flags;
@@ -284,6 +305,16 @@ void mtrace_end_entry(void)
 	local_irq_save(flags);
 	__mtrace_pop_call(&current->mtrace_stack);
 	local_irq_restore(flags);
+}
+
+void mtrace_sys_enter(void* ctx, struct pt_regs* regs, long id)
+{
+        mtrace_start_entry((unsigned long) &mtrace_sys_enter);
+}
+
+void mtrace_sys_exit(void* ctx, struct pt_regs* regs, long ret)
+{
+        mtrace_end_entry();
 }
 
 static int mtrace_task_cmdline(struct task_struct *task, char *buffer, int n)
@@ -475,6 +506,21 @@ void __init mtrace_init(void)
 	ret = register_trace_kmem_cache_free(mtrace_kmem_free, NULL);
 	BUG_ON(ret);
 
+        ret = register_trace_softirq_entry(mtrace_softirq_entry, NULL);
+        BUG_ON(ret);
+        ret = register_trace_softirq_exit(mtrace_softirq_exit, NULL);
+        BUG_ON(ret);
+
+        ret = register_trace_irq_handler_entry(mtrace_irq_entry, NULL);
+        BUG_ON(ret);
+        ret = register_trace_irq_handler_exit(mtrace_irq_exit, NULL);
+        BUG_ON(ret);
+
+        ret = register_trace_sys_enter(mtrace_sys_enter, NULL);
+        BUG_ON(ret);
+        ret = register_trace_sys_exit(mtrace_sys_exit, NULL);
+        BUG_ON(ret);
+
 	REG(mm_page_free);
 	REG(mm_page_free_batched);
 	REG(mm_page_alloc);
@@ -482,11 +528,9 @@ void __init mtrace_init(void)
 	REG(mm_page_pcpu_drain);
 	REG(mm_page_alloc_extfrag);
 
-#if 0   /* partial stack-switching support confuses mscan */
 	if (current)
 		mtrace_sched_record(task_pid_nr(current));
 	REG(sched_switch);
-#endif
 
 #ifdef CONFIG_LOCKDEP
 	debug_locks = 0;

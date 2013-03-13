@@ -73,6 +73,7 @@
 #include <linux/init_task.h>
 #include <linux/binfmts.h>
 #include <linux/context_tracking.h>
+#include <linux/mtrace.h>
 
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
@@ -2889,6 +2890,7 @@ static void __sched __schedule(void)
 
 need_resched:
 	preempt_disable();
+        mtrace_start_do_irq((unsigned long) &schedule);
 	cpu = smp_processor_id();
 	rq = cpu_rq(cpu);
 	rcu_note_context_switch(cpu);
@@ -2940,6 +2942,7 @@ need_resched:
 		rq->curr = next;
 		++*switch_count;
 
+                mtrace_end_do_irq();
 		context_switch(rq, prev, next); /* unlocks the rq */
 		/*
 		 * The context switch have flipped the stack from under us
@@ -2949,8 +2952,10 @@ need_resched:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
-	} else
+	} else {
+                mtrace_end_do_irq();
 		raw_spin_unlock_irq(&rq->lock);
+        }
 
 	post_schedule(rq);
 
@@ -4670,6 +4675,7 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 #if defined(CONFIG_SMP)
 	sprintf(idle->comm, "%s/%d", INIT_TASK_COMM, cpu);
 #endif
+        mtrace_init_task(idle);
 }
 
 #ifdef CONFIG_SMP

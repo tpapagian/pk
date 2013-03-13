@@ -70,6 +70,7 @@
 #include <linux/khugepaged.h>
 #include <linux/signalfd.h>
 #include <linux/uprobes.h>
+#include <linux/mtrace.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -1460,6 +1461,8 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 		attach_pid(p, PIDTYPE_PID, pid);
 		nr_threads++;
 	}
+
+        mtrace_init_task(p);
 
 	total_forks++;
 	spin_unlock(&current->sighand->siglock);

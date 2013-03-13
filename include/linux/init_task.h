@@ -10,6 +10,7 @@
 #include <linux/pid_namespace.h>
 #include <linux/user_namespace.h>
 #include <linux/securebits.h>
+#include <linux/mtrace.h>
 #include <net/net_namespace.h>
 
 #ifdef CONFIG_SMP
@@ -208,6 +209,7 @@ extern struct task_group root_task_group;
 	INIT_LOCKDEP							\
 	INIT_FTRACE_GRAPH						\
 	INIT_TRACE_RECURSION						\
+        INIT_MTRACE                                                     \
 	INIT_TASK_RCU_PREEMPT(tsk)					\
 	INIT_CPUSET_SEQ							\
 }
